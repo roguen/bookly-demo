@@ -4,6 +4,9 @@ audit.log
 .claude/
 .DS_Store
 
+# PowerPoint lock files, created whenever the deck is open
+~$*.pptx
+
 # Deck QA render artifacts — the .pptx is the deliverable
 Bookly_Agent_Architecture.pdf
 slide-*.jpg
