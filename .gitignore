@@ -7,3 +7,7 @@ audit.log
 # Deck QA render artifacts — the .pptx is the deliverable
 Bookly_Agent_Architecture.pdf
 slide-*.jpg
+
+# Deck build tooling only; the agent itself needs no packages
+node_modules/
+package-lock.json

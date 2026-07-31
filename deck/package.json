@@ -1,0 +1,12 @@
+{
+  "name": "bookly-deck",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Generator for Bookly_Agent_Architecture.pptx. Build tooling only — the agent itself has no dependencies.",
+  "scripts": {
+    "build": "node build.js ../Bookly_Agent_Architecture.pptx"
+  },
+  "dependencies": {
+    "pptxgenjs": "^4.0.1"
+  }
+}
