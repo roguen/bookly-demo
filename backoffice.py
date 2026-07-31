@@ -1,0 +1,371 @@
+"""The other side of the boundary: a second process, on a second port.
+
+`python3 backoffice.py`, started separately from the console. The separation
+is the architectural argument, not packaging. The agent claims to *emit*
+actions rather than *execute* them; if the thing that receives those actions
+ran inside the agent's process, that claim would be a diagram rather than a
+demonstrable fact. Here you can kill this server mid-conversation and watch
+the agent keep deciding, keep auditing, and record the delivery as failed.
+
+Three surfaces, one screen each:
+
+  Refund ledger   receives envelopes at /webhook and renders them as ledger
+                  lines. A repeated idempotency key is recorded as a
+                  suppressed duplicate against the existing line rather than
+                  a second line. Deduplication is in memory and dies with
+                  this process — the same contract stub_receiver.py has, and
+                  the screen says so rather than implying durability.
+
+  Agent desk      the human review queue, rendered as a support console. The
+                  queue file is the shared state between the two processes.
+
+  Policy viewer   read only. Every constant and every reason code from
+                  policy.py, with an explicit line naming who can change them
+                  today. There is deliberately no editing surface: making
+                  procedures authorable by non-engineers is a harder problem
+                  than this repo solves, and mocking it would be the one
+                  dishonest thing in the build.
+
+Nothing here flows back. These systems receive and display; nothing returns a
+value that reaches a verdict. `stub_receiver.py` is untouched and still works
+exactly as evidence/duplicate_receipt.txt documents — this is an addition, and
+the two bind the same port, so you run one or the other.
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+import threading
+from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from typing import Callable, Dict, List, Optional
+
+REPO = Path(__file__).resolve().parent
+os.environ.setdefault("BOOKLY_AUDIT_PATH", str(REPO / "audit.log"))
+os.environ.setdefault("BOOKLY_QUEUE_PATH", str(REPO / "queue.json"))
+
+import policy  # noqa: E402
+import queue as review  # noqa: E402  (this repo's queue.py, not the stdlib)
+import tools  # noqa: E402
+import web  # noqa: E402  (for the shared JSON shapes and header discipline)
+
+HOST = "127.0.0.1"
+# The port the webhook is already documented on. This is a drop-in receiver:
+# run this or stub_receiver.py, never both.
+PORT = 8787
+STATIC_DIR = REPO / "static"
+
+ALLOWED_HOSTS = frozenset(["127.0.0.1", "localhost", "[::1]", "::1"])
+MAX_BODY_BYTES = 64 * 1024
+
+# Every surface says what it is. These are honest mocks and they carry a chip
+# that says so, on screen, permanently.
+STAND_IN_NOTICE = (
+    "Stand-in. These screens are part of the demo, not a product: the ledger "
+    "is in memory and dies with this process, and nothing here returns a "
+    "value that reaches a verdict."
+)
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+class Ledger:
+    """Refund lines, deduplicated by idempotency key.
+
+    In memory, on purpose. Durable deduplication is the real receiver's job;
+    claiming it here would misrepresent what the demo proves. The screen says
+    the same thing, so nobody has to read this docstring to find out.
+    """
+
+    def __init__(self, now: Callable[[], str] = _utc_now) -> None:
+        self._now = now
+        self._lock = threading.Lock()
+        self._lines: List[dict] = []
+        self._by_key: Dict[str, dict] = {}
+
+    def receive(self, envelope: dict) -> dict:
+        key = envelope.get("idempotency_key") or ""
+        with self._lock:
+            existing = self._by_key.get(key)
+            if existing is not None:
+                # One line, one write. The repeat is recorded against the
+                # line it duplicates, which is what "would not be executed
+                # again" looks like when you draw it.
+                existing["duplicates"].append(
+                    {
+                        "at": self._now(),
+                        "envelope_id": envelope.get("envelope_id"),
+                    }
+                )
+                return {"duplicate": True, "line": dict(existing)}
+            line = {
+                "received_at": self._now(),
+                "idempotency_key": key,
+                "action": envelope.get("action"),
+                "resolution": envelope.get("resolution"),
+                "order_id": envelope.get("order_id"),
+                "amount": envelope.get("amount"),
+                "currency": envelope.get("currency"),
+                "reason_code": envelope.get("reason_code"),
+                "conversation_id": envelope.get("conversation_id"),
+                "actor": envelope.get("actor"),
+                "justification": envelope.get("justification"),
+                "envelope_id": envelope.get("envelope_id"),
+                "duplicates": [],
+            }
+            self._lines.append(line)
+            self._by_key[key] = line
+            return {"duplicate": False, "line": dict(line)}
+
+    def lines(self) -> List[dict]:
+        with self._lock:
+            return [dict(line) for line in reversed(self._lines)]
+
+    def summary(self) -> dict:
+        with self._lock:
+            executed = len(self._lines)
+            suppressed = sum(len(line["duplicates"]) for line in self._lines)
+            posted = sum(
+                line["amount"] or 0
+                for line in self._lines
+                if line["action"] == "refund"
+            )
+        return {
+            "lines": executed,
+            "suppressed_duplicates": suppressed,
+            "amount_posted": round(posted, 2),
+            "durability": (
+                "in memory; dies with this process, exactly like "
+                "stub_receiver.py. Durable deduplication is the real "
+                "receiver's job."
+            ),
+        }
+
+
+class BackOffice:
+    def __init__(self) -> None:
+        self.ledger = Ledger()
+        # The same queue file the console writes. Two processes, one shared
+        # record — which is the point of running this separately at all.
+        self.queue = review.ReviewQueue()
+
+
+class BackOfficeHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    server_version = "bookly-backoffice"
+    sys_version = ""
+
+    def log_message(self, fmt: str, *args) -> None:
+        pass
+
+    # -- plumbing (same discipline as the console) -------------------------
+
+    def _send(self, status: int, content_type: str, body: bytes,
+              extra: Optional[dict] = None) -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Cache-Control", "no-store")
+        for name, value in (extra or {}).items():
+            self.send_header(name, value)
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
+    def _json(self, payload, status: int = 200) -> None:
+        self._send(
+            status,
+            "application/json; charset=utf-8",
+            json.dumps(payload).encode("utf-8"),
+        )
+
+    def _error(self, status: int, message: str) -> None:
+        self._json({"error": message}, status)
+
+    def _body(self) -> dict:
+        length = int(self.headers.get("Content-Length") or 0)
+        if length <= 0:
+            return {}
+        if length > MAX_BODY_BYTES:
+            raise ValueError("request body too large")
+        payload = json.loads(self.rfile.read(length).decode("utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("expected a JSON object")
+        return payload
+
+    def _host_allowed(self) -> bool:
+        host = (self.headers.get("Host") or "").strip().lower()
+        if host.startswith("["):
+            host = host.split("]", 1)[0] + "]"
+        elif ":" in host:
+            host = host.rsplit(":", 1)[0]
+        return host in ALLOWED_HOSTS
+
+    # -- routing -----------------------------------------------------------
+
+    def do_GET(self) -> None:  # noqa: N802
+        self._route("GET")
+
+    def do_HEAD(self) -> None:  # noqa: N802
+        self._route("GET")
+
+    def do_POST(self) -> None:  # noqa: N802
+        self._route("POST")
+
+    def _route(self, method: str) -> None:
+        office = self.server.office  # type: ignore[attr-defined]
+        # The webhook is exempt from the Host pin: it is a machine-to-machine
+        # endpoint that the agent posts to, not a page a browser is tricked
+        # into loading, and it returns nothing an attacker could read.
+        path = self.path.split("?", 1)[0].rstrip("/") or "/"
+        if method == "POST" and path == "/webhook":
+            try:
+                self._webhook(office)
+            except Exception as error:
+                self._error(400, "%s: %s" % (type(error).__name__, error))
+            return
+        if not self._host_allowed():
+            self._error(421, "This back office answers on 127.0.0.1 only.")
+            return
+        try:
+            handler = self._match(method, path, office)
+            if handler is None:
+                self._error(404, "No route for %s %s" % (method, path))
+                return
+            handler()
+        except ValueError as error:
+            self._error(400, str(error))
+        except BrokenPipeError:
+            pass
+        except Exception as error:
+            self._error(500, "%s: %s" % (type(error).__name__, error))
+
+    def _match(self, method: str, path: str, office: BackOffice):
+        if method == "GET":
+            if path in ("/", "/index.html", "/backoffice.html"):
+                return lambda: self._static("backoffice.html")
+            if path == "/api/ledger":
+                return lambda: self._json(
+                    {
+                        "lines": office.ledger.lines(),
+                        "summary": office.ledger.summary(),
+                        "stand_in": STAND_IN_NOTICE,
+                    }
+                )
+            if path == "/api/queue":
+                return lambda: self._json(
+                    {
+                        "cases": office.queue.cases(),
+                        "counts": office.queue.counts(),
+                        "actions": list(review.ACTIONS),
+                        "stand_in": STAND_IN_NOTICE,
+                    }
+                )
+            if path == "/api/policy":
+                # Straight from policy.py, over the same shape the console
+                # serves, so the two surfaces cannot disagree.
+                return lambda: self._json(
+                    dict(web.policy_json(), stand_in=STAND_IN_NOTICE)
+                )
+            if path.startswith("/static/"):
+                return lambda: self._static(path[len("/static/"):])
+        if method == "POST":
+            resolve = re.fullmatch(
+                r"/api/queue/(case-[0-9a-f]{1,32})/resolve", path
+            )
+            if resolve:
+                return lambda: self._resolve(office, resolve.group(1))
+        return None
+
+    # -- handlers ----------------------------------------------------------
+
+    def _webhook(self, office: BackOffice) -> None:
+        """Receive an envelope, exactly as stub_receiver.py does.
+
+        It records and displays. It never executes anything, and it returns
+        nothing the agent reads back — the response is an acknowledgement, and
+        the agent does not branch on it.
+        """
+        payload = self._body()
+        result = office.ledger.receive(payload)
+        marker = " (DUPLICATE — would not be re-executed)" if result[
+            "duplicate"
+        ] else ""
+        print("--- envelope received%s ---" % marker, flush=True)
+        print(json.dumps(payload, indent=2), flush=True)
+        self._json({"ok": True, "duplicate": result["duplicate"]})
+
+    def _resolve(self, office: BackOffice, case_id: str) -> None:
+        payload = self._body()
+        result = office.queue.resolve(
+            case_id,
+            action=payload.get("action") or "",
+            actor=payload.get("actor") or "",
+            justification=payload.get("justification") or "",
+        )
+        self._json(result)
+
+    def _static(self, relative: str) -> None:
+        target = (STATIC_DIR / relative).resolve()
+        if not str(target).startswith(str(STATIC_DIR.resolve())):
+            self._error(404, "Not found.")
+            return
+        if not target.is_file():
+            self._error(404, "Not found.")
+            return
+        import mimetypes
+
+        content_type = mimetypes.guess_type(target.name)[0] or "text/plain"
+        if content_type.startswith("text/") or content_type.endswith("script"):
+            content_type += "; charset=utf-8"
+        extra = {}
+        if target.suffix == ".html":
+            extra["Content-Security-Policy"] = web.CONTENT_SECURITY_POLICY
+        self._send(200, content_type, target.read_bytes(), extra)
+
+
+class BackOfficeServer(ThreadingHTTPServer):
+    daemon_threads = True
+    # So a restart during the failure demo never hits "address already in
+    # use" while the previous socket is still in TIME_WAIT.
+    allow_reuse_address = True
+
+    def __init__(self, address, handler, office: BackOffice) -> None:
+        self.office = office
+        super().__init__(address, handler)
+
+    def server_bind(self) -> None:
+        import socketserver
+
+        socketserver.TCPServer.server_bind(self)
+        self.server_name = HOST
+        self.server_port = self.socket.getsockname()[1]
+
+
+def serve(port: int = PORT) -> None:
+    server = BackOfficeServer((HOST, port), BackOfficeHandler, BackOffice())
+    actual = server.server_address[1]
+    print("Bookly back office on http://%s:%d" % (HOST, actual))
+    print("webhook: http://%s:%d/webhook" % (HOST, actual))
+    print("run the console with:")
+    print(
+        "  BOOKLY_WEBHOOK_URL=http://%s:%d/webhook python3 web.py"
+        % (HOST, actual)
+    )
+    print("press Ctrl-C to stop", flush=True)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nstopped")
+    finally:
+        server.server_close()
+
+
+if __name__ == "__main__":
+    serve(int(os.environ.get("BOOKLY_BACKOFFICE_PORT") or PORT))

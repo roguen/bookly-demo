@@ -881,4 +881,9 @@ async function boot() {
   renderProvider();
 }
 
-boot();
+/* The back office imports `el` and `clear` from this module so there is
+   exactly one function in the build that puts text on a page — and therefore
+   exactly one place a markup sink could ever appear. That import must not
+   also start the console, so booting is conditional on the console's own
+   shell being the page that loaded us. */
+if (document.getElementById("composer")) boot();

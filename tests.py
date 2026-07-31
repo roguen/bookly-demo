@@ -23,6 +23,7 @@ import urllib.error
 import urllib.request
 from datetime import date
 
+import backoffice
 import covers
 import envelope as envelope_module
 import llm
@@ -1087,6 +1088,199 @@ def back_office_returns_nothing_that_reaches_a_verdict():
     assert len(verdicts) == 1
     assert verdicts[0]["payload"]["reason_code"] == policy.RETURN_WINDOW_EXPIRED
     assert verdicts[0]["payload"]["decision"] == "deny"
+
+
+# --- the back office ------------------------------------------------------
+
+
+class _BackOffice:
+    """A running back office, for the duration of a `with` block."""
+
+    def __init__(self):
+        self.server = None
+        self.url = None
+
+    def __enter__(self):
+        self.server = backoffice.BackOfficeServer(
+            ("127.0.0.1", 0), backoffice.BackOfficeHandler,
+            backoffice.BackOffice(),
+        )
+        port = self.server.server_address[1]
+        self.url = "http://127.0.0.1:%d/webhook" % port
+        self.base = "http://127.0.0.1:%d" % port
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        return self
+
+    def __exit__(self, *_exc):
+        self.server.shutdown()
+        self.server.server_close()
+
+    def get(self, path):
+        return json.loads(
+            urllib.request.urlopen(self.base + path, timeout=20).read().decode()
+        )
+
+
+@check
+def ledger_records_one_line_for_a_repeated_key():
+    """The same envelope delivered twice produces one ledger line and one
+    suppressed duplicate — the idempotency contract, drawn.
+
+    A second line would mean a second refund, which is the exact failure the
+    key exists to prevent.
+    """
+    saved = os.environ.get(envelope_module.WEBHOOK_ENV_VAR)
+    try:
+        with _BackOffice() as office:
+            os.environ[envelope_module.WEBHOOK_ENV_VAR] = office.url
+            # Two fresh processes' worth of the same decision: different
+            # envelope ids, same conversation, same action, same order — and
+            # therefore the same key.
+            first = _fresh_agent("conv-ledger").handle_turn(
+                "I want to return the Escher book"
+            )
+            again = _fresh_agent("conv-ledger").handle_turn(
+                "I want to return the Escher book"
+            )
+            sent = _envelopes(first) + _envelopes(again)
+            assert len(sent) == 2
+            assert sent[0]["envelope_id"] != sent[1]["envelope_id"]
+            assert sent[0]["idempotency_key"] == sent[1]["idempotency_key"]
+            assert [d for _e, d in first.envelopes] == ["delivered_200"]
+            assert [d for _e, d in again.envelopes] == ["delivered_200"]
+
+            ledger = office.get("/api/ledger")
+    finally:
+        os.environ.pop(envelope_module.WEBHOOK_ENV_VAR, None)
+        if saved is not None:
+            os.environ[envelope_module.WEBHOOK_ENV_VAR] = saved
+
+    assert len(ledger["lines"]) == 1, ledger["lines"]
+    line = ledger["lines"][0]
+    assert line["order_id"] == "BK-1042"
+    assert line["amount"] == ORDERS["BK-1042"].price_paid
+    assert line["reason_code"] == policy.REFUND_APPROVED_IN_WINDOW
+    assert len(line["duplicates"]) == 1
+    assert ledger["summary"]["lines"] == 1
+    assert ledger["summary"]["suppressed_duplicates"] == 1
+    # The money posted once, not twice.
+    assert ledger["summary"]["amount_posted"] == ORDERS["BK-1042"].price_paid
+    # And the screen says the deduplication is in memory rather than implying
+    # a durability this does not have.
+    assert "in memory" in ledger["summary"]["durability"]
+    assert ledger["stand_in"]
+
+
+@check
+def decision_survives_an_unreachable_receiver():
+    """Kill the receiver mid-conversation and the agent keeps working.
+
+    The verdict, the envelope and the audit line are unchanged; only the
+    delivery is lost, and it is recorded as failed rather than swallowed.
+    This is the evidence that the audit line precedes the network hop.
+    """
+    saved = os.environ.get(envelope_module.WEBHOOK_ENV_VAR)
+    before = _audit_size()
+    try:
+        with _BackOffice() as office:
+            os.environ[envelope_module.WEBHOOK_ENV_VAR] = office.url
+            up = _fresh_agent("conv-down").handle_turn(
+                "I want to return the Escher book"
+            )
+        # The `with` block has exited: the receiver is now gone, mid-demo.
+        down = _fresh_agent("conv-down").handle_turn(
+            "I want to return the Escher book"
+        )
+    finally:
+        os.environ.pop(envelope_module.WEBHOOK_ENV_VAR, None)
+        if saved is not None:
+            os.environ[envelope_module.WEBHOOK_ENV_VAR] = saved
+
+    (up_envelope, up_delivery), = up.envelopes
+    (down_envelope, down_delivery), = down.envelopes
+    assert up_delivery == "delivered_200"
+    # Named, stable, and legible on a screen — not the platform's errno text.
+    assert down_delivery == "failed_unreachable", down_delivery
+    # The decision is identical in every field that is a decision.
+    for field in ("action", "order_id", "amount", "currency", "reason_code",
+                  "idempotency_key", "conversation_id"):
+        assert up_envelope[field] == down_envelope[field], field
+    assert down_envelope["amount"] == ORDERS["BK-1042"].price_paid
+    # The reply the customer read did not change either.
+    assert up.reply == down.reply
+    # Both decisions are in the audit trail, and the failure is recorded
+    # rather than swallowed.
+    trail = _audit_since(before)
+    assert trail.count(down_envelope["idempotency_key"]) >= 2
+    assert '"delivery": "failed_unreachable"' in trail
+    # The audit surface classifies it, so a failed hop is legible rather than
+    # a field nobody reads.
+    states = [
+        entry.get("delivery_state")
+        for entry in web.audit_json()
+        if entry.get("event") == "delivery"
+    ]
+    assert "failed" in states
+
+
+@check
+def the_back_office_surfaces_say_what_they_are():
+    """Every surface carries a persistent stand-in chip, names systems by
+    function, and the policy viewer is read only."""
+    with _BackOffice() as office:
+        surfaces = {
+            "ledger": office.get("/api/ledger"),
+            "queue": office.get("/api/queue"),
+            "policy": office.get("/api/policy"),
+        }
+    for name, payload in surfaces.items():
+        assert payload.get("stand_in"), name
+        assert "not a product" in payload["stand_in"], name
+    # The policy viewer serves policy.py's own values and says who may change
+    # them. There is no write route for it at all.
+    assert surfaces["policy"]["constants"]
+    assert "policy.py" in surfaces["policy"]["who_can_change_these"]
+    assert "does not ship an editing surface" in (
+        surfaces["policy"]["who_can_change_these"]
+    )
+    office_source = pathlib.Path("backoffice.py").read_text(encoding="utf-8")
+    for route in ("/api/policy/edit", "/api/policy/update", "do_PUT",
+                  "do_DELETE", "do_PATCH"):
+        assert route not in office_source, route
+    # No vendor name, logo, or third-party brand colour anywhere on these
+    # screens. Systems are named by what they do.
+    vendors = ("stripe", "zendesk", "salesforce", "shopify", "twilio",
+               "intercom", "servicenow", "netsuite", "sap", "workday")
+    for path in ("backoffice.py", "static/backoffice.html",
+                 "static/backoffice.js", "static/app.css", "static/app.js",
+                 "static/index.html", "web.py"):
+        text = pathlib.Path(path).read_text(encoding="utf-8").lower()
+        for vendor in vendors:
+            assert vendor not in text, (path, vendor)
+
+
+@check
+def the_stub_receiver_is_untouched():
+    """evidence/duplicate_receipt.txt documents a reproducible procedure
+    against stub_receiver.py, and that evidence has to stay valid. The back
+    office is an addition, not a replacement."""
+    source = pathlib.Path("stub_receiver.py").read_text(encoding="utf-8")
+    assert "_seen_keys" in source and "duplicate" in source
+    assert "PORT = 8787" in source
+    # It still binds the documented port, which is why you run one or the
+    # other — and the back office says so in its own docstring.
+    assert "PORT = 8787" in pathlib.Path("backoffice.py").read_text(
+        encoding="utf-8"
+    )
+    # The agent envelope shape the evidence quotes is unchanged: emit() has
+    # not grown an actor field, which would have made that transcript stale.
+    emitted = _envelopes(
+        _fresh_agent("conv-shape").handle_turn("I want to return the Escher book")
+    )[0]
+    assert set(emitted) == {
+        "envelope_id", "idempotency_key", "action", "order_id", "amount",
+        "currency", "reason_code", "conversation_id", "customer_note",
+    }, sorted(emitted)
 
 
 def _audit_size() -> int:

@@ -1049,6 +1049,81 @@ body[data-view="customer"] .columns {
   grid-template-columns: var(--record-w) minmax(0, 1fr);
 }
 
+/* --- the back office ----------------------------------------------------
+   A second process on a second port, sharing this stylesheet so it reads as
+   the deterministic side of the same boundary rather than a second product
+   with its own opinions. */
+
+body.backoffice {
+  overflow: auto;
+}
+
+body.backoffice #console {
+  max-width: 940px;
+  margin: 0 auto;
+  min-height: 100%;
+}
+
+.office {
+  padding: 16px;
+}
+
+/* Persistent, visible, on every surface. These are honest mocks and they say
+   so — permanently, not in a dismissible toast. */
+.standin-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #c9873b;
+  border-radius: 999px;
+  padding: 3px 12px;
+  font-size: var(--step--1);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #f0c07a;
+}
+
+.standin-notice {
+  margin: 0;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--rule);
+  font-size: var(--step--1);
+  color: var(--muted);
+}
+
+.office .panel[hidden] {
+  display: none;
+}
+
+.suppressed {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--rule);
+}
+
+.suppressed-count {
+  display: block;
+  font-size: var(--step--1);
+  color: #f0c07a;
+  margin-bottom: 4px;
+}
+
+.reason {
+  border: 1px solid var(--rule-soft);
+  border-left: 3px solid var(--lilac);
+  border-radius: var(--radius);
+  background: var(--raised);
+  padding: 8px 10px;
+  margin-bottom: 6px;
+}
+
+.reason-code {
+  font-family: var(--mono);
+  font-weight: 700;
+  color: var(--lilac);
+  font-size: var(--step--1);
+}
+
 /* --- responsive: one column and a tab bar under 900px ------------------- */
 
 .mobilebar {

@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import socket
 import urllib.error
 import urllib.request
 import uuid
@@ -147,8 +148,16 @@ def _deliver(envelope: dict) -> str:
             request, timeout=DELIVERY_TIMEOUT_SECONDS
         ) as response:
             return "delivered_%d" % response.status
-    except urllib.error.URLError as error:
-        return "failed_%s" % getattr(error, "reason", "unreachable")
+    except urllib.error.HTTPError as error:
+        # The receiver answered and refused. Its status is the useful fact.
+        return "failed_%d" % error.code
+    except (urllib.error.URLError, socket.timeout, TimeoutError):
+        # Nobody answered. Normalised to one stable value rather than the
+        # platform's errno text, because this string is read off a screen
+        # during the failure demo and "failed_[Errno 61] Connection refused"
+        # is noise where "failed_unreachable" is the point: the decision was
+        # already made and already audited, and only the hop was lost.
+        return "failed_unreachable"
 
 
 def _audit(record: dict) -> None:

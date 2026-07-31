@@ -107,9 +107,31 @@ class ReviewQueue:
         self._path = Path(path or queue_path())
         self._lock = threading.RLock()
         self._cases: Dict[str, Case] = {}
+        self._mtime: Optional[float] = None
         self._load()
 
     # -- persistence -------------------------------------------------------
+
+    def _refresh(self) -> None:
+        """Pick up writes made by the other process.
+
+        The console and the back office are deliberately two processes, and
+        both of them touch this queue: the console lands cases, the back
+        office resolves them. The file is the shared state, so whoever is
+        about to read it checks whether the other one has written since.
+        Crude, and correct for one reviewer at one desk — which is the whole
+        deployment this demo claims.
+        """
+        try:
+            mtime = self._path.stat().st_mtime
+        except OSError:
+            if self._mtime is not None:
+                self._cases.clear()  # the file went away; so did the cases
+                self._mtime = None
+            return
+        if mtime != self._mtime:
+            self._cases.clear()
+            self._load()
 
     def _load(self) -> None:
         if not self._path.exists():
@@ -118,6 +140,7 @@ class ReviewQueue:
             raw = json.loads(self._path.read_text(encoding="utf-8"))
         except ValueError:
             return  # a corrupt demo file is not worth crashing a demo over
+        self._mtime = self._path.stat().st_mtime
         for record in raw.get("cases", []):
             self._cases[record["case_id"]] = Case(
                 case_id=record["case_id"],
@@ -132,11 +155,13 @@ class ReviewQueue:
         temporary = self._path.with_name(self._path.name + ".tmp")
         temporary.write_text(json.dumps(payload, indent=1), encoding="utf-8")
         temporary.replace(self._path)  # never a half-written queue on disk
+        self._mtime = self._path.stat().st_mtime
 
     # -- reads -------------------------------------------------------------
 
     def cases(self) -> List[dict]:
         with self._lock:
+            self._refresh()
             return [
                 case.as_dict()
                 for case in sorted(
@@ -146,11 +171,13 @@ class ReviewQueue:
 
     def get(self, case_id: str) -> Optional[dict]:
         with self._lock:
+            self._refresh()
             case = self._cases.get(case_id)
             return case.as_dict() if case else None
 
     def counts(self) -> dict:
         with self._lock:
+            self._refresh()
             statuses = [case.status for case in self._cases.values()]
         return {
             "open": statuses.count(CASE_OPEN),
@@ -172,6 +199,7 @@ class ReviewQueue:
         """
         case_id = _case_id(escalation)
         with self._lock:
+            self._refresh()
             case = self._cases.get(case_id)
             if case is None:
                 case = Case(
@@ -228,6 +256,7 @@ class ReviewQueue:
                 "attached is not reviewable"
             )
         with self._lock:
+            self._refresh()
             case = self._cases.get(case_id)
             if case is None:
                 raise ValueError("no such case: %s" % case_id)
@@ -267,6 +296,7 @@ class ReviewQueue:
         """Back to a known state. Only the reset endpoint calls this."""
         with self._lock:
             self._cases.clear()
+            self._mtime = None
             if self._path.exists():
                 self._path.unlink()
 
