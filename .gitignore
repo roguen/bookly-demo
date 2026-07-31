@@ -4,6 +4,15 @@ audit.log
 .claude/
 .DS_Store
 
+# Secrets. The agent reads ANTHROPIC_API_KEY from the environment and never
+# from a file, so nothing here should ever exist — this is a backstop for a
+# public repo, not a supported way to configure the key.
+.env
+.env.*
+*.key
+*.pem
+secrets*
+
 # PowerPoint lock files, created whenever the deck is open
 ~$*.pptx
 
