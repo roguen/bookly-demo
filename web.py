@@ -219,9 +219,23 @@ class Console:
                 return _refused(
                     self,
                     name,
-                    "%s could not be started: %s: %s. The stand-in is still "
-                    "running." % (name, type(error).__name__, error),
+                    "%s could not be started: %s. The stand-in is still "
+                    "running." % (name, _describe(error)),
                 )
+            # Constructing a client is offline for both vendors, so a wrong
+            # key, a renamed model and a missing network all look like success
+            # until the first turn. One tiny real call now moves that
+            # discovery off the stage and into this button.
+            if isinstance(provider, llm.HostedProvider):
+                try:
+                    provider.verify()
+                except Exception as error:
+                    return _refused(
+                        self,
+                        name,
+                        "%s answered with an error, so the stand-in is still "
+                        "running: %s" % (name, _describe(error)),
+                    )
             self._provider = provider
             self._provider_name = name
             if key:
@@ -247,6 +261,24 @@ class Console:
         if self._api_key and self._provider_name == name:
             return self._api_key, self._key_source
         return None, None
+
+
+MAX_ERROR_CHARS = 240
+
+
+def _describe(error: Exception) -> str:
+    """A vendor error, short enough to read on a badge.
+
+    SDK exceptions can carry a full response body. The type and the first
+    line are what tells you whether it was the key, the model name or the
+    network — the rest is noise on a stage.
+    """
+    text = " ".join(str(error).split())
+    if len(text) > MAX_ERROR_CHARS:
+        text = text[:MAX_ERROR_CHARS] + "…"
+    return "%s: %s" % (type(error).__name__, text) if text else (
+        type(error).__name__
+    )
 
 
 def _refused(console: "Console", requested: str, message: str) -> dict:
@@ -380,6 +412,10 @@ def customer_json() -> dict:
             if order.customer_id == store.CURRENT_CUSTOMER_ID
         ],
         "policy": policy_json(),
+        # Prompts the console offers as next things to say. Content, not
+        # logic: each one goes through the same handle_turn as anything typed
+        # by hand, and none of them carries a hint about the answer.
+        "suggestions": store.PROFILE.get("suggestions", {}),
     }
 
 

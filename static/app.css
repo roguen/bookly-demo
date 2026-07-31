@@ -331,14 +331,49 @@ button:disabled {
   gap: 8px;
 }
 
-.order {
+/* Each order is a control: clicking it writes a question about that book
+   into the composer. It is still a record row, so it stays neutral — nothing
+   here may read as a decision. */
+button.order {
+  position: relative;
   display: flex;
   gap: 10px;
   align-items: flex-start;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: var(--step-0);
+  color: inherit;
   background: var(--raised);
   border: 1px solid var(--rule-soft);
   border-radius: var(--radius);
   padding: 8px;
+  cursor: pointer;
+}
+
+button.order:hover {
+  border-color: var(--lilac);
+  color: inherit;
+}
+
+/* Out of flow on purpose: in the flex row it reserved width even at zero
+   opacity, which pushed every author line onto a second row. */
+button.order::after {
+  content: "Ask";
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  font-size: var(--step--2);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--lilac);
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+
+button.order:hover::after,
+button.order:focus-visible::after {
+  opacity: 1;
 }
 
 .order img {
@@ -509,6 +544,40 @@ button:disabled {
 
 .bubble.agent .who {
   color: var(--grey);
+}
+
+/* What to say next, offered after the agent has replied. These are prompts,
+   not outputs — they belong to neither side of the boundary, so they take
+   the neutral outline the customer's own words take rather than grey or
+   purple. */
+.next-steps {
+  align-self: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: min(38em, 92%);
+  padding: 4px 0 2px;
+}
+
+.next-label {
+  flex: 1 0 100%;
+  margin: 0;
+  font-size: var(--step--2);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.next-steps button {
+  border-color: #45456e;
+  background: transparent;
+  white-space: normal;
+  text-align: left;
+}
+
+.empty button {
+  display: block;
+  margin-top: 10px;
 }
 
 .composer {

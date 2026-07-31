@@ -950,6 +950,109 @@ def switching_provider_mid_conversation_changes_wording_not_the_key():
 
 
 @check
+def a_hosted_provider_is_checked_before_it_is_switched_to():
+    """Constructing a client is offline for both vendors, so a wrong key, a
+    renamed model and a missing network all look like success until the first
+    turn. Switching makes one real call first, and a provider that fails it
+    never becomes active."""
+
+    class Unreachable(llm.HostedProvider):
+        name = "unreachable"
+
+        def __init__(self, api_key=None):
+            self.api_key = api_key
+
+        def _complete(self, system, user):
+            raise ConnectionError("Connection error.")
+
+    class Reachable(llm.HostedProvider):
+        name = "reachable"
+
+        def __init__(self, api_key=None):
+            self.api_key = api_key
+
+        def _complete(self, system, user):
+            return "OK"
+
+    saved = dict(llm.PROVIDERS)
+    saved_vars = dict(llm.VENDOR_KEY_VARS)
+    try:
+        llm.PROVIDERS["unreachable"] = Unreachable
+        llm.PROVIDERS["reachable"] = Reachable
+        llm.VENDOR_KEY_VARS["unreachable"] = "BOOKLY_FAKE_KEY_A"
+        llm.VENDOR_KEY_VARS["reachable"] = "BOOKLY_FAKE_KEY_B"
+        with _Console() as console:
+            broken = console.post(
+                "/api/provider",
+                {"name": "unreachable", "api_key": "sk-not-a-real-key"},
+            )
+            assert broken["ok"] is False
+            # It stayed on the stand-in rather than switching to something
+            # that will fail on the customer's first sentence.
+            assert broken["active"] == "rules", broken
+            assert "still running" in broken["message"]
+            assert "ConnectionError" in broken["message"]
+            # And a turn still works, on the stand-in.
+            turn = console.post(
+                "/api/turn",
+                {"conversation_id": "conv-verify",
+                 "text": "I want to return the Escher book"},
+            )
+            assert turn["envelopes"][0]["envelope"]["amount"] == (
+                ORDERS["BK-1042"].price_paid
+            )
+            # One that answers the check does switch.
+            working = console.post(
+                "/api/provider",
+                {"name": "reachable", "api_key": "sk-fine"},
+            )
+            assert working["ok"] is True and working["active"] == "reachable"
+    finally:
+        llm.PROVIDERS.clear()
+        llm.PROVIDERS.update(saved)
+        llm.VENDOR_KEY_VARS.clear()
+        llm.VENDOR_KEY_VARS.update(saved_vars)
+
+    # verify() is shared logic on HostedProvider, not a per-vendor copy, so
+    # there is no seam for one vendor to skip the check.
+    for hosted in (AnthropicProvider, OpenAIProvider):
+        assert "verify" not in vars(hosted), hosted.__name__
+        assert hosted.verify is HostedProvider.verify
+
+
+@check
+def the_prompts_the_console_offers_come_from_the_profile():
+    """The openers and the follow-up suggestions are demo content, so they
+    live in the profile with the scenarios — re-skinning stays a data edit.
+    They are wording only: every one is an ordinary turn, and none of them
+    hints at what the answer should be."""
+    with _Console() as console:
+        served = console.get("/api/customer")["suggestions"]
+    assert served["openers"], "no openers served"
+    assert served["fallback"], "no fallback suggestions served"
+    # Follow-ups are keyed by reason code, and every key is a real one.
+    codes = {entry.code for entry in policy.REASON_CODES}
+    for code in served["after"]:
+        assert code in codes, code
+    # The two outcomes the demo turns on both have a follow-up.
+    for code in (policy.REFUND_APPROVED_IN_WINDOW,
+                 policy.RETURN_WINDOW_EXPIRED):
+        assert served["after"].get(code), code
+    # None of them is written into the client.
+    source = pathlib.Path("static/app.js").read_text(encoding="utf-8")
+    for prompt in served["openers"] + served["fallback"]:
+        assert prompt not in source, prompt
+    # And every suggested prompt is a turn the agent actually handles: none
+    # of them falls through to the generic help reply.
+    every = set(served["openers"]) | set(served["fallback"])
+    for prompts in served["after"].values():
+        every.update(prompts)
+    for prompt in sorted(every):
+        reply = _fresh_agent("conv-suggest").handle_turn(prompt).reply
+        assert "What can I do for you?" not in reply, prompt
+
+
+@check
 def the_console_serves_records_and_never_another_customers():
     """The record, the orders and their covers come out of the store; an
     order belonging to someone else is not among them and its cover is not

@@ -74,6 +74,23 @@ That is one rule with no exceptions, and it is the whole design system.
 what a shopper would see. Lifetime value and CSAT are not hidden with CSS in
 that mode — they are not rendered.
 
+**Getting around.** Clicking an order writes a question about that book into
+the composer rather than sending it, so you can edit it first. After every
+reply the console offers what to say next, following the reason code the turn
+actually produced. Those prompts live in the profile alongside the scenarios,
+not in the JavaScript.
+
+The Audit and Queue tabs start empty and stay empty until something happens
+that writes to them — only a turn that *decides* something writes an audit
+line, and only an escalation opens a case. Each empty tab carries the button
+that produces one.
+
+**Switching provider.** Paste the key into the field first, then pick the
+provider: the key is read when you choose. Switching makes one small call to
+check the key, the model name and the network before it commits, so a broken
+setup surfaces at the button rather than on the next customer turn. Selecting
+a hosted provider with no key leaves the stand-in running and says so.
+
 **Replay** plays a scripted conversation into the real interface through the
 real API. Nothing is pre-recorded. `DEMO.md` is the run of show.
 

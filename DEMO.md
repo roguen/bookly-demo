@@ -225,7 +225,13 @@ dependencies, which is why this runs on a plane.
 Pick a hosted provider without pasting a key. It says so plainly and stays on
 the stand-in. Nothing throws.
 
-If you have a key, paste it and switch mid-conversation. The wording changes.
+If you have a key: **paste it into the field first, then click the provider**
+— the key is read at the moment you choose. The button reads `checking…` for
+a second, because switching makes one small real call to check the key, the
+model name and the network before it commits. A bad key fails *here*, not on
+your next sentence.
+
+Switch mid-conversation. The wording changes.
 Open **Checks → Provider parity**: the idempotency key does not. The key is
 `sha256(conversation|action|order)`; no provider appears in that material.
 `evidence/provider_parity.txt` is a real hosted run of the same four scenarios

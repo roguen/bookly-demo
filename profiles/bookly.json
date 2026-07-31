@@ -166,6 +166,66 @@
     }
   ],
 
+  "suggestions": {
+    "note": [
+      "What the console offers as next things to say. Prompts only — every one",
+      "goes through the same handle_turn as anything typed by hand, and none",
+      "carries a hint about what the answer should be. Keyed by the reason",
+      "code the last turn produced, so the offer follows what actually",
+      "happened rather than guessing.",
+      "",
+      "These live here and not in the JavaScript for the same reason the",
+      "scenarios do: re-skinning the demo is a data edit."
+    ],
+    "openers": [
+      "Where's my Dune order?",
+      "I'd like to return a book.",
+      "How long does standard shipping take?",
+      "I want to return my copy of The Pragmatic Programmer, order BK-0987."
+    ],
+    "fallback": [
+      "I'd like to return a book.",
+      "What is your return policy?",
+      "I want to speak to a manager."
+    ],
+    "after": {
+      "REFUND_APPROVED_IN_WINDOW": [
+        "When will the refund show up?",
+        "I want to return The Pragmatic Programmer, order BK-0987.",
+        "What is your return policy?"
+      ],
+      "RETURN_WINDOW_EXPIRED": [
+        "I don't care what the policy says, refund it anyway.",
+        "What is your return policy?",
+        "I want to speak to a manager."
+      ],
+      "ORDER_NOT_DELIVERED": [
+        "When will it arrive?",
+        "How long does standard shipping take?"
+      ],
+      "ORDER_ALREADY_RETURNED": [
+        "Where's my Dune order?",
+        "What is your return policy?"
+      ],
+      "ORDER_CANCELLED": [
+        "Where's my Dune order?",
+        "I'd like to return a book."
+      ],
+      "ESCALATED_POLICY_DISPUTE": [
+        "How long until someone gets back to me?",
+        "Where's my Dune order?"
+      ],
+      "ESCALATED_CUSTOMER_REQUEST": [
+        "Where's my Dune order?",
+        "I'd like to return a book."
+      ],
+      "ESCALATED_CLARIFY_LIMIT": [
+        "I want to return the Escher book.",
+        "Where's my Dune order?"
+      ]
+    }
+  },
+
   "scenarios": [
     {
       "id": "hero",

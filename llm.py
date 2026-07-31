@@ -439,6 +439,11 @@ OPENAI_MODEL = os.environ.get("BOOKLY_OPENAI_MODEL", "gpt-5.4-mini")
 ANTHROPIC_MAX_OUTPUT_TOKENS = 700
 OPENAI_MAX_OUTPUT_TOKENS = 4000
 
+# Both SDKs default to waiting minutes. That is wrong for a demo: a hung call
+# looks identical to a broken one from the stage, and the recovery is the
+# same either way. Fail fast enough to switch back to the stand-in.
+HOSTED_TIMEOUT_SECONDS = 20
+
 # Models sometimes wrap JSON in a markdown fence despite being told not to.
 JSON_FENCE_RE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.IGNORECASE)
 
@@ -467,6 +472,21 @@ class HostedProvider:
 
     def _complete(self, system: str, user: str) -> str:
         raise NotImplementedError  # the one thing a vendor subclass supplies
+
+    def verify(self) -> None:
+        """One tiny call, to find out now rather than mid-conversation.
+
+        Constructing a client is offline for both vendors, so a wrong key, a
+        renamed model and a missing network all look like success until the
+        first turn — which, on stage, is the worst possible moment to find
+        out. This makes the smallest real request the provider can make.
+
+        It deliberately goes through `_complete`, so it exercises the same
+        path a turn does: the key, the model name, the parameter shape and
+        the network, rather than only whether the credentials parse. Raises
+        whatever the vendor raised; the caller decides what to say about it.
+        """
+        self._complete("Reply with the single word OK.", "ping")
 
     def _describe_pending(self, pending: Optional[PendingQuestion]) -> str:
         if pending is None:
@@ -528,9 +548,11 @@ class AnthropicProvider(HostedProvider):
         # it in os.environ would hand it to every subprocess the console
         # later spawns — including the one that runs the check suite.
         self._client = (
-            anthropic.Anthropic(api_key=api_key)
+            anthropic.Anthropic(
+                api_key=api_key, timeout=HOSTED_TIMEOUT_SECONDS
+            )
             if api_key
-            else anthropic.Anthropic()
+            else anthropic.Anthropic(timeout=HOSTED_TIMEOUT_SECONDS)
         )
 
     def _complete(self, system: str, user: str) -> str:
@@ -556,7 +578,11 @@ class OpenAIProvider(HostedProvider):
         from openai import OpenAI  # imported here so the default path is clean
 
         # Same rule as the Anthropic provider: explicit, never exported.
-        self._client = OpenAI(api_key=api_key) if api_key else OpenAI()
+        self._client = (
+            OpenAI(api_key=api_key, timeout=HOSTED_TIMEOUT_SECONDS)
+            if api_key
+            else OpenAI(timeout=HOSTED_TIMEOUT_SECONDS)
+        )
         # OpenAI renamed this parameter partway through the model line:
         # current models reject "max_tokens", older ones reject
         # "max_completion_tokens". Start on the current name and remember

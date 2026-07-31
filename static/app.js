@@ -210,7 +210,20 @@ function renderRecord() {
       "ul",
       { class: "orders" },
       orders.map((order) =>
-        el("li", { class: "order" }, [
+        /* Clicking an order writes the question into the composer rather
+           than sending it, so it can be edited before it goes — and so the
+           demo can show the turn arriving rather than having already
+           happened. The order id is used on purpose: it resolves through the
+           explicit-reference rule, which is the one visible in the trace. */
+        el("li", {}, [
+          el("button", {
+            class: "order",
+            attrs: {
+              type: "button",
+              title: `Ask about ${order.title}`,
+            },
+            on: { click: () => ask(`What's the status of my order ${order.order_id}?`) },
+          }, [
           el("img", {
             attrs: {
               src: order.cover.href,
@@ -234,6 +247,7 @@ function renderRecord() {
               class: "order-id",
               text: `${order.order_id} · ${money(order.price_paid)}`,
             }),
+          ]),
           ]),
         ])
       )
@@ -276,15 +290,22 @@ function renderRecord() {
 
 /* --- conversation ------------------------------------------------------- */
 
-/* Openers for an empty conversation. Wording only — every one of these goes
-   through the same handle_turn as anything typed by hand, and none of them
-   carries a hint about what the answer should be. */
-const OPENERS = [
-  "Where's my Dune order?",
-  "I'd like to return a book.",
-  "How long does standard shipping take?",
-  "I want to return my copy of The Pragmatic Programmer, order BK-0987.",
-];
+/* The prompts the console offers come from the profile, not from here, for
+   the same reason the scenarios do: re-skinning is a data edit. They are
+   wording only — every one goes through the same handle_turn as anything
+   typed by hand, and none carries a hint about what the answer should be. */
+
+function suggestions() {
+  return (state.customer && state.customer.suggestions) || {};
+}
+
+function promptButton(text, label) {
+  return el("button", {
+    text: label || text,
+    attrs: { type: "button" },
+    on: { click: () => send(text) },
+  });
+}
 
 function renderOpeners() {
   const panel = el("div", { class: "opener" }, [
@@ -293,16 +314,44 @@ function renderOpeners() {
       text: "Type anything, or begin with one of these. Operator view opens the glass box on the right.",
     }),
   ]);
-  for (const opener of OPENERS) {
-    panel.appendChild(
-      el("button", {
-        text: opener,
-        attrs: { type: "button" },
-        on: { click: () => send(opener) },
-      })
-    );
+  for (const opener of suggestions().openers || []) {
+    panel.appendChild(promptButton(opener));
   }
   return panel;
+}
+
+/* After a reply, offer what to say next. The offer follows the reason code
+   the turn actually produced, so it tracks what happened rather than
+   guessing — and it is still only wording. The openers come back alongside
+   it so the conversation never dead-ends. */
+function nextSteps() {
+  const all = suggestions();
+  const verdicts = state.trace.filter((note) => note.stage === "verdict");
+  const lastCode = verdicts.length
+    ? verdicts[verdicts.length - 1].payload.reason_code
+    : null;
+  const followUps =
+    (lastCode && (all.after || {})[lastCode]) || all.fallback || [];
+
+  const strip = el("div", { class: "next-steps" });
+  strip.appendChild(
+    el("p", {
+      class: "next-label",
+      text: lastCode
+        ? `Next, after ${lastCode}`
+        : "Next",
+    })
+  );
+  const asked = new Set(
+    state.messages.filter((m) => m.role === "customer").map((m) => m.text)
+  );
+  const offered = [];
+  for (const text of [...followUps, ...(all.openers || [])]) {
+    if (offered.includes(text) || asked.has(text)) continue;
+    offered.push(text);
+    strip.appendChild(promptButton(text));
+  }
+  return offered.length ? strip : null;
 }
 
 function renderMessages() {
@@ -321,6 +370,13 @@ function renderMessages() {
         el("span", { text: message.text }),
       ])
     );
+  }
+  /* Only after the agent has spoken, and never mid-replay — a scripted
+     conversation should not grow controls halfway through. */
+  const last = state.messages[state.messages.length - 1];
+  if (last && last.role === "agent" && !state.replaying) {
+    const strip = nextSteps();
+    if (strip) dom.messages.appendChild(strip);
   }
   dom.messages.scrollTop = dom.messages.scrollHeight;
 }
@@ -458,11 +514,34 @@ function deliveryState(delivery) {
   return "unknown";
 }
 
-function emptyState(title, hint) {
-  return el("div", { class: "empty" }, [
+/* Write a question into the composer and focus it, rather than sending it.
+   The turn should be something you watched arrive, not something that had
+   already happened by the time you looked. */
+function ask(text) {
+  dom.message.value = text;
+  dom.message.focus();
+  dom.message.setSelectionRange(text.length, text.length);
+  if (state.region !== "conversation") setRegion("conversation");
+}
+
+/* An empty state that says what to do next is better than one that
+   apologises — and one that will do it for you is better still. `action`,
+   when given, is the turn that fills this surface. */
+function emptyState(title, hint, action) {
+  const panel = el("div", { class: "empty" }, [
     el("strong", { text: title }),
     el("span", { text: hint }),
   ]);
+  if (action) {
+    panel.appendChild(
+      el("button", {
+        text: action.label,
+        attrs: { type: "button" },
+        on: { click: () => send(action.text) },
+      })
+    );
+  }
+  return panel;
 }
 
 function renderTrace(streaming) {
@@ -522,7 +601,8 @@ async function renderAudit() {
     panel.appendChild(
       emptyState(
         "The trail is empty",
-        "Every emitted envelope is written to audit.log before the network hop. Take a turn that decides something and it appears here."
+        "Only a turn that decides something writes here — a lookup does not. Every emitted envelope is written to audit.log before the network hop.",
+        { label: "Ask for a refund", text: "I want to return the Escher book" }
       )
     );
     return;
@@ -584,7 +664,8 @@ async function renderQueue() {
     panel.appendChild(
       emptyState(
         "No cases yet",
-        "Escalations land here for a human to resolve. Ask for a manager, or press an out-of-window return until the agent hands it over."
+        "Only an escalation opens a case: an explicit ask for a person, a disputed denial, or a clarifying question that ran out of attempts.",
+        { label: "Ask for a manager", text: "I want to speak to a manager" }
       )
     );
     return;
@@ -847,49 +928,84 @@ function renderProviderPanel() {
   const key = el("input", {
     attrs: {
       type: "password",
-      placeholder: "API key (held in memory for this session only)",
+      placeholder: "Paste an API key here first, then pick a provider below",
       autocomplete: "off",
       spellcheck: "false",
     },
   });
   const message = el("p", { class: "form-error" });
   const choices = el("div", { class: "provider-choices" });
+  const buttons = [];
+
+  async function choose(name) {
+    /* Switching now makes one real call to the provider before committing,
+       so a wrong key or a renamed model surfaces here instead of on the
+       first turn of a conversation. That takes a moment, and the button
+       says so rather than appearing to have ignored the click. */
+    message.textContent = "";
+    message.removeAttribute("data-state");
+    for (const button of buttons) button.disabled = true;
+    const chosen = buttons.find((b) => b.dataset.provider === name);
+    const label = chosen.textContent;
+    chosen.textContent = "checking…";
+    try {
+      const result = await Api.setProvider(name, key.value || null);
+      state.provider = result;
+      if (result.ok) key.value = "";
+      renderProvider();
+      renderProviderPanel();
+      if (!result.ok) {
+        const panelMessage = document.querySelector(
+          "#provider-panel .form-error"
+        );
+        if (panelMessage) {
+          panelMessage.textContent = result.message;
+          panelMessage.setAttribute("data-state", "fail");
+        }
+      }
+    } catch (error) {
+      chosen.textContent = label;
+      for (const button of buttons) button.disabled = false;
+      message.textContent = String(error).replace(/^Error:\s*/, "");
+      message.setAttribute("data-state", "fail");
+    }
+  }
 
   for (const name of state.provider.available) {
     const active = name === state.provider.active;
-    choices.appendChild(
-      el("button", {
-        text: name,
-        attrs: {
-          type: "button",
-          "aria-pressed": String(active),
-        },
-        on: {
-          click: async () => {
-            message.textContent = "";
-            try {
-              const result = await Api.setProvider(name, key.value || null);
-              state.provider = result;
-              key.value = "";
-              renderProvider();
-              renderProviderPanel();
-              if (!result.ok) message.textContent = result.message;
-            } catch (error) {
-              message.textContent = String(error);
-            }
-          },
-        },
-      })
-    );
+    const button = el("button", {
+      text: name,
+      attrs: {
+        type: "button",
+        "aria-pressed": String(active),
+        "data-provider": name,
+      },
+      on: { click: () => choose(name) },
+    });
+    buttons.push(button);
+    choices.appendChild(button);
   }
 
+  /* Enter in the key field applies it to the first hosted provider, so a
+     paste-and-return works without hunting for the right button. */
+  key.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    const hosted = state.provider.hosted[0];
+    if (hosted) choose(hosted);
+  });
+
   panel.appendChild(el("h4", { text: "Model provider" }));
-  panel.appendChild(choices);
+  /* The key field comes before the buttons because that is the order it has
+     to be used in: the key is read at the moment a provider is chosen. It
+     used to sit underneath them, which made the first click look ignored. */
   panel.appendChild(key);
+  panel.appendChild(choices);
+  panel.appendChild(message);
   panel.appendChild(
     el("p", {
       class: "policy-source",
-      text: "The key is accepted by POST body, held on one object in the server's memory, and shown only as a badge. It is never written to disk, never logged, never put in a URL, and never exported to the environment — the checks run in a subprocess, and an exported key would ride into it. Selecting a hosted provider with no key leaves the stand-in running and says so.",
+      text: "Picking a hosted provider makes one small call to check the key, the model name and the network before switching, so a broken setup surfaces here rather than mid-conversation. The key is held on one object in the server's memory and shown only as a badge — never written to disk, never logged, never put in a URL, and never exported to the environment, because the check suite runs in a subprocess and an exported key would ride into it.",
     })
   );
   const environment = state.provider.environment_keys;
@@ -897,11 +1013,10 @@ function renderProviderPanel() {
     panel.appendChild(
       el("p", {
         class: "policy-source",
-        text: `Keys found in the environment: ${environment.join(", ")}.`,
+        text: `Keys found in the environment: ${environment.join(", ")}. Those are used automatically; you do not need to paste one.`,
       })
     );
   }
-  panel.appendChild(message);
 }
 
 /* --- provider ----------------------------------------------------------- */
@@ -1137,6 +1252,16 @@ async function boot() {
     checks: document.getElementById("panel-checks"),
   };
 
+  /* Boot is async: it fetches the record and the provider state before any
+     of these controls have anything to act on. Clicking during that window
+     used to do nothing at all, which reads as a broken button rather than a
+     page that is still loading. */
+  const gated = [
+    dom.providerBadge, dom.replay, dom.viewCustomer, dom.viewOperator,
+    document.getElementById("reset"),
+  ];
+  for (const control of gated) control.disabled = true;
+
   dom.composer.addEventListener("submit", (event) => {
     event.preventDefault();
     const text = dom.message.value;
@@ -1182,6 +1307,7 @@ async function boot() {
     notify(`Could not reach the console API: ${error}`);
     return;
   }
+  for (const control of gated) control.disabled = false;
 
   clear(dom.brand);
   dom.brand.appendChild(
