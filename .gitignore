@@ -3,3 +3,7 @@ __pycache__/
 audit.log
 .claude/
 .DS_Store
+
+# Deck QA render artifacts — the .pptx is the deliverable
+Bookly_Agent_Architecture.pdf
+slide-*.jpg

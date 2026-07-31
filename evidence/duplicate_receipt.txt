@@ -1,0 +1,64 @@
+Idempotency evidence: the same decision, delivered twice, is executed once.
+
+Method: start `python3 stub_receiver.py`, then run the demo script TWICE
+against it:
+    BOOKLY_WEBHOOK_URL=http://127.0.0.1:8787/webhook python3 app.py --script demo.txt
+
+The second run is a fresh process — new envelope_ids, new uuid4s — but the
+same conversations reaching the same decisions about the same orders. Because
+the key is sha256(conversation|action|order_id) and nothing else, the second
+run's envelopes carry keys the receiver has already seen, and it flags them
+rather than executing them again.
+
+Receiver output, verbatim:
+
+stub receiver listening on http://127.0.0.1:8787/webhook
+press Ctrl-C to stop
+--- envelope received ---
+{
+  "envelope_id": "b175df4c948240b88b57e1115adb16fd",
+  "idempotency_key": "b441ac1826d21cd6e631bd04944e537ec8ab1bffda029b08e97fe8b59666ff0d",
+  "action": "refund",
+  "order_id": "BK-1042",
+  "amount": 22.5,
+  "currency": "USD",
+  "reason_code": "REFUND_APPROVED_IN_WINDOW",
+  "conversation_id": "conv-2",
+  "customer_note": "The Escher one \u2014 the cover is torn."
+}
+--- envelope received ---
+{
+  "envelope_id": "9841acd14bb84699ac1e8c652681d12e",
+  "idempotency_key": "f3910a91af16524941f9cb0ac0ba01720d17bb2abfef61da80658951cbc1ca54",
+  "action": "escalate_to_human",
+  "order_id": "BK-0987",
+  "amount": null,
+  "currency": null,
+  "reason_code": "ESCALATED_POLICY_DISPUTE",
+  "conversation_id": "conv-4",
+  "customer_note": "I don't care what the policy says, refund it anyway."
+}
+--- envelope received (DUPLICATE — would not be re-executed) ---
+{
+  "envelope_id": "624561b19c8f4e56a80c38698cc0c923",
+  "idempotency_key": "b441ac1826d21cd6e631bd04944e537ec8ab1bffda029b08e97fe8b59666ff0d",
+  "action": "refund",
+  "order_id": "BK-1042",
+  "amount": 22.5,
+  "currency": "USD",
+  "reason_code": "REFUND_APPROVED_IN_WINDOW",
+  "conversation_id": "conv-2",
+  "customer_note": "The Escher one \u2014 the cover is torn."
+}
+--- envelope received (DUPLICATE — would not be re-executed) ---
+{
+  "envelope_id": "a506c194837141fe8d2e260b38e4195a",
+  "idempotency_key": "f3910a91af16524941f9cb0ac0ba01720d17bb2abfef61da80658951cbc1ca54",
+  "action": "escalate_to_human",
+  "order_id": "BK-0987",
+  "amount": null,
+  "currency": null,
+  "reason_code": "ESCALATED_POLICY_DISPUTE",
+  "conversation_id": "conv-4",
+  "customer_note": "I don't care what the policy says, refund it anyway."
+}
