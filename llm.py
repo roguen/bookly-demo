@@ -412,8 +412,14 @@ must not change or soften the decision."""
 
 # Models change names faster than this repo will; both are overridable so a
 # stale default is a one-line env fix rather than a code change.
+#
+# A mini-tier model is the deliberate default, not a cost compromise. Both
+# jobs are narrow and structured — turn to slots, event to sentence — which
+# is the same property that makes the regex stand-in serviceable. A model
+# that has to reason about eligibility would need the frontier tier; one
+# that only reads and phrases does not.
 ANTHROPIC_MODEL = os.environ.get("BOOKLY_ANTHROPIC_MODEL", "claude-sonnet-5")
-OPENAI_MODEL = os.environ.get("BOOKLY_OPENAI_MODEL", "gpt-5.5")
+OPENAI_MODEL = os.environ.get("BOOKLY_OPENAI_MODEL", "gpt-5.4-mini")
 
 # Models sometimes wrap JSON in a markdown fence despite being told not to.
 JSON_FENCE_RE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.IGNORECASE)

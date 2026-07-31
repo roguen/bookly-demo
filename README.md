@@ -120,9 +120,16 @@ pip install openai
 OPENAI_API_KEY=your-key python3 app.py
 ```
 
-`BOOKLY_PROVIDER=rules|anthropic|openai` forces a choice when more than one
-key is set. `BOOKLY_ANTHROPIC_MODEL` / `BOOKLY_OPENAI_MODEL` override the
-model, so a renamed model is an env fix rather than a code change.
+`BOOKLY_PROVIDER=rules|anthropic|openai` forces a choice; setting two vendor
+keys without it is refused rather than resolved by precedence.
+`BOOKLY_ANTHROPIC_MODEL` / `BOOKLY_OPENAI_MODEL` override the model, so a
+renamed model is an env fix rather than a code change.
+
+The OpenAI default is a **mini-tier** model on purpose. Extraction and
+narration are narrow and structured, which is the same property that makes
+the regex stand-in serviceable — a model that had to reason about
+eligibility would need a frontier tier; one that only reads and phrases
+does not.
 
 Nothing else changes — the decision layer is identical either way. Both
 hosted providers subclass `HostedProvider` and define exactly two things:
