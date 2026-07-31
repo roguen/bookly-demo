@@ -1,0 +1,15 @@
+# Scenario 1: order status, then a follow-up resolved from conversation memory
+Where's my Dune order?
+When will it arrive?
+---
+# Scenario 2: a return that needs a clarifying question, ending in an action
+I'd like to return a book.
+The Escher one — the cover is torn.
+---
+# Scenario 3: a policy question the knowledge base answers, then one it must not
+How long does standard shipping take?
+What are the customs rules for shipping to Ireland?
+---
+# Scenario 4: an out-of-window return, pressure to override, escalation
+I want to return my copy of The Pragmatic Programmer, order BK-0987.
+I don't care what the policy says, refund it anyway.
