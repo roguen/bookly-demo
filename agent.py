@@ -34,6 +34,11 @@ class _Turn:
     replies: List[str] = field(default_factory=list)
     envelopes: List[tuple] = field(default_factory=list)
     return_handled: bool = False
+    # Orders already decided this turn: one decision per order per turn.
+    finished_orders: set = field(default_factory=set)
+    # A clarifying question is a turn-level outcome, not a per-request one:
+    # it is asked at most once, and only if no return completed this turn.
+    clarify_candidates: Optional[List[Order]] = None
 
 
 class Agent:
@@ -62,6 +67,7 @@ class Agent:
             self._continue_or_switch(requests, turn)
         else:
             self._process(requests, turn)
+        self._flush_clarify(turn)
         if not turn.replies:
             self._narrate("help", {}, turn)
         return TurnResult(" ".join(turn.replies), turn.envelopes)
@@ -69,23 +75,31 @@ class Agent:
     # -- the intent-switching precedence rule -----------------------------
 
     def _continue_or_switch(self, requests: List[Request], turn: _Turn) -> None:
-        """A turn that fills the asked-about slot is a continuation. A turn
-        that fills nothing and names a different intent is a topic change.
-        A turn that does neither gets one re-ask, then a human."""
-        if any(_fills_which_order(r) for r in requests):
-            order = self._order_from_answer(requests)
-            self.pending = None
-            self.clarify_attempts = 0
+        """A turn that answers the asked-about slot is a continuation. A turn
+        that answers nothing and names a different intent is a topic change.
+        A turn that does neither gets bounded re-asks, then a human."""
+        answers = [r for r in requests if _is_answer(r)]
+        others = [r for r in requests if not _is_answer(r)]
+        if answers:
+            order = self._order_from_answer(answers)
             if order is None:
-                self._start_return(turn)
+                # The answer engaged the question but resolved nothing (an
+                # out-of-range number, an unknown id). That is a failed
+                # clarification attempt — counted, so the loop stays bounded.
+                self._reask_or_escalate(turn)
             else:
+                self.pending = None
+                self.clarify_attempts = 0
                 self._finish_return(order, turn)
+            self._process(others, turn)
         elif any(r.intent for r in requests):
             # Abandoning a half-filled procedure beats trapping the customer
             # in it; restating the intent later simply starts it again.
             self.pending = None
             self.clarify_attempts = 0
             self._process(requests, turn)
+            if turn.clarify_candidates is None and not turn.return_handled:
+                self._narrate("return_parked", {}, turn)
         else:
             self._reask_or_escalate(turn)
 
@@ -111,6 +125,12 @@ class Agent:
                 self._handle_return(request, turn)
             elif request.intent == "policy_question":
                 self._answer_policy(request, turn)
+            elif request.intent == "human_handoff":
+                self._emit_escalation(
+                    policy.ESCALATED_CUSTOMER_REQUEST,
+                    self.focus_order_id,
+                    turn,
+                )
 
     # -- reads: order status ----------------------------------------------
 
@@ -177,16 +197,30 @@ class Agent:
             self._finish_return(candidates[0], turn)
 
     def _ask_which_order(self, candidates: List[Order], turn: _Turn) -> None:
+        turn.clarify_candidates = candidates
+
+    def _flush_clarify(self, turn: _Turn) -> None:
+        """Ask the deferred clarifying question — unless a later request in
+        the same turn already completed a return, in which case the vague ask
+        was the same request restated and the question would be stale."""
+        if turn.clarify_candidates is None or turn.return_handled:
+            return
         self.pending = PendingQuestion(
             kind="which_order",
-            option_ids=tuple(o.order_id for o in candidates),
+            option_ids=tuple(o.order_id for o in turn.clarify_candidates),
         )
         self.clarify_attempts = 0
         self._narrate(
-            "clarify_which_order", {"options": _option_facts(candidates)}, turn
+            "clarify_which_order",
+            {"options": _option_facts(turn.clarify_candidates)},
+            turn,
         )
 
     def _finish_return(self, order: Optional[Order], turn: _Turn) -> None:
+        if order is not None:
+            if order.order_id in turn.finished_orders:
+                return  # one decision per order per turn, however often named
+            turn.finished_orders.add(order.order_id)
         turn.return_handled = True
         verdict = policy.decide_return(order, self.customer_id, TODAY)
         if verdict.order_id:
@@ -268,7 +302,7 @@ class Agent:
         self, requests: List[Request]
     ) -> Optional[Order]:
         """Resolve the customer's answer to "which order?". None means the
-        answer did not pick a unique option; the procedure restarts cleanly."""
+        answer resolved no unique order — a failed clarification attempt."""
         for request in requests:
             if request.order_id:
                 return tools.get_order(request.order_id)
@@ -283,9 +317,10 @@ class Agent:
         return None
 
     def _narrate(self, kind: str, facts: dict, turn: _Turn) -> None:
-        turn.replies.append(
-            self.provider.narrate(NarrationEvent(kind=kind, facts=facts))
-        )
+        text = self.provider.narrate(NarrationEvent(kind=kind, facts=facts))
+        # A sentence repeated inside one reply is never a feature.
+        if text not in turn.replies:
+            turn.replies.append(text)
 
 
 # -- module helpers ---------------------------------------------------------
@@ -296,6 +331,16 @@ def _fills_which_order(request: Request) -> bool:
         request.order_id
         or request.title_words
         or request.option_number is not None
+    )
+
+
+def _is_answer(request: Request) -> bool:
+    """A request answers "which order?" only if it picks something AND does
+    not carry its own different ask. Asking about an order is not choosing
+    it — "where's my Dune order?" must never spend a clarification slot."""
+    return _fills_which_order(request) and request.intent in (
+        None,
+        "return_request",
     )
 
 

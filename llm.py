@@ -59,6 +59,10 @@ class NarrationEvent:
     facts: dict = field(default_factory=dict)
 
 
+VALID_INTENTS = frozenset(
+    ["order_status", "return_request", "policy_question", "human_handoff"]
+)
+
 # ---------------------------------------------------------------------------
 # Rules-based stand-in provider.
 # ---------------------------------------------------------------------------
@@ -95,10 +99,24 @@ POLICY_QUESTION_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Catches an explicit ask for a person. Kept narrow: it must not fire on
+# ordinary mentions of people, only on asking to be handed to one.
+HUMAN_HANDOFF_RE = re.compile(
+    r"\b(manager|supervisor|representative|escalate"
+    r"|(?:speak|talk) to (?:a |an )?(?:person|human|someone|somebody|agent))\b",
+    re.IGNORECASE,
+)
+
 # Catches an answer to "which one?": a bare number or an ordinal word.
 OPTION_DIGIT_RE = re.compile(r"^\s*(?:option\s+)?([1-9])\s*[.)]?\s*$")
 ORDINAL_WORDS = {"first": 1, "second": 2, "third": 3}
 ORDINAL_RE = re.compile(r"\b(first|second|third)\b", re.IGNORECASE)
+
+# Cardinal words ("one") count as answers only in replies short enough to BE
+# an answer; inside a longer sentence "one" is usually just a word.
+CARDINAL_WORDS = {"one": 1, "two": 2, "three": 3}
+CARDINAL_RE = re.compile(r"\b(one|two|three)\b", re.IGNORECASE)
+CARDINAL_MAX_WORDS = 3
 
 # Title words shorter than this are too common to identify a book.
 MIN_TITLE_WORD_LEN = 4
@@ -132,7 +150,13 @@ class RulesProvider:
         # requests a return wins even if it also mentions the policy.
         if RETURN_REQUEST_RE.search(segment):
             return "return_request"
-        if STATUS_SIGNAL_RE.search(segment) and STATUS_OBJECT_RE.search(segment):
+        if HUMAN_HANDOFF_RE.search(segment):
+            return "human_handoff"
+        # An explicit order id counts as the object: "where is BK-9999"
+        # is a status question even without the word "order".
+        if STATUS_SIGNAL_RE.search(segment) and (
+            STATUS_OBJECT_RE.search(segment) or ORDER_ID_RE.search(segment)
+        ):
             return "order_status"
         if POLICY_QUESTION_RE.search(segment):
             return "policy_question"
@@ -158,6 +182,10 @@ class RulesProvider:
         ordinal = ORDINAL_RE.search(segment)
         if ordinal:
             return ORDINAL_WORDS[ordinal.group(1).lower()]
+        if len(segment.split()) <= CARDINAL_MAX_WORDS:
+            cardinal = CARDINAL_RE.search(segment)
+            if cardinal:
+                return CARDINAL_WORDS[cardinal.group(1).lower()]
         return None
 
     def narrate(self, event: NarrationEvent) -> str:
@@ -255,13 +283,25 @@ def _escalation(f: dict) -> str:
             "who can review it with you — you'll hear back shortly."
         )
     if f["reason_code"] == "ORDER_NOT_OWNED_BY_CUSTOMER":
+        # Deliberately identical to the not-found wording: the reply must not
+        # reveal whether a guessed order id exists. The escalation itself
+        # travels on the back channel, not in the reply.
+        return _order_not_found(f)
+    if f["reason_code"] == "ESCALATED_CUSTOMER_REQUEST":
         return (
-            "I can't find that order on your account, so I've flagged it "
-            "for a human agent to review with you."
+            "Of course — I've flagged this conversation for a human agent "
+            "to pick up. They'll follow up with you shortly."
         )
     return (
         "I don't want to guess with a refund, so I've handed this to a "
         "human agent who can look at your account with you."
+    )
+
+
+def _return_parked(f: dict) -> str:
+    return (
+        "(I've set the return aside for now — say \"return\" whenever "
+        "you'd like to pick it back up.)"
     )
 
 
@@ -297,6 +337,7 @@ _TEMPLATES = {
     "return_denied": _return_denied,
     "order_not_found": _order_not_found,
     "escalation": _escalation,
+    "return_parked": _return_parked,
     "kb_answer": _kb_answer,
     "kb_miss": _kb_miss,
     "no_returnable_orders": _no_returnable_orders,
@@ -312,7 +353,8 @@ EXTRACTION_SYSTEM_PROMPT = """\
 You extract structured slots from one customer-support turn for an online
 bookstore. Split the turn into requests at conjunctions and sentence breaks.
 For each request report: intent (one of "order_status", "return_request",
-"policy_question", or null), order_id (format BK-0000, or null), title_words
+"policy_question", "human_handoff", or null), order_id (format BK-0000, or
+null), title_words
 (words from the customer's own order titles listed below that the request
 refers to), option_number (if the request answers a numbered choice, else
 null), and text (the request verbatim).
@@ -377,16 +419,37 @@ class AnthropicProvider:
             return [Request(intent=None, text=original_text)]
         requests = []
         for item in items:
-            requests.append(
-                Request(
-                    intent=item.get("intent"),
-                    order_id=item.get("order_id"),
-                    title_words=tuple(item.get("title_words") or ()),
-                    option_number=item.get("option_number"),
-                    text=item.get("text") or "",
-                )
-            )
+            if isinstance(item, dict):
+                requests.append(self._clean_request(item))
         return requests or [Request(intent=None, text=original_text)]
+
+    def _clean_request(self, item: dict) -> Request:
+        """Model output is untrusted: every field is validated to the same
+        shapes the rules provider produces, or dropped."""
+        intent = item.get("intent")
+        order_id = item.get("order_id")
+        option = item.get("option_number")
+        words = item.get("title_words") or ()
+        if isinstance(option, str) and option.isdigit():
+            option = int(option)
+        return Request(
+            intent=intent if intent in VALID_INTENTS else None,
+            order_id=(
+                order_id.upper()
+                if isinstance(order_id, str)
+                and ORDER_ID_RE.fullmatch(order_id.strip())
+                else None
+            ),
+            title_words=tuple(
+                w.lower() for w in words if isinstance(w, str)
+            ),
+            option_number=(
+                option
+                if isinstance(option, int) and not isinstance(option, bool)
+                else None
+            ),
+            text=str(item.get("text") or ""),
+        )
 
 
 def make_provider():

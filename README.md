@@ -117,6 +117,7 @@ Nothing else changes — the decision layer is identical either way.
 | `app.py`           | the CLI shell                                          |
 | `stub_receiver.py` | the orchestration layer's end of the webhook           |
 | `tests.py`         | the eval harness                                       |
+| `demo.txt`         | the four scripted scenarios                            |
 
 ## Assumptions and limits
 
@@ -126,3 +127,20 @@ Nothing else changes — the decision layer is identical either way.
   retrieval returning nothing on a gap is designed behavior, not a bug.
 - Cases the policy engine does not model escalate to a human rather than
   resolve. That is the intended failure mode.
+- The `[envelope …]` lines in the CLI are back-office telemetry, shown for
+  demo visibility. In a deployment they go to the webhook and audit log; the
+  customer sees only the `bookly>` text.
+- Extraction only knows the signed-in customer's own titles — which is why
+  nothing about other customers can leak, and also why a question about an
+  unknown title ("my Snow Crash order") reads as title-less and falls back
+  to the likeliest order. Replies always name the order they describe, so a
+  wrong read is visible and cheap; writes never fall back.
+- The rules-based stand-in has a fixed phrase vocabulary. Turns it cannot
+  classify ("pick up where we left off", keyword-free demands) fall to a
+  safe help reply rather than a guess; the hosted model narrows this gap.
+- Adversarial testing showed injected instructions in free text can *pose*
+  extra requests (each judged by policy like any other request) but cannot
+  change any verdict, amount, or reason code — see
+  `injection_changes_nothing` in `tests.py` and `evidence/`.
+- Repeated escalations in one conversation share one idempotency key, so a
+  downstream consumer posts a single case however often the customer pushes.

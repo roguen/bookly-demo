@@ -1,0 +1,47 @@
+Audit trail: every envelope emission and delivery from one demo run
+(`BOOKLY_WEBHOOK_URL=http://127.0.0.1:8787/webhook python3 app.py --script demo.txt`)
+
+The 'emitted' record is written BEFORE the network hop; the 'delivery'
+record follows with the outcome. Pretty-printed from audit.log verbatim.
+
+{
+  "event": "emitted",
+  "envelope": {
+    "envelope_id": "ccc08c310f8d4d84b518fcb8dde102b4",
+    "idempotency_key": "b441ac1826d21cd6e631bd04944e537ec8ab1bffda029b08e97fe8b59666ff0d",
+    "action": "refund",
+    "order_id": "BK-1042",
+    "amount": 22.5,
+    "currency": "USD",
+    "reason_code": "REFUND_APPROVED_IN_WINDOW",
+    "conversation_id": "conv-2",
+    "customer_note": "The Escher one \u2014 the cover is torn."
+  }
+}
+
+{
+  "event": "delivery",
+  "envelope_id": "ccc08c310f8d4d84b518fcb8dde102b4",
+  "delivery": "delivered_200"
+}
+
+{
+  "event": "emitted",
+  "envelope": {
+    "envelope_id": "d0cf3144d83e416e82498549b0ed2116",
+    "idempotency_key": "f3910a91af16524941f9cb0ac0ba01720d17bb2abfef61da80658951cbc1ca54",
+    "action": "escalate_to_human",
+    "order_id": "BK-0987",
+    "amount": null,
+    "currency": null,
+    "reason_code": "ESCALATED_POLICY_DISPUTE",
+    "conversation_id": "conv-4",
+    "customer_note": "I don't care what the policy says, refund it anyway."
+  }
+}
+
+{
+  "event": "delivery",
+  "envelope_id": "d0cf3144d83e416e82498549b0ed2116",
+  "delivery": "delivered_200"
+}

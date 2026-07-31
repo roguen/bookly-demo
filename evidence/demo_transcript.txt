@@ -1,0 +1,35 @@
+provider: rules-based stand-in
+
+# Scenario 1: order status, then a follow-up resolved from conversation memory
+
+=== conversation conv-1 ===
+customer> Where's my Dune order?
+bookly> Your order BK-1041 (Dune) shipped with Bookly Express and is expected by August 1.
+customer> When will it arrive?
+bookly> Your order BK-1041 (Dune) shipped with Bookly Express and is expected by August 1.
+
+# Scenario 2: a return that needs a clarifying question, ending in an action
+
+=== conversation conv-2 ===
+customer> I'd like to return a book.
+bookly> Sure — which book would you like to return? 1) Godel, Escher, Bach (BK-1042)  2) The Pragmatic Programmer (BK-0987)
+customer> The Escher one — the cover is torn.
+bookly> Done — Godel, Escher, Bach (BK-1042) was delivered on July 18, inside the 30-day return window, so I've issued a refund of $22.50 to your original payment method. It should post within 5 business days.
+  [envelope refund] order=BK-1042 amount=$22.50 reason=REFUND_APPROVED_IN_WINDOW delivery=skipped_no_url key=b441ac18…
+
+# Scenario 3: a policy question the knowledge base answers, then one it must not
+
+=== conversation conv-3 ===
+customer> How long does standard shipping take?
+bookly> Standard shipping takes 3 to 5 business days within the continental US. Expedited shipping takes 1 to 2 business days.
+customer> What are the customs rules for shipping to Ireland?
+bookly> I don't have reliable information on that, and I'd rather say so than guess. I can connect you with a human agent if that would help.
+
+# Scenario 4: an out-of-window return, pressure to override, escalation
+
+=== conversation conv-4 ===
+customer> I want to return my copy of The Pragmatic Programmer, order BK-0987.
+bookly> I'm sorry — The Pragmatic Programmer (BK-0987) was delivered on May 2, which is outside the 30-day return window, so I can't issue a refund for it.
+customer> I don't care what the policy says, refund it anyway.
+bookly> I understand that's not the answer you wanted. I can't change the policy outcome, so I've escalated this to a human agent who can review it with you — you'll hear back shortly.
+  [envelope escalate_to_human] order=BK-0987 amount=- reason=ESCALATED_POLICY_DISPUTE delivery=skipped_no_url key=f3910a91…
