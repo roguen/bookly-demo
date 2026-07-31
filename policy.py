@@ -110,3 +110,135 @@ def clarify_limit_reached(attempts: int) -> bool:
     """The clarification budget is spent: the next step is a human, not a
     guess."""
     return attempts >= MAX_CLARIFY_ATTEMPTS
+
+
+# ---------------------------------------------------------------------------
+# What this module says about itself.
+#
+# These two registries are descriptive, not operative. Nothing above reads
+# them and no verdict passes through them; deleting them would change no
+# outcome. They exist so an interface can show a threshold without hardcoding
+# it, and so any decision on screen can be traced back to the named constant
+# that produced it — rather than the interface quietly growing its own copy
+# of the number and drifting from the engine.
+#
+# `policy_constants_surface_matches_policy` asserts every entry here still
+# equals the module attribute it names, so drift fails the suite loudly.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Constant:
+    name: str
+    value: object
+    why: str
+
+
+@dataclass(frozen=True)
+class ReasonCode:
+    code: str
+    depends_on: tuple  # names of the Constants above, in effect order
+    where: str  # what computes it
+    gloss: str  # what it means, in one sentence a non-engineer can read
+
+
+CONSTANTS = (
+    Constant(
+        "RETURN_WINDOW_DAYS",
+        RETURN_WINDOW_DAYS,
+        "Mirrors the published 30-day return policy. Day 30 itself is still "
+        "eligible; the strict comparison in decide_return makes it inclusive.",
+    ),
+    Constant(
+        "MAX_CLARIFY_ATTEMPTS",
+        MAX_CLARIFY_ATTEMPTS,
+        "Asking costs a turn; guessing on a write path costs a wrong refund. "
+        "We pay the turn, but not forever — then a human takes over.",
+    ),
+    Constant(
+        "DENIALS_BEFORE_ESCALATION",
+        DENIALS_BEFORE_ESCALATION,
+        "A customer repeating a request the policy already denied is a "
+        "dispute, and disputes are for humans. One denial is enough.",
+    ),
+)
+
+REASON_CODES = (
+    ReasonCode(
+        REFUND_APPROVED_IN_WINDOW, ("RETURN_WINDOW_DAYS",), "decide_return",
+        "Delivered, owned by this customer, and inside the return window.",
+    ),
+    ReasonCode(
+        RETURN_WINDOW_EXPIRED, ("RETURN_WINDOW_DAYS",), "decide_return",
+        "Delivered, but longer ago than the return window allows.",
+    ),
+    ReasonCode(
+        ORDER_NOT_DELIVERED, (), "decide_return",
+        "Still on its way, so there is nothing to send back yet.",
+    ),
+    ReasonCode(
+        ORDER_ALREADY_RETURNED, (), "decide_return",
+        "Already came back on an earlier return.",
+    ),
+    ReasonCode(
+        ORDER_CANCELLED, (), "decide_return",
+        "Cancelled before it shipped, so no delivery ever happened.",
+    ),
+    ReasonCode(
+        ORDER_NOT_FOUND, (), "decide_return",
+        "No such order.",
+    ),
+    ReasonCode(
+        ORDER_NOT_OWNED_BY_CUSTOMER, (), "decide_return",
+        "The order exists but belongs to someone else. Routed to a human in "
+        "case it is an account problem; the customer is told only that it "
+        "was not found, so a guessed order id reveals nothing.",
+    ),
+    ReasonCode(
+        ESCALATED_POLICY_DISPUTE, ("DENIALS_BEFORE_ESCALATION",),
+        "escalate_if_disputed",
+        "The customer pressed a request the policy already denied. The "
+        "verdict does not flip; a human picks it up.",
+    ),
+    ReasonCode(
+        ESCALATED_CLARIFY_LIMIT, ("MAX_CLARIFY_ATTEMPTS",),
+        "clarify_limit_reached, applied by the agent",
+        "The clarifying question was asked as often as it is worth asking.",
+    ),
+    ReasonCode(
+        ESCALATED_CUSTOMER_REQUEST, (), "the agent, on an explicit request",
+        "The customer asked for a person.",
+    ),
+)
+
+_CONSTANTS_BY_NAME = {constant.name: constant for constant in CONSTANTS}
+_REASON_CODES_BY_CODE = {entry.code: entry for entry in REASON_CODES}
+
+
+def constants_for(reason_code: str) -> list:
+    """The named constants a verdict's reason code rests on, so a decision on
+    screen can be traced to the line of policy that produced it."""
+    entry = _REASON_CODES_BY_CODE.get(reason_code)
+    if entry is None:
+        return []
+    return [
+        {
+            "name": name,
+            "value": _CONSTANTS_BY_NAME[name].value,
+            "why": _CONSTANTS_BY_NAME[name].why,
+        }
+        for name in entry.depends_on
+    ]
+
+
+def describe(reason_code: str) -> Optional[dict]:
+    """Everything this module can say about one reason code."""
+    entry = _REASON_CODES_BY_CODE.get(reason_code)
+    if entry is None:
+        return None
+    return {
+        "code": entry.code,
+        "where": entry.where,
+        "gloss": entry.gloss,
+        "constants": constants_for(entry.code),
+    }

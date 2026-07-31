@@ -23,6 +23,7 @@ from llm import (
     Provider,
     Request,
 )
+from recorder import NULL_RECORDER, Recorder
 from store import CURRENT_CUSTOMER_ID, TODAY, Order
 
 # What one emitted action looks like to a caller: the envelope, and how
@@ -57,9 +58,14 @@ class Agent:
         provider: Provider,
         conversation_id: str,
         customer_id: str = CURRENT_CUSTOMER_ID,
+        recorder: Recorder = NULL_RECORDER,
     ) -> None:
         self.provider = provider
         self.conversation_id = conversation_id
+        # A bystander that does nothing unless someone is watching. Nothing
+        # below ever asks which recorder this is, which is why handing one in
+        # cannot change an outcome.
+        self.recorder = recorder
         # Customer memory: durable identity; records live in the store.
         self.customer_id = customer_id
         # Conversation memory: survives across turns, dies with the session.
@@ -75,9 +81,22 @@ class Agent:
     def handle_turn(self, text: str) -> TurnResult:
         turn = _Turn(raw_text=text)
         requests = self.provider.extract(text, self._context())
+        # The slots, verbatim. There is no amount field for an injected
+        # instruction to land in, and this note is where that is visible.
+        self.recorder.note(
+            "extract",
+            {"provider": self.provider.name, "requests": list(requests)},
+        )
         if self.pending is not None:
             self._continue_or_switch(requests, turn)
         else:
+            self.recorder.note(
+                "route",
+                {
+                    "branch": "no_pending_question",
+                    "intents": [r.intent for r in requests],
+                },
+            )
             self._process(requests, turn)
         self._ask_deferred_question(turn)
         if not turn.replies:
@@ -91,13 +110,30 @@ class Agent:
         that answers nothing and names a different intent is a topic change.
         A turn that does neither gets bounded re-asks, then a human."""
         answers = [r for r in requests if _is_answer(r)]
+        asked_about = list(self.pending.option_ids)
         if answers:
             others = [r for r in requests if not _is_answer(r)]
+            self._note_route("continuation", asked_about, answers)
             self._continue_procedure(answers, others, turn)
         elif any(r.intent for r in requests):
+            self._note_route("topic_change", asked_about, requests)
             self._switch_topic(requests, turn)
         else:
+            self._note_route("reask", asked_about, requests)
             self._reask_or_escalate(turn)
+
+    def _note_route(
+        self, branch: str, asked_about: List[str], requests: List[Request]
+    ) -> None:
+        self.recorder.note(
+            "route",
+            {
+                "branch": branch,
+                "pending_question": self.pending.kind if self.pending else None,
+                "asked_about": asked_about,
+                "intents": [r.intent for r in requests],
+            },
+        )
 
     def _continue_procedure(
         self, answers: List[Request], others: List[Request], turn: _Turn
@@ -131,7 +167,17 @@ class Agent:
 
     def _reask_or_escalate(self, turn: _Turn) -> None:
         self.clarify_attempts += 1
-        if policy.clarify_limit_reached(self.clarify_attempts):
+        spent = policy.clarify_limit_reached(self.clarify_attempts)
+        self.recorder.note(
+            "clarify",
+            {
+                "step": "limit_reached" if spent else "reask",
+                "attempts": self.clarify_attempts,
+                "limit": policy.MAX_CLARIFY_ATTEMPTS,
+                "constant": "MAX_CLARIFY_ATTEMPTS",
+            },
+        )
+        if spent:
             self._emit_escalation(policy.ESCALATED_CLARIFY_LIMIT, None, turn)
             self.pending = None
             self.clarify_attempts = 0
@@ -171,19 +217,45 @@ class Agent:
     def _resolve_read_target(self, request: Request) -> Optional[Order]:
         """Reads are cheap and self-describing (the reply names the order),
         so a wrong guess costs little: prefer an explicit reference, then
-        the order under discussion, then the one still in transit."""
+        the order under discussion, then the one still in transit.
+
+        Each way out records which rule got there, because "it used the order
+        already under discussion" and "it fell back to the most recent one"
+        look identical in the reply and are very different facts.
+        """
         if request.order_id:
             order = tools.get_order(request.order_id)
-            return order if policy.can_view(order, self.customer_id) else None
+            visible = policy.can_view(order, self.customer_id)
+            return self._note_read(
+                order if visible else None, "explicit_reference"
+            )
         by_title = self._orders_by_title_words(request.title_words)
         if len(by_title) == 1:
-            return by_title[0]
+            return self._note_read(by_title[0], "unique_title_match")
         if self.focus_order_id:
-            return tools.get_order(self.focus_order_id)
+            return self._note_read(
+                tools.get_order(self.focus_order_id), "order_under_discussion"
+            )
         in_transit = tools.in_transit_orders(self.customer_id)
         if len(in_transit) == 1:
-            return in_transit[0]
-        return _most_recent(tools.orders_for_customer(self.customer_id))
+            return self._note_read(in_transit[0], "only_one_in_transit")
+        return self._note_read(
+            _most_recent(tools.orders_for_customer(self.customer_id)),
+            "most_recently_ordered",
+        )
+
+    def _note_read(self, order: Optional[Order], rule: str) -> Optional[Order]:
+        self.recorder.note(
+            "lookup",
+            {
+                "kind": "order_read",
+                "rule": rule,
+                "order_id": order.order_id if order else None,
+                "title": order.title if order else None,
+                "status": order.status if order else None,
+            },
+        )
+        return order
 
     # -- writes: the return procedure --------------------------------------
 
@@ -193,9 +265,32 @@ class Agent:
         if turn.return_handled and not _fills_which_order(request):
             return
         if request.order_id:
-            self._finish_return(tools.get_order(request.order_id), turn)
+            order = tools.get_order(request.order_id)
+            self.recorder.note(
+                "lookup",
+                {
+                    "kind": "return_target",
+                    "rule": "explicit_reference",
+                    "asked_for": request.order_id,
+                    "order_id": order.order_id if order else None,
+                    "title": order.title if order else None,
+                },
+            )
+            self._finish_return(order, turn)
             return
         by_title = self._orders_by_title_words(request.title_words)
+        if request.title_words:
+            self.recorder.note(
+                "lookup",
+                {
+                    "kind": "return_target",
+                    "rule": "title_match",
+                    "title_words": list(request.title_words),
+                    "matched_ids": [o.order_id for o in by_title],
+                    "note": "a write never falls back: no match asks, and "
+                            "more than one asks",
+                },
+            )
         if len(by_title) == 1:
             self._finish_return(by_title[0], turn)
         elif len(by_title) > 1:
@@ -211,9 +306,21 @@ class Agent:
             self._finish_return(tools.get_order(self.focus_order_id), turn)
             return
         candidates = tools.delivered_orders(self.customer_id)
+        needs_choice = policy.should_clarify(len(candidates))
+        self.recorder.note(
+            "candidates",
+            {
+                "source": "delivered_orders",
+                "candidate_ids": [o.order_id for o in candidates],
+                "count": len(candidates),
+                "should_clarify": needs_choice,
+                "rule": "ask only when more than one order could take the "
+                        "write",
+            },
+        )
         if not candidates:
             self._narrate("no_returnable_orders", {}, turn)
-        elif policy.should_clarify(len(candidates)):
+        elif needs_choice:
             self._defer_which_order(candidates, turn)
         else:
             self._finish_return(candidates[0], turn)
@@ -224,6 +331,14 @@ class Agent:
         """Record that the turn needs a clarifying question. Asking waits
         until the whole turn is read, because a later request may answer it."""
         turn.clarify_candidates = candidates
+        self.recorder.note(
+            "clarify",
+            {
+                "step": "deferred",
+                "option_ids": [o.order_id for o in candidates],
+                "why": "a later request in the same turn may answer it",
+            },
+        )
 
     def _ask_deferred_question(self, turn: _Turn) -> None:
         """Ask the deferred clarifying question — unless a later request in
@@ -236,6 +351,19 @@ class Agent:
             option_ids=tuple(o.order_id for o in turn.clarify_candidates),
         )
         self.clarify_attempts = 0
+        # Deciding to ask is this note. Phrasing the question is the narrate
+        # note that follows — the two sit on opposite sides of the boundary
+        # and must never render as one row.
+        self.recorder.note(
+            "clarify",
+            {
+                "step": "asked",
+                "question": self.pending.kind,
+                "option_ids": list(self.pending.option_ids),
+                "attempts": self.clarify_attempts,
+                "limit": policy.MAX_CLARIFY_ATTEMPTS,
+            },
+        )
         self._narrate(
             "clarify_which_order",
             {"options": _option_facts(turn.clarify_candidates)},
@@ -249,10 +377,25 @@ class Agent:
             turn.finished_orders.add(order.order_id)
         turn.return_handled = True
         verdict = policy.decide_return(order, self.customer_id, TODAY)
+        prior_denials = (
+            self.denials.get(verdict.order_id, 0) if verdict.order_id else 0
+        )
         if verdict.order_id:
-            verdict = policy.escalate_if_disputed(
-                verdict, self.denials.get(verdict.order_id, 0)
-            )
+            verdict = policy.escalate_if_disputed(verdict, prior_denials)
+        # The whole answer, and the named constants it rests on, so anything
+        # on screen can be walked back to the line of policy that produced it.
+        self.recorder.note(
+            "verdict",
+            {
+                "decision": verdict.decision,
+                "reason_code": verdict.reason_code,
+                "order_id": verdict.order_id,
+                "refund_amount": verdict.refund_amount,
+                "prior_denials": prior_denials,
+                "today": TODAY,
+                "constants": policy.constants_for(verdict.reason_code),
+            },
+        )
         if verdict.decision == "approve_refund":
             self._emit_refund(verdict, order, turn)
         elif verdict.decision == "deny":
@@ -277,6 +420,7 @@ class Agent:
             customer_note=turn.raw_text,
         )
         turn.envelopes.append(emitted)
+        self._note_envelope(emitted)
         self.focus_order_id = order.order_id
         facts = _order_facts(order)
         facts["amount"] = verdict.refund_amount
@@ -294,12 +438,35 @@ class Agent:
             customer_note=turn.raw_text,
         )
         turn.envelopes.append(emitted)
+        self._note_envelope(emitted)
         self._narrate("escalation", {"reason_code": reason_code}, turn)
+
+    def _note_envelope(self, emitted: Emission) -> None:
+        """The action record and how delivery went. The audit line was
+        already written before the hop, so a failed delivery here has still
+        lost nothing but the delivery."""
+        envelope_record, delivery = emitted
+        self.recorder.note(
+            "envelope",
+            {"envelope": envelope_record, "delivery": delivery},
+        )
 
     # -- reads: policy questions -------------------------------------------
 
     def _answer_policy(self, request: Request, turn: _Turn) -> None:
         article = tools.search_policy(request.text)
+        self.recorder.note(
+            "lookup",
+            {
+                "kind": "policy_article",
+                "query": request.text,
+                "article_id": article.article_id if article else None,
+                "title": article.title if article else None,
+                "floor": tools.MIN_KEYWORD_MATCHES,
+                "rule": "below the keyword floor, or a tie for best, returns "
+                        "nothing rather than the nearest article",
+            },
+        )
         if article is None:
             self._narrate("kb_miss", {}, turn)
         else:
@@ -348,7 +515,18 @@ class Agent:
     def _narrate(self, kind: str, facts: dict, turn: _Turn) -> None:
         text = self.provider.narrate(NarrationEvent(kind=kind, facts=facts))
         # A sentence repeated inside one reply is never a feature.
-        if text not in turn.replies:
+        duplicate = text in turn.replies
+        self.recorder.note(
+            "narrate",
+            {
+                "provider": self.provider.name,
+                "event": kind,
+                "facts": facts,
+                "text": text,
+                "suppressed_duplicate": duplicate,
+            },
+        )
+        if not duplicate:
             turn.replies.append(text)
 
 

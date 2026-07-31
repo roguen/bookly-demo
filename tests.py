@@ -10,6 +10,7 @@ harness lives.
 from __future__ import annotations
 
 import os
+import re
 import sys
 import traceback
 import types
@@ -17,9 +18,11 @@ from datetime import date
 
 import covers
 import policy
+import recorder
 import tools
 from agent import Agent
 from envelope import idempotency_key
+from recorder import ListRecorder, NullRecorder
 from llm import (
     PROVIDERS,
     AnthropicProvider,
@@ -347,6 +350,102 @@ def option_answer_plus_second_request_handles_both():
     emitted = _envelopes(result)
     assert len(emitted) == 1 and emitted[0]["order_id"] == "BK-1042"
     assert "outside" in result.reply  # BK-0987's out-of-window denial
+
+
+@check
+def null_recorder_leaves_cli_output_identical():
+    """The recorder is inert by default. An agent handed nothing and an agent
+    handed a ListRecorder must produce the same reply and the same envelope,
+    field for field — otherwise the trace is not observing the turn, it is
+    participating in it."""
+    script = [
+        "I'd like to return a book.",
+        "The Escher one — the cover is torn.",
+        "I want to return my copy of The Pragmatic Programmer, order BK-0987.",
+        "I don't care what the policy says, refund it anyway.",
+    ]
+    silent = Agent(RulesProvider(), "conv-recorder")
+    watched = Agent(RulesProvider(), "conv-recorder", recorder=ListRecorder())
+    assert isinstance(silent.recorder, NullRecorder)
+    for line in script:
+        quiet, loud = silent.handle_turn(line), watched.handle_turn(line)
+        assert quiet.reply == loud.reply, line
+        assert len(quiet.envelopes) == len(loud.envelopes), line
+        for (a, delivery_a), (b, delivery_b) in zip(
+            quiet.envelopes, loud.envelopes
+        ):
+            assert delivery_a == delivery_b
+            for field in (
+                "action", "order_id", "amount", "reason_code",
+                "idempotency_key", "conversation_id", "customer_note",
+            ):
+                assert a[field] == b[field], (line, field)
+    # And the watched run actually recorded the whole conversation, or the
+    # comparison above proves only that two silent agents agree.
+    notes = watched.recorder.notes
+    assert len([n for n in notes if n.stage == "extract"]) == len(script)
+    assert len([n for n in notes if n.stage == "envelope"]) == 2
+    assert len([n for n in notes if n.stage == "verdict"]) == 3
+
+
+@check
+def every_recorded_note_declares_its_side():
+    """Which side of the boundary produced a note is the whole colour scheme,
+    so every stage the agent emits must be declared — a typo'd stage name is
+    a design hole, not a formatting one."""
+    source = open("agent.py", "r", encoding="utf-8").read()
+    emitted = set(re.findall(r"self\.recorder\.note\(\s*\"([a-z_]+)\"", source))
+    assert emitted, "no note call sites found — did the recorder get removed?"
+    assert emitted <= recorder.STAGES, emitted - recorder.STAGES
+    for stage in emitted:
+        assert recorder.side_of(stage) in (
+            recorder.MODEL, recorder.DETERMINISTIC
+        ), stage
+    # The two model-side stages are the model's two jobs, and nothing else on
+    # this list may quietly join them.
+    model_stages = {s for s in emitted if recorder.side_of(s) == recorder.MODEL}
+    assert model_stages == {"extract", "narrate"}, model_stages
+    # A real turn produces both sides, in that order.
+    watched = ListRecorder()
+    Agent(RulesProvider(), "conv-sides", recorder=watched).handle_turn(
+        "I want to return the Escher book"
+    )
+    sides = [n.side for n in watched.notes]
+    assert sides[0] == recorder.MODEL and sides[-1] == recorder.MODEL
+    assert recorder.DETERMINISTIC in sides
+    assert recorder.UNKNOWN_SIDE not in sides
+
+
+@check
+def a_verdict_traces_back_to_its_named_constant():
+    """Any decision on screen can be walked back to the line of policy that
+    produced it, without the interface holding its own copy of the number."""
+    watched = ListRecorder()
+    Agent(RulesProvider(), "conv-trace", recorder=watched).handle_turn(
+        "I want to return my copy of The Pragmatic Programmer, order BK-0987."
+    )
+    verdicts = [n for n in watched.notes if n.stage == "verdict"]
+    assert len(verdicts) == 1
+    payload = verdicts[0].payload
+    assert payload["reason_code"] == policy.RETURN_WINDOW_EXPIRED
+    named = payload["constants"]
+    assert [c["name"] for c in named] == ["RETURN_WINDOW_DAYS"]
+    assert named[0]["value"] == policy.RETURN_WINDOW_DAYS
+    assert named[0]["why"]
+    # Every reason code the module defines is described, and every constant a
+    # code names is a real module attribute at its real value.
+    codes = {
+        value for name, value in vars(policy).items()
+        if name.isupper() and isinstance(value, str) and name == value
+    }
+    assert codes == {entry.code for entry in policy.REASON_CODES}, codes
+    for constant in policy.CONSTANTS:
+        assert getattr(policy, constant.name) == constant.value, constant.name
+        assert constant.why
+    for entry in policy.REASON_CODES:
+        assert entry.gloss and entry.where
+        for name in entry.depends_on:
+            assert any(c.name == name for c in policy.CONSTANTS), name
 
 
 @check
