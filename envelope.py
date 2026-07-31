@@ -37,11 +37,13 @@ def emit(
     amount: Optional[float] = None,
     customer_note: Optional[str] = None,
 ) -> Tuple[dict, str]:
-    """Build, audit, then attempt to deliver one envelope.
+    """Build, audit, then attempt delivery — audited first, so the decision
+    survives a failed hop.
 
     The customer_note is carried verbatim as inert metadata for the human
     reading the audit trail. Nothing parses it; the amount and reason code
-    arrive already decided by policy.
+    arrive already decided by policy. Returns the envelope and its delivery
+    status, which is recorded for the audit line and never branched on.
     """
     envelope = {
         "envelope_id": uuid.uuid4().hex,

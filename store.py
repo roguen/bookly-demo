@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from typing import Optional
+from typing import FrozenSet, Optional
 
 # The demo clock. Policy functions take `today` as a parameter so they stay
 # pure; this constant is the single place the demo's "now" is defined.
@@ -37,7 +37,7 @@ class Article:
     article_id: str
     title: str
     summary: str
-    keywords: frozenset
+    keywords: FrozenSet[str]
 
 
 ORDERS = {

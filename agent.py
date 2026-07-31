@@ -5,25 +5,35 @@ ask policy for verdicts, emit envelopes, and hand structured events to the
 provider for narration. It computes no verdict itself. Memory is three tiers
 with three lifetimes: turn slots (this function call), conversation state
 (this object), and customer records (the store). Collapsing them breaks the
-second request of a conversation — yesterday's slot must not leak into
-today's decision.
+second request of a conversation — an earlier turn's slot must not survive
+into this turn's decision.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 import envelope
 import policy
 import tools
-from llm import ExtractionContext, NarrationEvent, PendingQuestion, Request
+from llm import (
+    ExtractionContext,
+    NarrationEvent,
+    PendingQuestion,
+    Provider,
+    Request,
+)
 from store import CURRENT_CUSTOMER_ID, TODAY, Order
+
+# What one emitted action looks like to a caller: the envelope, and how
+# delivery went.
+Emission = Tuple[dict, str]
 
 
 @dataclass
 class TurnResult:
     reply: str
-    envelopes: List[tuple]  # (envelope dict, delivery status) pairs
+    envelopes: List[Emission]
 
 
 @dataclass
@@ -32,10 +42,10 @@ class _Turn:
 
     raw_text: str
     replies: List[str] = field(default_factory=list)
-    envelopes: List[tuple] = field(default_factory=list)
+    envelopes: List[Emission] = field(default_factory=list)
     return_handled: bool = False
     # Orders already decided this turn: one decision per order per turn.
-    finished_orders: set = field(default_factory=set)
+    finished_orders: Set[str] = field(default_factory=set)
     # A clarifying question is a turn-level outcome, not a per-request one:
     # it is asked at most once, and only if no return completed this turn.
     clarify_candidates: Optional[List[Order]] = None
@@ -44,7 +54,7 @@ class _Turn:
 class Agent:
     def __init__(
         self,
-        provider,
+        provider: Provider,
         conversation_id: str,
         customer_id: str = CURRENT_CUSTOMER_ID,
     ) -> None:
@@ -56,7 +66,9 @@ class Agent:
         self.pending: Optional[PendingQuestion] = None
         self.clarify_attempts = 0
         self.focus_order_id: Optional[str] = None
-        self.denials: dict = {}  # order_id -> times a return was denied
+        # How many times each order's return has already been denied. A
+        # repeat is a dispute, which policy escalates.
+        self.denials: Dict[str, int] = {}
 
     # -- the single entry point -------------------------------------------
 
@@ -67,7 +79,7 @@ class Agent:
             self._continue_or_switch(requests, turn)
         else:
             self._process(requests, turn)
-        self._flush_clarify(turn)
+        self._ask_deferred_question(turn)
         if not turn.replies:
             self._narrate("help", {}, turn)
         return TurnResult(" ".join(turn.replies), turn.envelopes)
@@ -79,33 +91,43 @@ class Agent:
         that answers nothing and names a different intent is a topic change.
         A turn that does neither gets bounded re-asks, then a human."""
         answers = [r for r in requests if _is_answer(r)]
-        others = [r for r in requests if not _is_answer(r)]
         if answers:
-            order, used = self._order_from_answer(answers)
-            if order is None:
-                # The answer engaged the question but resolved nothing (an
-                # out-of-range number, an unknown id). That is a failed
-                # clarification attempt — counted, so the loop stays bounded.
-                self._reask_or_escalate(turn)
-                remaining = others
-            else:
-                self.pending = None
-                self.clarify_attempts = 0
-                self._finish_return(order, turn)
-                # One request answered the question; the rest of the turn
-                # still deserves handling ("1 and also return BK-0987").
-                remaining = [r for r in answers if r is not used] + others
-            self._process(remaining, turn)
+            others = [r for r in requests if not _is_answer(r)]
+            self._continue_procedure(answers, others, turn)
         elif any(r.intent for r in requests):
-            # Abandoning a half-filled procedure beats trapping the customer
-            # in it; restating the intent later simply starts it again.
-            self.pending = None
-            self.clarify_attempts = 0
-            self._process(requests, turn)
-            if turn.clarify_candidates is None and not turn.return_handled:
-                self._narrate("return_parked", {}, turn)
+            self._switch_topic(requests, turn)
         else:
             self._reask_or_escalate(turn)
+
+    def _continue_procedure(
+        self, answers: List[Request], others: List[Request], turn: _Turn
+    ) -> None:
+        order, used = self._order_from_answer(answers)
+        if order is None:
+            # The answer engaged the question but resolved nothing (an
+            # out-of-range number, an unknown id). That is a failed
+            # clarification attempt — counted, so the loop stays bounded.
+            self._reask_or_escalate(turn)
+            self._process(others, turn)
+            return
+        self.pending = None
+        self.clarify_attempts = 0
+        self._finish_return(order, turn)
+        # One request answered the question; the rest of the turn still
+        # deserves handling ("1 and also return BK-0987").
+        leftover = [r for r in answers if r is not used]
+        self._process(leftover + others, turn)
+
+    def _switch_topic(self, requests: List[Request], turn: _Turn) -> None:
+        # Abandoning a half-filled procedure beats trapping the customer in
+        # it; restating the intent later simply starts it again.
+        self.pending = None
+        self.clarify_attempts = 0
+        self._process(requests, turn)
+        # Say so, unless this turn already started or finished a return —
+        # then there is nothing set aside to mention.
+        if turn.clarify_candidates is None and not turn.return_handled:
+            self._narrate("return_parked", {}, turn)
 
     def _reask_or_escalate(self, turn: _Turn) -> None:
         self.clarify_attempts += 1
@@ -181,7 +203,7 @@ class Agent:
         if len(by_title) == 1:
             self._finish_return(by_title[0], turn)
         elif len(by_title) > 1:
-            self._ask_which_order(by_title, turn)
+            self._defer_which_order(by_title, turn)
         else:
             self._start_return(turn)
 
@@ -196,14 +218,18 @@ class Agent:
         if not candidates:
             self._narrate("no_returnable_orders", {}, turn)
         elif policy.should_clarify(len(candidates)):
-            self._ask_which_order(candidates, turn)
+            self._defer_which_order(candidates, turn)
         else:
             self._finish_return(candidates[0], turn)
 
-    def _ask_which_order(self, candidates: List[Order], turn: _Turn) -> None:
+    def _defer_which_order(
+        self, candidates: List[Order], turn: _Turn
+    ) -> None:
+        """Record that the turn needs a clarifying question. Asking waits
+        until the whole turn is read, because a later request may answer it."""
         turn.clarify_candidates = candidates
 
-    def _flush_clarify(self, turn: _Turn) -> None:
+    def _ask_deferred_question(self, turn: _Turn) -> None:
         """Ask the deferred clarifying question — unless a later request in
         the same turn already completed a return, in which case the vague ask
         was the same request restated and the question would be stale."""
@@ -234,7 +260,8 @@ class Agent:
         if verdict.decision == "approve_refund":
             self._emit_refund(verdict, order, turn)
         elif verdict.decision == "deny":
-            self.denials[order.order_id] = self.denials.get(order.order_id, 0) + 1
+            already = self.denials.get(order.order_id, 0)
+            self.denials[order.order_id] = already + 1
             self.focus_order_id = order.order_id
             self._narrate("return_denied", _denial_facts(verdict, order), turn)
         elif verdict.decision == "escalate":
@@ -371,9 +398,7 @@ def _denial_facts(verdict: policy.Verdict, order: Order) -> dict:
 
 
 def _option_facts(orders: List[Order]) -> List[dict]:
-    return [
-        {"order_id": o.order_id, "title": o.title} for o in orders if o
-    ]
+    return [{"order_id": o.order_id, "title": o.title} for o in orders if o]
 
 
 def _most_recent(orders: List[Order]) -> Optional[Order]:

@@ -7,9 +7,10 @@ from __future__ import annotations
 
 import argparse
 import sys
+from typing import Optional
 
 from agent import Agent, TurnResult
-from llm import make_provider
+from llm import Provider, make_provider
 
 KEY_PREVIEW_CHARS = 8  # enough of the idempotency key to eyeball, no more
 
@@ -30,12 +31,13 @@ def print_turn_output(result: TurnResult) -> None:
         )
 
 
-def _fmt_amount(amount) -> str:
+def _fmt_amount(amount: Optional[float]) -> str:
     return "-" if amount is None else "$%.2f" % amount
 
 
-def run_script(path: str, provider) -> None:
-    """Replay a demo script. `---` starts a new conversation; `#` comments."""
+def run_script(path: str, provider: Provider) -> None:
+    """Replay a demo script: `---` starts a new conversation, `#` lines are
+    echoed as scene headings, and blank lines are skipped."""
     conversation_number = 0
     agent = None
     with open(path, "r", encoding="utf-8") as script:
@@ -57,7 +59,7 @@ def run_script(path: str, provider) -> None:
             print_turn_output(agent.handle_turn(line))
 
 
-def run_repl(provider) -> None:
+def run_repl(provider: Provider) -> None:
     print("Bookly support agent. Type 'exit' to quit.")
     agent = Agent(provider, "conv-live")
     while True:

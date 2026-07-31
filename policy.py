@@ -9,11 +9,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from typing import Optional
+from typing import Literal, Optional
 
 from store import Order
 
+Decision = Literal["approve_refund", "deny", "escalate", "not_found"]
+
 # Thresholds live here, together, because they are policy — not code detail.
+
+# Mirrors Bookly's published 30-day return policy. Day 30 itself is still
+# eligible; the strict comparison in decide_return makes the bound inclusive.
 RETURN_WINDOW_DAYS = 30
 
 # Asking a clarifying question costs one turn. Guessing on a write path costs
@@ -45,7 +50,7 @@ class Verdict:
     No extracted slot has a path into this dataclass.
     """
 
-    decision: str  # "approve_refund", "deny", "escalate", or "not_found"
+    decision: Decision
     reason_code: str
     order_id: Optional[str] = None
     refund_amount: Optional[float] = None
@@ -86,9 +91,12 @@ def can_view(order: Optional[Order], customer_id: str) -> bool:
 
 
 def should_clarify(candidate_count: int) -> bool:
-    """Ask only when there is a real choice. One candidate means proceed."""
+    """Ask only when there is a real choice. One candidate proceeds; zero is
+    the nothing-to-return path, which the caller handles."""
     return candidate_count > 1
 
 
 def clarify_limit_reached(attempts: int) -> bool:
+    """The clarification budget is spent: the next step is a human, not a
+    guess."""
     return attempts >= MAX_CLARIFY_ATTEMPTS

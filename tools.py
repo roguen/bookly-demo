@@ -7,7 +7,7 @@ that does not clearly match an article returns None, never the nearest one.
 from __future__ import annotations
 
 import re
-from typing import List, Optional
+from typing import List, Optional, Set
 
 from store import ARTICLES, ORDERS, Article, Order
 
@@ -56,6 +56,8 @@ def search_policy(query: str) -> Optional[Article]:
     for article in ARTICLES:
         score = len(tokens & article.keywords)
         scored.append((score, article))
+    # Sort on the score alone: Articles are not orderable, and a tie is
+    # rejected below rather than broken arbitrarily.
     scored.sort(key=lambda pair: pair[0], reverse=True)
     best_score, best_article = scored[0]
     if best_score < MIN_KEYWORD_MATCHES:
@@ -65,6 +67,6 @@ def search_policy(query: str) -> Optional[Article]:
     return best_article
 
 
-def _tokenize(text: str) -> set:
+def _tokenize(text: str) -> Set[str]:
     """Lowercase whole words. Word boundaries come free with findall."""
     return set(re.findall(r"[a-z]+", text.lower()))

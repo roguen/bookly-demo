@@ -1,7 +1,7 @@
 """The language model boundary. The model has exactly two jobs.
 
 Extraction: one customer turn in, structured slots out.
-Narration: one structured decision in, English out.
+Narration: one structured event in — a decision or a fact — English out.
 
 Nothing else crosses this boundary. No verdict, amount, or reason code is
 ever produced here — those come from policy.py, which this module never
@@ -16,7 +16,7 @@ import json
 import os
 import re
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import List, Optional, Protocol, Tuple
 
 # ---------------------------------------------------------------------------
 # The data that crosses the boundary.
@@ -63,13 +63,30 @@ VALID_INTENTS = frozenset(
     ["order_status", "return_request", "policy_question", "human_handoff"]
 )
 
+
+class Provider(Protocol):
+    """The whole contract between the agent and a language model: a name for
+    the transcript, and the two jobs. Both providers below satisfy it, which
+    is why swapping them touches no other file."""
+
+    name: str
+
+    def extract(self, text: str, context: ExtractionContext) -> List[Request]:
+        ...
+
+    def narrate(self, event: NarrationEvent) -> str:
+        ...
+
 # ---------------------------------------------------------------------------
 # Rules-based stand-in provider.
 # ---------------------------------------------------------------------------
 
 # A turn splits into requests at conjunctions and sentence breaks, so each
 # request carries its own slots ("where's my Dune order AND I want to
-# return the Escher book" becomes two requests).
+# return the Escher book" becomes two requests). Deliberately does not split
+# on "?" or ",": both appear mid-request often enough that splitting there
+# fragments one ask into several. The cost is that two questions joined by a
+# question mark arrive as one request — a stand-in limit, not a design one.
 SEGMENT_SPLIT_RE = re.compile(r"\s+\band\b\s+|;\s*|\.\s+")
 
 # Catches order ids and nothing else. The format is fixed by the store.
@@ -82,8 +99,9 @@ RETURN_REQUEST_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Order status needs both a question word and an object, so "how long does
-# shipping take" (no object) stays a policy question.
+# Order status needs a question word AND something being asked about, so
+# "how long does shipping take" — a signal with no object — stays a policy
+# question rather than becoming a lookup of some arbitrary order.
 STATUS_SIGNAL_RE = re.compile(
     r"\b(where|status|track|tracking|when|arrive|arriving|arrived|eta)\b",
     re.IGNORECASE,
@@ -107,8 +125,12 @@ HUMAN_HANDOFF_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Catches an answer to "which one?": a bare number or an ordinal word.
+# Catches a digit that is the entire reply — anchored at both ends, because
+# a stray "2" inside a sentence is a quantity, not a choice.
 OPTION_DIGIT_RE = re.compile(r"^\s*(?:option\s+)?([1-9])\s*[.)]?\s*$")
+
+# Ordinals are unambiguous enough to catch anywhere in a reply ("the first
+# one, please"), unlike bare digits. Deferrals are screened out first.
 ORDINAL_WORDS = {"first": 1, "second": 2, "third": 3}
 ORDINAL_RE = re.compile(r"\b(first|second|third)\b", re.IGNORECASE)
 
@@ -466,7 +488,7 @@ class AnthropicProvider:
         )
 
 
-def make_provider():
+def make_provider() -> Provider:
     """The hosted model is opt-in; the stand-in is the default path."""
     if os.environ.get("ANTHROPIC_API_KEY"):
         return AnthropicProvider()

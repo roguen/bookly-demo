@@ -1,8 +1,11 @@
 """The eval harness. Standard library only; run with `python3 tests.py`.
 
-Each check is one assertion about a behavior the architecture claims.
-Policy checks call the decision layer directly — no model anywhere in the
-loop — because that is the point: the decisions are testable without one.
+Each check names one behavior the architecture claims, and asserts whatever
+it takes to pin that behavior down. Policy checks call the decision layer
+directly — no model anywhere in the loop — because that is the point: the
+decisions are testable without one. The conversation checks below run whole
+turns through the agent, which is where the seed of a golden-transcript
+harness lives.
 """
 from __future__ import annotations
 
