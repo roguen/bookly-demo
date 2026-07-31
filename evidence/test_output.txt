@@ -17,6 +17,10 @@ ok    asking_for_a_human_escalates
 ok    deferral_words_are_never_a_choice
 ok    title_status_question_is_not_a_clarify_answer
 ok    option_answer_plus_second_request_handles_both
+ok    every_provider_satisfies_the_same_contract
+ok    hostile_model_output_cannot_reach_a_decision
+ok    openai_provider_adapts_to_the_renamed_token_parameter
+ok    provider_selection_is_explicit_and_bounded
 ok    golden_transcript_return_flow
 
-20 passed, 0 failed
+24 passed, 0 failed

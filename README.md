@@ -97,16 +97,24 @@ By default the two model jobs run on a rules-based stand-in so the demo is
 dependency-free and deterministic. Because both jobs are narrow and
 structured, the stand-in is serviceable.
 
-**Everything in `evidence/` was produced by the stand-in.** The Anthropic
-provider is implemented but has not been exercised — treat it as untested
-code. Note also that API access is billed separately from a claude.ai
-subscription, so a Pro or Max plan alone will not authorize these calls.
+**The provider does not change the decision, and that is measured rather
+than asserted.** `evidence/provider_parity.txt` is the same four-scenario
+script run twice — once on the stand-in, once on `gpt-5.4-mini` through the
+OpenAI API. All eight replies came back worded differently; every decision
+field matched, including the idempotency key (a hash of conversation,
+action, and order). The amount is `$22.50` in both because `policy.py`
+reads it from the order record; neither model was asked for it, and the
+extraction schema has no amount field to put one in.
 
-What does *not* depend on the provider: the extraction schema has no amount
-field, and `policy.py` re-derives every verdict, reason code, and amount
-from the order record, so no model — regex or hosted — can alter a decision.
-What a hosted model would change is slot-extraction quality on messier
-phrasing. Verifying that is the first job of the eval harness.
+The Anthropic provider is implemented but has **not** been exercised — API
+access is billed separately from a claude.ai subscription, so a Pro or Max
+plan alone will not authorize those calls.
+
+One honest limit: the parity run proves the *decisions* are
+provider-independent, not the *prose*. On the knowledge-base miss the
+hosted model dropped the offer of a human agent that the template makes
+every time. No decision moved, but that is the kind of drift a graded
+narration rubric would catch, and this repo does not have one yet.
 
 To use a hosted model instead:
 

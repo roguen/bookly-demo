@@ -137,7 +137,7 @@ TALKING POINTS
 
 - policy.py does not import an LLM. That's a structural property you can grep for, not a promise.
 - The whole thing runs with no API key and no dependencies — there's a rules-based stand-in for both model jobs.
-- For a given order, the verdict, the reason code and the amount are identical either way. What a better model buys is better slot extraction, not different policy.
+- Verified, not assumed: same script through the regex stand-in and through gpt-5.4-mini, all eight replies worded differently, every decision field identical down to the idempotency key.
 - Twenty checks, all dependency-free, and the decision tests never touch a model at all.
 
 IF ASKED
@@ -297,7 +297,9 @@ IF ASKED
 
 - Why not let the model call tools directly?: Then the model chooses when it has enough information, and that judgment is exactly what I don't want it making on a write path.
 - How much would swapping in a real LLM change?: For a given order, nothing — same verdict, same reason code, same amount. What changes is how well it reads the customer's sentence. There's a Provider protocol, and both providers satisfy it.
-- Have you actually run it against a hosted model?: No — everything you've seen is the rules-based stand-in, and I'd rather say that than imply otherwise. The Anthropic provider is implemented but not exercised. The reason I'm still confident about the verdict is structural, not empirical: the extraction schema has no amount field, and policy re-derives the amount from the order record, so there's no path for a model to change one. What a real model would change is slot quality — and that's exactly what the eval harness on the last slide is for.`);
+- Have you actually run it against a hosted model?: Yes. I ran the same four-scenario script twice, changing only the provider — the regex stand-in, then gpt-5.4-mini through the OpenAI API. All eight replies came back differently worded. Every decision field was identical, including the idempotency key, which is a hash of conversation, action, and order. That transcript is in evidence/provider_parity.txt.
+- Why does the idempotency key matter in that comparison?: Because it's derived from the decision, not the text. Two providers landing on the same key means they reached the same action on the same order. A downstream receiver deduping on it can't tell which model ran, and doesn't need to.
+- Did anything differ besides wording?: One thing worth naming. On the knowledge-base miss, the stand-in offers a human agent and the hosted model asks for more detail instead. Both correctly declined to invent an answer and no decision moved — but the model dropped an offer the template makes every time. That's narration drift, and it's exactly what the graded rubric on the last slide would catch.`);
 
 // ---------------------------------------------------------------------------
 // Slide 3 — Key decisions

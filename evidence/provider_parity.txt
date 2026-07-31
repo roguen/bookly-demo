@@ -1,0 +1,98 @@
+Provider parity: two vendors, one decision layer.
+
+The deck claims that swapping the model changes the wording and never
+the verdict. This is that claim run rather than argued.
+
+Method: the same four-scenario demo script, executed twice against the
+same code, changing only the provider.
+
+    BOOKLY_PROVIDER=rules  python3 app.py --script demo.txt
+    BOOKLY_PROVIDER=openai python3 app.py --script demo.txt
+
+  rules  = the dependency-free regex stand-in, no network
+  openai = gpt-5.4-mini via the OpenAI API
+
+========================================================================
+THE REPLIES DIFFER — every one of them
+========================================================================
+
+[1] similarity 74%
+  rules : Your order BK-1041 (Dune) shipped with Bookly Express and is expected by August 1.
+  openai: Your order BK-1041 for Dune has shipped with Bookly Express. It’s expected to arrive on 2026-08-01.
+
+[2] similarity 63%
+  rules : Your order BK-1041 (Dune) shipped with Bookly Express and is expected by August 1.
+  openai: Your order BK-1041 for Dune has been shipped with Bookly Express. The estimated delivery date is 2026-08-01.
+
+[3] similarity 59%
+  rules : Sure — which book would you like to return? 1) Godel, Escher, Bach (BK-1042)  2) The Pragmatic Programmer (BK-0987)
+  openai: Could you please tell us which order you mean: **BK-1042 — Godel, Escher, Bach** or **BK-0987 — The Pragmatic Programmer**?
+
+[4] similarity 43%
+  rules : Done — Godel, Escher, Bach (BK-1042) was delivered on July 18, inside the 30-day return window, so I've issued a refund of $22.50 to your original payment method. It should post within 5 business days.
+  openai: Your refund has been approved for **Godel, Escher, Bach** on order **BK-1042**. The order was delivered on **2026-07-18**, and the refund amount is **$22.50**.
+
+[5] similarity 78%
+  rules : Standard shipping takes 3 to 5 business days within the continental US. Expedited shipping takes 1 to 2 business days.
+  openai: Standard shipping within the continental US takes 3 to 5 business days. Expedited shipping takes 1 to 2 business days.
+
+[6] similarity 26%
+  rules : I don't have reliable information on that, and I'd rather say so than guess. I can connect you with a human agent if that would help.
+  openai: I couldn’t find a help article for that yet. Please share a bit more detail about what you’re trying to do, and I’ll help from there.
+
+[7] similarity 43%
+  rules : I'm sorry — The Pragmatic Programmer (BK-0987) was delivered on May 2, which is outside the 30-day return window, so I can't issue a refund for it.
+  openai: Thanks for reaching out. We can’t accept a return for order BK-0987 because the return window has expired.
+
+[8] similarity 31%
+  rules : I understand that's not the answer you wanted. I can't change the policy outcome, so I've escalated this to a human agent who can review it with you — you'll hear back shortly.
+  openai: Thanks for reaching out. I’ve escalated this because it involves a policy dispute.
+
+Replies compared: 8. Byte-identical: 0.
+
+========================================================================
+THE DECISIONS DO NOT
+========================================================================
+
+  refund
+    same      action           refund
+    same      order_id         BK-1042
+    same      amount           22.5
+    same      currency         USD
+    same      reason_code      REFUND_APPROVED_IN_WINDOW
+    same      conversation_id  conv-2
+    same      idempotency_key  b441ac1826d21cd6e631bd04...
+
+  escalate_to_human
+    same      action           escalate_to_human
+    same      order_id         BK-0987
+    same      amount           None
+    same      currency         None
+    same      reason_code      ESCALATED_POLICY_DISPUTE
+    same      conversation_id  conv-4
+    same      idempotency_key  f3910a91af16524941f9cb0a...
+
+Every decision field matches, including the idempotency key — which is
+sha256(conversation|action|order_id), so an identical key means the two
+providers reached the same action on the same order in the same
+conversation. A downstream receiver deduping on that key cannot tell
+which model ran, and does not need to.
+
+The amount is $22.50 in both runs because policy.py reads it from the
+order record. Neither model was asked for it, and neither could have
+supplied it: the extraction schema has no amount field.
+
+========================================================================
+ONE HONEST OBSERVATION
+========================================================================
+
+Reply [6], the knowledge-base miss, is where the two runs diverge most
+in substance. The stand-in offers a human agent; gpt-5.4-mini asks for
+more detail instead. Both correctly decline to invent an answer, and
+no decision changed — but the hosted model dropped an offer the
+template makes every time.
+
+That is narration drift, not a policy failure, and it is precisely what
+the graded narration rubric proposed on the last slide would catch. It
+is also the honest limit of this artifact: it proves the decisions are
+provider-independent. It does not prove the prose is.

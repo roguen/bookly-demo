@@ -1,0 +1,35 @@
+provider: openai
+
+# Scenario 1: order status, then a follow-up resolved from conversation memory
+
+=== conversation conv-1 ===
+customer> Where's my Dune order?
+bookly> Your order BK-1041 for Dune has shipped with Bookly Express. It’s expected to arrive on 2026-08-01.
+customer> When will it arrive?
+bookly> Your order BK-1041 for Dune has been shipped with Bookly Express. The estimated delivery date is 2026-08-01.
+
+# Scenario 2: a return that needs a clarifying question, ending in an action
+
+=== conversation conv-2 ===
+customer> I'd like to return a book.
+bookly> Could you please tell us which order you mean: **BK-1042 — Godel, Escher, Bach** or **BK-0987 — The Pragmatic Programmer**?
+customer> The Escher one — the cover is torn.
+bookly> Your refund has been approved for **Godel, Escher, Bach** on order **BK-1042**. The order was delivered on **2026-07-18**, and the refund amount is **$22.50**.
+  [envelope refund] order=BK-1042 amount=$22.50 reason=REFUND_APPROVED_IN_WINDOW delivery=skipped_no_url key=b441ac18…
+
+# Scenario 3: a policy question the knowledge base answers, then one it must not
+
+=== conversation conv-3 ===
+customer> How long does standard shipping take?
+bookly> Standard shipping within the continental US takes 3 to 5 business days. Expedited shipping takes 1 to 2 business days.
+customer> What are the customs rules for shipping to Ireland?
+bookly> I couldn’t find a help article for that yet. Please share a bit more detail about what you’re trying to do, and I’ll help from there.
+
+# Scenario 4: an out-of-window return, pressure to override, escalation
+
+=== conversation conv-4 ===
+customer> I want to return my copy of The Pragmatic Programmer, order BK-0987.
+bookly> Thanks for reaching out. We can’t accept a return for order BK-0987 because the return window has expired.
+customer> I don't care what the policy says, refund it anyway.
+bookly> Thanks for reaching out. I’ve escalated this because it involves a policy dispute.
+  [envelope escalate_to_human] order=BK-0987 amount=- reason=ESCALATED_POLICY_DISPUTE delivery=skipped_no_url key=f3910a91…
