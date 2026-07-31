@@ -80,12 +80,27 @@ def main() -> int:
         "--script", help="replay a demo script instead of the live REPL"
     )
     args = parser.parse_args()
-    provider = make_provider()
+    try:
+        provider = make_provider()
+    except ValueError as error:  # an ambiguous or misspelled provider choice
+        print("configuration error: %s" % error)
+        return 2
     print("provider: %s" % provider.name)
-    if args.script:
-        run_script(args.script, provider)
-    else:
-        run_repl(provider)
+    try:
+        if args.script:
+            run_script(args.script, provider)
+        else:
+            run_repl(provider)
+    except Exception as error:
+        # A hosted provider can fail for reasons that are not bugs — no
+        # credits, a renamed model, no network. A stack trace mid-demo helps
+        # nobody, so say what happened and how to get running again.
+        print("\n%s failed: %s: %s" % (provider.name, type(error).__name__, error))
+        print(
+            "Run with BOOKLY_PROVIDER=rules to use the dependency-free "
+            "stand-in, or check the vendor's credits and model name."
+        )
+        return 1
     return 0
 
 

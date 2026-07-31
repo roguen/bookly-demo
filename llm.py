@@ -413,7 +413,7 @@ must not change or soften the decision."""
 # Models change names faster than this repo will; both are overridable so a
 # stale default is a one-line env fix rather than a code change.
 ANTHROPIC_MODEL = os.environ.get("BOOKLY_ANTHROPIC_MODEL", "claude-sonnet-5")
-OPENAI_MODEL = os.environ.get("BOOKLY_OPENAI_MODEL", "gpt-4o")
+OPENAI_MODEL = os.environ.get("BOOKLY_OPENAI_MODEL", "gpt-5.5")
 
 # Models sometimes wrap JSON in a markdown fence despite being told not to.
 JSON_FENCE_RE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.IGNORECASE)
@@ -543,8 +543,8 @@ PROVIDERS = {
 def make_provider() -> Provider:
     """Hosted models are opt-in; the stand-in is the default path.
 
-    BOOKLY_PROVIDER forces a choice; otherwise whichever vendor key is set
-    wins, and with no key set the demo runs on the stand-in.
+    BOOKLY_PROVIDER forces a choice; otherwise a single vendor key selects
+    itself, and with no key set the demo runs on the stand-in.
     """
     name = os.environ.get("BOOKLY_PROVIDER") or _provider_from_keys()
     if name not in PROVIDERS:
@@ -555,9 +555,23 @@ def make_provider() -> Provider:
     return PROVIDERS[name]()
 
 
+# Which env var announces which vendor. Order is presentation only — an
+# ambiguous environment is refused rather than resolved by precedence.
+VENDOR_KEYS = (("anthropic", "ANTHROPIC_API_KEY"), ("openai", "OPENAI_API_KEY"))
+
+
 def _provider_from_keys() -> str:
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        return "anthropic"
-    if os.environ.get("OPENAI_API_KEY"):
-        return "openai"
-    return "rules"
+    """Guess the vendor from the environment, but only when the guess is
+    unambiguous. Two keys set is a question, not a default — the same rule
+    the agent applies to a customer turn it cannot resolve."""
+    found = [name for name, var in VENDOR_KEYS if os.environ.get(var)]
+    if len(found) > 1:
+        raise ValueError(
+            "%s are both set, so the provider is ambiguous. Set "
+            "BOOKLY_PROVIDER to one of %s."
+            % (
+                " and ".join(var for _, var in VENDOR_KEYS),
+                ", ".join(sorted(PROVIDERS)),
+            )
+        )
+    return found[0] if found else "rules"

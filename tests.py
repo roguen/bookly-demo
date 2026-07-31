@@ -316,6 +316,15 @@ def provider_selection_is_explicit_and_bounded():
             raise AssertionError("expected a clear error, got none")
         except ValueError as error:
             assert "BOOKLY_PROVIDER" in str(error)
+        # Two vendor keys is a question, not a default.
+        os.environ.pop("BOOKLY_PROVIDER")
+        os.environ["ANTHROPIC_API_KEY"] = "fake"
+        os.environ["OPENAI_API_KEY"] = "fake"
+        try:
+            make_provider()
+            raise AssertionError("ambiguous keys should not pick a winner")
+        except ValueError as error:
+            assert "ambiguous" in str(error)
     finally:
         for key, value in saved.items():
             os.environ.pop(key, None)
