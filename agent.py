@@ -81,17 +81,21 @@ class Agent:
         answers = [r for r in requests if _is_answer(r)]
         others = [r for r in requests if not _is_answer(r)]
         if answers:
-            order = self._order_from_answer(answers)
+            order, used = self._order_from_answer(answers)
             if order is None:
                 # The answer engaged the question but resolved nothing (an
                 # out-of-range number, an unknown id). That is a failed
                 # clarification attempt — counted, so the loop stays bounded.
                 self._reask_or_escalate(turn)
+                remaining = others
             else:
                 self.pending = None
                 self.clarify_attempts = 0
                 self._finish_return(order, turn)
-            self._process(others, turn)
+                # One request answered the question; the rest of the turn
+                # still deserves handling ("1 and also return BK-0987").
+                remaining = [r for r in answers if r is not used] + others
+            self._process(remaining, turn)
         elif any(r.intent for r in requests):
             # Abandoning a half-filled procedure beats trapping the customer
             # in it; restating the intent later simply starts it again.
@@ -300,21 +304,23 @@ class Agent:
 
     def _order_from_answer(
         self, requests: List[Request]
-    ) -> Optional[Order]:
-        """Resolve the customer's answer to "which order?". None means the
-        answer resolved no unique order — a failed clarification attempt."""
+    ) -> Tuple[Optional[Order], Optional[Request]]:
+        """Resolve the customer's answer to "which order?" and report which
+        request resolved it. (None, None) means nothing resolved a unique
+        order — a failed clarification attempt."""
         for request in requests:
             if request.order_id:
-                return tools.get_order(request.order_id)
+                return tools.get_order(request.order_id), request
             if request.option_number is not None:
                 index = request.option_number - 1
                 if 0 <= index < len(self.pending.option_ids):
-                    return tools.get_order(self.pending.option_ids[index])
+                    order_id = self.pending.option_ids[index]
+                    return tools.get_order(order_id), request
             if request.title_words:
                 matches = self._orders_by_title_words(request.title_words)
                 if len(matches) == 1:
-                    return matches[0]
-        return None
+                    return matches[0], request
+        return None, None
 
     def _narrate(self, kind: str, facts: dict, turn: _Turn) -> None:
         text = self.provider.narrate(NarrationEvent(kind=kind, facts=facts))

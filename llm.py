@@ -118,6 +118,15 @@ CARDINAL_WORDS = {"one": 1, "two": 2, "three": 3}
 CARDINAL_RE = re.compile(r"\b(one|two|three)\b", re.IGNORECASE)
 CARDINAL_MAX_WORDS = 3
 
+# A number word inside a delegating reply ("just pick one", "either one",
+# "pick the first one") is not a choice — the customer is handing the choice
+# back. Ambiguity on a write path always breaks toward asking again.
+DEFERRAL_RE = re.compile(
+    r"\b(pick|choose|decide|either|any|whatever|whichever"
+    r"|don'?t care|up to you)\b",
+    re.IGNORECASE,
+)
+
 # Title words shorter than this are too common to identify a book.
 MIN_TITLE_WORD_LEN = 4
 
@@ -137,25 +146,28 @@ class RulesProvider:
         self, segment: str, context: ExtractionContext
     ) -> Request:
         id_match = ORDER_ID_RE.search(segment)
+        title_words = self._title_words(segment, context.known_titles)
+        has_reference = bool(id_match or title_words)
         return Request(
-            intent=self._intent_of(segment),
+            intent=self._intent_of(segment, has_reference),
             order_id=id_match.group(0).upper() if id_match else None,
-            title_words=self._title_words(segment, context.known_titles),
+            title_words=title_words,
             option_number=self._option_number(segment),
             text=segment.strip(),
         )
 
-    def _intent_of(self, segment: str) -> Optional[str]:
+    def _intent_of(self, segment: str, has_reference: bool) -> Optional[str]:
         # Asking to do something beats asking about something: a segment that
         # requests a return wins even if it also mentions the policy.
         if RETURN_REQUEST_RE.search(segment):
             return "return_request"
         if HUMAN_HANDOFF_RE.search(segment):
             return "human_handoff"
-        # An explicit order id counts as the object: "where is BK-9999"
-        # is a status question even without the word "order".
+        # An explicit order reference — an id or a title — counts as the
+        # object: "what's the status of Dune" is a status question even
+        # without the word "order".
         if STATUS_SIGNAL_RE.search(segment) and (
-            STATUS_OBJECT_RE.search(segment) or ORDER_ID_RE.search(segment)
+            STATUS_OBJECT_RE.search(segment) or has_reference
         ):
             return "order_status"
         if POLICY_QUESTION_RE.search(segment):
@@ -179,6 +191,8 @@ class RulesProvider:
         digit = OPTION_DIGIT_RE.match(segment)
         if digit:
             return int(digit.group(1))
+        if DEFERRAL_RE.search(segment):
+            return None
         ordinal = ORDINAL_RE.search(segment)
         if ordinal:
             return ORDINAL_WORDS[ordinal.group(1).lower()]

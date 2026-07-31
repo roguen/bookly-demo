@@ -222,6 +222,39 @@ def asking_for_a_human_escalates():
 
 
 @check
+def deferral_words_are_never_a_choice():
+    """"just pick one" hands the choice back; it must re-ask, never refund,
+    and repeated deferral must still reach the bounded human handoff."""
+    agent = _fresh_agent()
+    agent.handle_turn("I'd like to return a book.")
+    first = agent.handle_turn("just pick one")
+    assert first.envelopes == [] and "can't guess" in first.reply
+    second = agent.handle_turn("just pick one")
+    emitted = _envelopes(second)
+    assert len(emitted) == 1
+    assert emitted[0]["reason_code"] == policy.ESCALATED_CLARIFY_LIMIT
+
+
+@check
+def title_status_question_is_not_a_clarify_answer():
+    agent = _fresh_agent()
+    agent.handle_turn("I'd like to return a book.")
+    result = agent.handle_turn("What's the status of Godel, Escher, Bach?")
+    assert result.envelopes == []
+    assert result.reply.startswith("Your order BK-1042")
+
+
+@check
+def option_answer_plus_second_request_handles_both():
+    agent = _fresh_agent()
+    agent.handle_turn("I'd like to return a book.")
+    result = agent.handle_turn("1 and I also want to return BK-0987")
+    emitted = _envelopes(result)
+    assert len(emitted) == 1 and emitted[0]["order_id"] == "BK-1042"
+    assert "outside" in result.reply  # BK-0987's out-of-window denial
+
+
+@check
 def golden_transcript_return_flow():
     """One full conversation asserted end to end — the seed of the
     golden-transcript harness. Exact strings on purpose: any wording or
