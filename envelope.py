@@ -19,8 +19,17 @@ import uuid
 from typing import Optional, Tuple
 
 AUDIT_PATH = "audit.log"
+AUDIT_PATH_ENV_VAR = "BOOKLY_AUDIT_PATH"
 WEBHOOK_ENV_VAR = "BOOKLY_WEBHOOK_URL"
 DELIVERY_TIMEOUT_SECONDS = 3
+
+
+def audit_path() -> str:
+    """Where the audit line goes. Overridable so the console can run the
+    check suite in a subprocess without fifteen test envelopes landing in
+    the trail the demo is about to show on screen. Read per call, not at
+    import, so a test can redirect it and put it back."""
+    return os.environ.get(AUDIT_PATH_ENV_VAR) or AUDIT_PATH
 
 
 def idempotency_key(conversation_id: str, action: str, order_id: str) -> str:
@@ -90,5 +99,5 @@ def _deliver(envelope: dict) -> str:
 
 
 def _audit(record: dict) -> None:
-    with open(AUDIT_PATH, "a", encoding="utf-8") as audit_file:
+    with open(audit_path(), "a", encoding="utf-8") as audit_file:
         audit_file.write(json.dumps(record) + "\n")

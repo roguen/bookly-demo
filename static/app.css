@@ -1,0 +1,101 @@
+/* The design system, which is one rule.
+ *
+ * Every element is coloured by which side of the boundary produced it. Model
+ * output is grey. Deterministic output is purple. The customer's own words
+ * are neither, so they are neutral with an outline — exactly how slide 2 of
+ * the deck treats the customer-turn node.
+ *
+ * That is the whole system. Applied without exception, it teaches the thesis
+ * without a sentence of explanation, which is why nothing below introduces a
+ * third meaning for either colour or a decorative use of purple.
+ *
+ * The palette is the deck's, pulled from decagon.ai's live stylesheet, with
+ * the meanings it already carries there.
+ */
+
+:root {
+  /* --- provenance: the two sides, and the line between them ------------- */
+
+  /* The deterministic side. Never decorative. Fills, borders, and type at
+     large or bold sizes. */
+  --purple: #5754ff;
+  /* The same meaning, dark enough to be body text on a light surface.
+     #5754FF is 4.85:1 on white but only 4.30:1 on --tint, which misses AA;
+     this is 5.73:1 and 5.08:1 on those two. */
+  --purple-ink: #4b48f0;
+  /* The deterministic side against the dark ground. 8.08:1 on --deep. */
+  --lilac: #9b99ff;
+
+  /* The model side. Fills and borders on light surfaces, and body text on
+     the dark ground, where it is 5.56:1. */
+  --grey: #858586;
+  /* The model side as body text on a light surface: --grey is only 3.69:1
+     on white and fails AA, so model-side prose uses this at 6.27:1. The
+     meaning is unchanged; only the ink is legible. */
+  --grey-ink: #5a5a66;
+  /* The model side against the dark ground. 17.7:1 on --deep. */
+  --lightgrey: #eeeef4;
+
+  /* Belongs to neither side, which is the entire point of it. */
+  --boundary: #e8e8f2;
+
+  /* --- ground and surface ---------------------------------------------- */
+  --deep: #010024; /* app ground */
+  --tint: #f0f0ff; /* raised deterministic surface */
+  --ink: #0a0a0b; /* text on light */
+  --paper: #ffffff;
+
+  /* --- type: two roles, no third face, no webfont ----------------------- */
+  /* Offline is a requirement, so both stacks are system faces only. */
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+
+  /* Data looks like data: the trace, the audit and the envelope cards are
+     mono, because that content is machine output and should read as it. */
+  --step--1: 0.75rem;
+  --step-0: 0.875rem;
+  --step-1: 1rem;
+  --step-2: 1.25rem;
+  --step-3: 1.75rem;
+
+  --radius: 6px;
+  --gap: 12px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--deep);
+  color: var(--lightgrey);
+  font-family: var(--sans);
+  font-size: var(--step-0);
+  line-height: 1.5;
+}
+
+/* Keyboard focus is visible everywhere, on both grounds. */
+:focus-visible {
+  outline: 2px solid var(--lilac);
+  outline-offset: 2px;
+}
+
+/* One motion budget, spent in one place. Everything here honours a reader
+   who has asked for less of it. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

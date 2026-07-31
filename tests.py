@@ -9,17 +9,25 @@ harness lives.
 """
 from __future__ import annotations
 
+import json
 import os
+import pathlib
 import re
 import sys
+import threading
 import traceback
 import types
+import urllib.error
+import urllib.request
 from datetime import date
 
 import covers
+import envelope as envelope_module
+import llm
 import policy
 import recorder
 import tools
+import web
 from agent import Agent
 from envelope import idempotency_key
 from recorder import ListRecorder, NullRecorder
@@ -604,6 +612,299 @@ def golden_transcript_return_flow():
     assert envelope["idempotency_key"] == idempotency_key(
         "conv-golden", "refund", "BK-1042"
     )
+
+
+# --- the web layer --------------------------------------------------------
+#
+# These spin a real server on an ephemeral port and talk to it over real
+# HTTP. Faking the request would test the router; this tests the thing the
+# browser will actually reach.
+
+
+class _Console:
+    """A running console, for the duration of a `with` block."""
+
+    def __init__(self):
+        self.server = None
+        self.base = None
+
+    def __enter__(self):
+        self.server = web.ConsoleServer(
+            ("127.0.0.1", 0), web.ConsoleHandler, web.Console()
+        )
+        self.base = "http://127.0.0.1:%d" % self.server.server_address[1]
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        return self
+
+    def __exit__(self, *_exc):
+        self.server.shutdown()
+        self.server.server_close()
+
+    def _open(self, path, payload=None):
+        # The console pins the Host values it answers on, and the ephemeral
+        # port means the test has to send the matching one.
+        request = urllib.request.Request(
+            self.base + path,
+            data=None if payload is None else json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+            method="GET" if payload is None else "POST",
+        )
+        return urllib.request.urlopen(request, timeout=20)
+
+    def get(self, path):
+        return json.loads(self._open(path).read().decode())
+
+    def post(self, path, payload):
+        return json.loads(self._open(path, payload).read().decode())
+
+    def raw(self, path):
+        return self._open(path).read().decode()
+
+
+def _demo_scenarios():
+    """The four scripted conversations, read from demo.txt itself."""
+    conversations, current = [], None
+    for raw in open("demo.txt", "r", encoding="utf-8"):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line == "---":
+            current = None
+            continue
+        if current is None:
+            current = []
+            conversations.append(current)
+        current.append(line)
+    return conversations
+
+
+DECISION_FIELDS = (
+    "action", "order_id", "amount", "currency", "reason_code",
+    "idempotency_key", "conversation_id", "customer_note",
+)
+
+
+@check
+def web_layer_emits_identical_envelopes():
+    """The answer to "did you just bolt a UI onto it".
+
+    Every demo scenario is driven through the HTTP handler and through Agent
+    directly, and every decision field is compared — including the
+    idempotency key, which would diverge the moment the web layer started
+    keeping its own conversation identity or its own idea of an order.
+    """
+    scenarios = _demo_scenarios()
+    assert len(scenarios) == 4, len(scenarios)
+    with _Console() as console:
+        for number, turns in enumerate(scenarios, start=1):
+            conversation_id = "conv-parity-%d" % number
+            direct = Agent(RulesProvider(), conversation_id)
+            for text in turns:
+                over_http = console.post(
+                    "/api/turn",
+                    {"conversation_id": conversation_id, "text": text},
+                )
+                in_process = direct.handle_turn(text)
+                assert over_http["reply"] == in_process.reply, text
+                served = [e["envelope"] for e in over_http["envelopes"]]
+                emitted = _envelopes(in_process)
+                assert len(served) == len(emitted), text
+                for served_one, emitted_one in zip(served, emitted):
+                    for field in DECISION_FIELDS:
+                        assert served_one[field] == emitted_one[field], (
+                            text, field, served_one[field], emitted_one[field]
+                        )
+                # And the served turn carries a trace the direct one never
+                # asked for — the whole reason the web layer exists.
+                assert over_http["trace"]
+                assert {n["side"] for n in over_http["trace"]} <= {
+                    recorder.MODEL, recorder.DETERMINISTIC
+                }
+
+
+@check
+def policy_constants_surface_matches_policy():
+    """Every threshold the interface shows is read from policy.py over the
+    API. An interface holding its own copy of "30" is an interface that will
+    eventually disagree with the engine."""
+    with _Console() as console:
+        served = console.get("/api/customer")["policy"]
+        assert console.get("/api/policy") == served
+    by_name = {c["name"]: c["value"] for c in served["constants"]}
+    assert by_name["RETURN_WINDOW_DAYS"] == policy.RETURN_WINDOW_DAYS
+    assert by_name["MAX_CLARIFY_ATTEMPTS"] == policy.MAX_CLARIFY_ATTEMPTS
+    assert by_name["DENIALS_BEFORE_ESCALATION"] == (
+        policy.DENIALS_BEFORE_ESCALATION
+    )
+    assert served["retrieval_floor"] == tools.MIN_KEYWORD_MATCHES
+    assert len(by_name) == len(policy.CONSTANTS)
+    assert {c["code"] for c in served["reason_codes"]} == {
+        entry.code for entry in policy.REASON_CODES
+    }
+    # The viewer is read only, and says who can change these.
+    assert "policy.py" in served["who_can_change_these"]
+
+
+@check
+def injected_markup_is_escaped():
+    """A turn carrying markup survives to the audit log verbatim, comes back
+    over the API verbatim, and reaches the page as text.
+
+    The last part is asserted structurally rather than by driving a browser:
+    the client never calls an HTML-parsing sink at all, so there is no
+    context in which a customer's angle bracket could become an element.
+    """
+    hostile = (
+        "<img src=x onerror=alert(1)> and <script>alert(2)</script> "
+        "please return the Escher book"
+    )
+    before = _audit_size()
+    with _Console() as console:
+        served = console.post(
+            "/api/turn", {"conversation_id": "conv-xss", "text": hostile}
+        )
+    # Verbatim over the wire: JSON is data, so nothing is mangled on the way.
+    envelopes = [e["envelope"] for e in served["envelopes"]]
+    assert len(envelopes) == 1
+    assert envelopes[0]["customer_note"] == hostile
+    assert envelopes[0]["amount"] == ORDERS["BK-1042"].price_paid
+    # Verbatim in the audit trail, which is the record a human reads.
+    assert hostile in _audit_since(before)
+    # And no sink exists on the client. This is the same kind of check as
+    # "policy.py does not import an LLM": structural, and greppable.
+    sinks = (
+        "innerHTML", "outerHTML", "insertAdjacentHTML", "document.write",
+        "eval(", "new Function", "srcdoc",
+    )
+    scripts = sorted(pathlib.Path("static").glob("*.js"))
+    assert scripts, "no client scripts found to check"
+    for script in scripts:
+        source = script.read_text(encoding="utf-8")
+        for sink in sinks:
+            assert sink not in source, (script.name, sink)
+
+
+@check
+def api_key_never_appears_in_a_response_or_a_log():
+    """A key pasted into the console is held in memory for the session and
+    shows up as a badge. It must not reach a response body, the audit trail,
+    a URL, the environment, or the subprocess that runs the checks."""
+    secret = "sk-test-DO-NOT-LEAK-abcdef0123456789"
+    before = _audit_size()
+    bodies = []
+    with _Console() as console:
+        # Whether this switch succeeds depends on which vendor SDKs happen to
+        # be installed, and the leak rule does not: a key that was accepted
+        # and stored is exactly the case worth proving clean.
+        result = console.post(
+            "/api/provider", {"name": "anthropic", "api_key": secret}
+        )
+        bodies.append(json.dumps(result))
+        state = console.get("/api/provider")
+        bodies.append(json.dumps(state))
+        if result["ok"]:
+            assert state["key"]["present"] is True
+            assert state["key"]["source"] == "session"
+            # The badge reveals the last four characters and nothing else.
+            assert state["key"]["masked"].endswith(secret[-4:])
+            assert len(state["key"]["masked"]) <= 12
+            assert secret[:-4] not in state["key"]["masked"]
+        else:
+            assert "still running" in result["message"]
+            assert result["active"] == "rules"
+        # Back to the stand-in before taking a turn, so this check never
+        # makes a network call. The key stays held for the session.
+        bodies.append(json.dumps(console.post("/api/provider", {"name": "rules"})))
+        bodies.append(json.dumps(console.post(
+            "/api/turn",
+            {"conversation_id": "conv-key", "text": "return the Escher book"},
+        )))
+        bodies.append(json.dumps(console.get("/api/customer")))
+        bodies.append(json.dumps(console.get("/api/audit")))
+    for body in bodies:
+        assert secret not in body
+        assert secret[8:] not in body  # nor any usable tail of it
+    assert secret not in _audit_since(before)
+    assert secret not in json.dumps(dict(os.environ))
+    # The checks subprocess is handed an environment with no vendor key in it
+    # at all, so a session key cannot ride along into it.
+    _command, environment = web.checks_command()
+    assert not any(
+        var in environment for var in llm.VENDOR_KEY_VARS.values()
+    )
+    assert secret not in json.dumps(environment)
+
+
+@check
+def a_hosted_provider_with_no_key_stays_on_the_standin():
+    """Switching degrades honestly: it says so plainly and keeps running,
+    rather than throwing mid-demo or pretending it switched."""
+    saved = {var: os.environ.pop(var, None)
+             for var in llm.VENDOR_KEY_VARS.values()}
+    try:
+        with _Console() as console:
+            for name in sorted(llm.VENDOR_KEY_VARS):
+                result = console.post("/api/provider", {"name": name})
+                assert result["ok"] is False
+                assert result["active"] == "rules"
+                assert "No API key" in result["message"]
+                assert result["key"]["present"] is False
+            nonsense = console.post("/api/provider", {"name": "definitely-not"})
+            assert nonsense["ok"] is False and nonsense["active"] == "rules"
+            # The stand-in itself always switches, and reports its model.
+            back = console.post("/api/provider", {"name": "rules"})
+            assert back["ok"] is True and back["active"] == "rules"
+            assert back["model"] == llm.MODELS["rules"]
+    finally:
+        for var, value in saved.items():
+            if value is not None:
+                os.environ[var] = value
+
+
+@check
+def the_console_serves_records_and_never_another_customers():
+    """The record, the orders and their covers come out of the store; an
+    order belonging to someone else is not among them and its cover is not
+    fetchable either."""
+    with _Console() as console:
+        served = console.get("/api/customer")
+        ids = [o["order_id"] for o in served["orders"]]
+        assert "BK-2077" not in ids  # belongs to C-2002
+        assert set(ids) == {
+            o.order_id for o in tools.orders_for_customer(CURRENT_CUSTOMER_ID)
+        }
+        assert served["customer"]["customer_id"] == CURRENT_CUSTOMER_ID
+        assert served["today"] == TODAY.isoformat()
+        for order in served["orders"]:
+            assert order["cover"]["svg"].startswith("<svg")
+            assert order["cover"]["href"] == "/api/cover/%s.svg" % (
+                order["order_id"]
+            )
+        assert console.raw("/api/cover/BK-1042.svg").startswith("<svg")
+        for path in ("/api/cover/BK-2077.svg", "/api/cover/BK-9999.svg"):
+            try:
+                console.raw(path)
+                raise AssertionError("%s should not be served" % path)
+            except urllib.error.HTTPError as error:
+                assert error.code == 404
+        # The four scripted scenarios come from demo.txt, not a second copy.
+        scenarios = console.get("/api/scenarios")["scenarios"]
+        from_script = [s for s in scenarios if s["source"] == "demo.txt"]
+        assert [s["turns"] for s in from_script] == _demo_scenarios()
+
+
+def _audit_size() -> int:
+    path = pathlib.Path(envelope_module.audit_path())
+    return path.stat().st_size if path.exists() else 0
+
+
+def _audit_since(offset: int) -> str:
+    path = pathlib.Path(envelope_module.audit_path())
+    if not path.exists():
+        return ""
+    with open(path, "r", encoding="utf-8") as audit_file:
+        audit_file.seek(offset)
+        return audit_file.read()
 
 
 def main() -> int:

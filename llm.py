@@ -520,10 +520,18 @@ class HostedProvider:
 class AnthropicProvider(HostedProvider):
     name = "anthropic"
 
-    def __init__(self) -> None:
+    def __init__(self, api_key: Optional[str] = None) -> None:
         import anthropic  # imported here so the default path needs no deps
 
-        self._client = anthropic.Anthropic()
+        # An explicit key is passed to the client rather than exported to the
+        # environment. The console accepts a key for the session, and putting
+        # it in os.environ would hand it to every subprocess the console
+        # later spawns — including the one that runs the check suite.
+        self._client = (
+            anthropic.Anthropic(api_key=api_key)
+            if api_key
+            else anthropic.Anthropic()
+        )
 
     def _complete(self, system: str, user: str) -> str:
         response = self._client.messages.create(
@@ -544,10 +552,11 @@ def _rejects_parameter(error: Exception, parameter: str) -> bool:
 class OpenAIProvider(HostedProvider):
     name = "openai"
 
-    def __init__(self) -> None:
+    def __init__(self, api_key: Optional[str] = None) -> None:
         from openai import OpenAI  # imported here so the default path is clean
 
-        self._client = OpenAI()
+        # Same rule as the Anthropic provider: explicit, never exported.
+        self._client = OpenAI(api_key=api_key) if api_key else OpenAI()
         # OpenAI renamed this parameter partway through the model line:
         # current models reject "max_tokens", older ones reject
         # "max_completion_tokens". Start on the current name and remember
@@ -588,6 +597,32 @@ PROVIDERS = {
     "openai": OpenAIProvider,
 }
 
+# The model string each provider will actually call, so an interface can show
+# it without holding its own copy that drifts from the code.
+MODELS = {
+    "rules": "regex extraction, template narration",
+    "anthropic": ANTHROPIC_MODEL,
+    "openai": OPENAI_MODEL,
+}
+
+
+def build_provider(name: str, api_key: Optional[str] = None) -> Provider:
+    """Construct one provider by name, with an optional session key.
+
+    `make_provider()` reads the environment and is what the CLI uses. This is
+    what the console uses, because the console is handed a key at runtime and
+    must never write it anywhere the environment can carry it onward.
+    """
+    if name not in PROVIDERS:
+        raise ValueError(
+            "unknown provider %r (expected one of %s)"
+            % (name, ", ".join(sorted(PROVIDERS)))
+        )
+    provider_class = PROVIDERS[name]
+    if issubclass(provider_class, HostedProvider):
+        return provider_class(api_key)
+    return provider_class()
+
 
 def make_provider() -> Provider:
     """Hosted models are opt-in; the stand-in is the default path.
@@ -607,6 +642,7 @@ def make_provider() -> Provider:
 # Which env var announces which vendor. Order is presentation only — an
 # ambiguous environment is refused rather than resolved by precedence.
 VENDOR_KEYS = (("anthropic", "ANTHROPIC_API_KEY"), ("openai", "OPENAI_API_KEY"))
+VENDOR_KEY_VARS = dict(VENDOR_KEYS)
 
 
 def _provider_from_keys() -> str:
