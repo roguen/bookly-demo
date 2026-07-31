@@ -34,13 +34,16 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 REPO = Path(__file__).resolve().parent
 # The console must work regardless of where it was launched from, so the
-# audit trail is pinned to the repo before anything imports envelope.py.
+# audit trail and the queue are pinned to the repo before anything imports
+# the modules that read them.
 os.environ.setdefault("BOOKLY_AUDIT_PATH", str(REPO / "audit.log"))
+os.environ.setdefault("BOOKLY_QUEUE_PATH", str(REPO / "queue.json"))
 
-import covers  # noqa: E402  (after the audit path is pinned)
+import covers  # noqa: E402  (after the paths are pinned)
 import envelope  # noqa: E402
 import llm  # noqa: E402
 import policy  # noqa: E402
+import queue as review  # noqa: E402  (this repo's queue.py, not the stdlib)
 import store  # noqa: E402
 import tools  # noqa: E402
 from agent import Agent  # noqa: E402
@@ -83,6 +86,10 @@ class Console:
     def __init__(self) -> None:
         self._lock = threading.RLock()
         self._agents: Dict[str, Agent] = {}
+        # The transcript is kept here, not in the agent, because the only
+        # thing that needs it is the case a human will read.
+        self._transcripts: Dict[str, List[dict]] = {}
+        self.queue = review.ReviewQueue()
         self._provider = llm.RulesProvider()
         self._provider_name = "rules"
         # Held here and nowhere else. Not in os.environ, not on disk, not in
@@ -101,7 +108,19 @@ class Console:
             trace = ListRecorder()
             agent.recorder = trace
             result = agent.handle_turn(text)
-            agent.recorder = trace  # kept so nothing reads a stale recorder
+
+            transcript = self._transcripts.setdefault(conversation_id, [])
+            transcript.append({"role": "customer", "text": text})
+            transcript.append({"role": "agent", "text": result.reply})
+
+            # Escalations land in the queue here, in the web layer, by
+            # watching what the agent emitted. The agent is not told the queue
+            # exists — it emits, and something downstream picks the emission
+            # up, which is the same shape as the webhook.
+            for emitted, _delivery in result.envelopes:
+                if emitted.get("action") == "escalate_to_human":
+                    self.queue.open_case(emitted, list(transcript))
+
             return {
                 "conversation_id": conversation_id,
                 "reply": result.reply,
@@ -118,6 +137,8 @@ class Console:
         trail rotated rather than deleted, provider back to the stand-in."""
         with self._lock:
             self._agents.clear()
+            self._transcripts.clear()
+            self.queue.clear()
             self._provider = llm.RulesProvider()
             self._provider_name = "rules"
             self._api_key = None
@@ -558,6 +579,17 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 return lambda: self._json({"scenarios": scenarios_json()})
             if path == "/api/provider":
                 return lambda: self._json(console.provider_state())
+            if path == "/api/queue":
+                return lambda: self._json(
+                    {
+                        "cases": console.queue.cases(),
+                        "counts": console.queue.counts(),
+                        "actions": list(review.ACTIONS),
+                    }
+                )
+            case = re.fullmatch(r"/api/queue/(case-[0-9a-f]{1,32})", path)
+            if case:
+                return lambda: self._case(console, case.group(1))
             cover = re.fullmatch(r"/api/cover/(BK-\d{4})\.svg", path)
             if cover:
                 return lambda: self._cover(cover.group(1))
@@ -572,6 +604,11 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 return lambda: self._json(console.reset())
             if path == "/api/checks":
                 return self._checks
+            resolve = re.fullmatch(
+                r"/api/queue/(case-[0-9a-f]{1,32})/resolve", path
+            )
+            if resolve:
+                return lambda: self._resolve(console, resolve.group(1))
         return None
 
     # -- handlers ----------------------------------------------------------
@@ -598,6 +635,26 @@ class ConsoleHandler(BaseHTTPRequestHandler):
         if api_key is not None and not isinstance(api_key, str):
             raise ValueError("api_key must be a string")
         self._json(console.set_provider(name, api_key))
+
+    def _case(self, console: Console, case_id: str) -> None:
+        case = console.queue.get(case_id)
+        if case is None:
+            self._error(404, "No such case.")
+            return
+        self._json(case)
+
+    def _resolve(self, console: Console, case_id: str) -> None:
+        payload = self._body()
+        # Missing actor or justification raises ValueError in queue.py and
+        # comes back as a 400. The requirement is enforced there, once, rather
+        # than here and again in the browser.
+        result = console.queue.resolve(
+            case_id,
+            action=payload.get("action") or "",
+            actor=payload.get("actor") or "",
+            justification=payload.get("justification") or "",
+        )
+        self._json(result)
 
     def _cover(self, order_id: str) -> None:
         order = tools.get_order(order_id)

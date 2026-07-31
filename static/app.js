@@ -51,6 +51,8 @@ export const Api = {
   provider: () => api("/api/provider"),
   setProvider: (name, apiKey) =>
     api("/api/provider", apiKey ? { name, api_key: apiKey } : { name }),
+  queue: () => api("/api/queue"),
+  resolve: (caseId, body) => api(`/api/queue/${caseId}/resolve`, body),
   turn: (conversationId, text) =>
     api("/api/turn", { conversation_id: conversationId, text }),
   reset: () => api("/api/reset"),
@@ -557,15 +559,153 @@ async function renderAudit() {
 
 /* --- placeholders filled in by later steps ------------------------------ */
 
-function renderQueue() {
+/* The review queue. The load-bearing part of this rendering is that the
+   original verdict and the human's action are drawn as two separate things,
+   in that order — because that is what actually happened. Nothing here edits
+   a decision; a resolution is appended below the one it reviews. */
+async function renderQueue() {
   const panel = dom.panels.queue;
   clear(panel);
+  let payload;
+  try {
+    payload = await Api.queue();
+  } catch (error) {
+    panel.appendChild(emptyState("Could not read the queue", String(error)));
+    return;
+  }
+  if (!payload.cases.length) {
+    panel.appendChild(
+      emptyState(
+        "No cases yet",
+        "Escalations land here for a human to resolve. Ask for a manager, or press an out-of-window return until the agent hands it over."
+      )
+    );
+    return;
+  }
   panel.appendChild(
-    emptyState(
-      "No cases yet",
-      "Escalations land here for a human to resolve. Ask for a manager, or press an out-of-window return until it escalates."
-    )
+    el("p", {
+      class: "policy-source",
+      text: `${payload.counts.open} open · ${payload.counts.resolved} resolved. Resolving appends; it never edits the verdict above it.`,
+    })
   );
+  for (const kase of payload.cases) {
+    panel.appendChild(caseCard(kase, payload.actions));
+  }
+}
+
+function caseCard(kase, actions) {
+  const card = el("div", {
+    class: "case",
+    attrs: { "data-status": kase.status },
+  });
+
+  card.appendChild(
+    el("div", { class: "case-head" }, [
+      el("span", { class: "case-id", text: kase.case_id }),
+      el("span", { class: "case-status", text: kase.status }),
+    ])
+  );
+
+  /* The decision under review, exactly as policy computed it. */
+  card.appendChild(
+    el("div", { class: "envelope" }, [
+      el("div", { class: "envelope-action" }, [
+        el("span", { text: "ESCALATED" }),
+        el("span", { class: "envelope-amount", text: kase.order_id || "—" }),
+      ]),
+      el("div", { class: "envelope-row envelope-reason", text: kase.reason_code }),
+      el("div", {
+        class: "envelope-row",
+        text: `key ${shortKey(kase.envelope.idempotency_key)} · ${kase.opened_at}`,
+      }),
+    ])
+  );
+
+  const transcript = el("details", { class: "case-transcript" }, [
+    el("summary", { text: `conversation (${kase.conversation.length} turns)` }),
+  ]);
+  for (const message of kase.conversation) {
+    transcript.appendChild(
+      el("div", { class: `case-turn ${message.role}` }, [
+        el("span", { class: "who", text: message.role }),
+        el("span", { text: message.text }),
+      ])
+    );
+  }
+  card.appendChild(transcript);
+
+  /* Everything that has happened since, newest last. */
+  const history = el("ol", { class: "case-events" });
+  for (const event of kase.events) {
+    const item = el("li", { attrs: { "data-kind": event.kind } }, [
+      el("span", { class: "event-kind", text: event.kind.replace(/_/g, " ") }),
+      el("span", { class: "event-actor", text: `${event.actor} · ${event.at}` }),
+    ]);
+    if (event.kind === "resolution") {
+      item.appendChild(el("div", { class: "event-action", text: event.action }));
+      item.appendChild(el("div", { text: event.justification }));
+      item.appendChild(
+        el("div", {
+          class: "order-id",
+          text: `key ${shortKey(event.envelope.idempotency_key)} · supersedes ${shortKey(
+            event.envelope.supersedes
+          )}`,
+        })
+      );
+    }
+    history.appendChild(item);
+  }
+  card.appendChild(history);
+
+  if (kase.status === "open") {
+    card.appendChild(resolveForm(kase, actions));
+  }
+  return card;
+}
+
+function resolveForm(kase, actions) {
+  const actor = el("input", {
+    attrs: { type: "text", placeholder: "Your name (required)", required: "" },
+  });
+  const justification = el("textarea", {
+    attrs: {
+      rows: "2",
+      placeholder: "Why (required) — this is the record an auditor reads",
+      required: "",
+    },
+  });
+  const choice = el("select", {}, actions.map((action) =>
+    el("option", { text: action, attrs: { value: action } })
+  ));
+  const error = el("p", { class: "form-error" });
+
+  const form = el("form", { class: "resolve" }, [
+    el("h4", { text: "Resolve" }),
+    choice,
+    actor,
+    justification,
+    el("button", { text: "Record decision", attrs: { type: "submit" } }),
+    error,
+  ]);
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    error.textContent = "";
+    try {
+      await Api.resolve(kase.case_id, {
+        action: choice.value,
+        actor: actor.value,
+        justification: justification.value,
+      });
+      await renderQueue();
+      if (state.tab === "audit") await renderAudit();
+    } catch (problem) {
+      /* The requirement is enforced once, in queue.py. The browser reports
+         what the server said rather than keeping its own copy of the rule. */
+      error.textContent = String(problem).replace(/^Error:\s*/, "");
+    }
+  });
+  return form;
 }
 
 function renderChecks() {

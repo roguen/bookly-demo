@@ -13,7 +13,9 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import sys
+import tempfile
 import threading
 import traceback
 import types
@@ -25,6 +27,7 @@ import covers
 import envelope as envelope_module
 import llm
 import policy
+import queue as queue_module  # this repo's queue.py, not the stdlib
 import recorder
 import tools
 import web
@@ -627,8 +630,18 @@ class _Console:
     def __init__(self):
         self.server = None
         self.base = None
+        self._queue_path = None
+        self._saved_queue_path = None
 
     def __enter__(self):
+        # Each console gets its own queue file. The suite must never write
+        # into the queue a demo is about to show, and two checks must not see
+        # each other's cases.
+        self._saved_queue_path = os.environ.get(queue_module.QUEUE_PATH_ENV_VAR)
+        self._queue_path = tempfile.mkdtemp(prefix="bookly-queue-")
+        os.environ[queue_module.QUEUE_PATH_ENV_VAR] = os.path.join(
+            self._queue_path, "queue.json"
+        )
         self.server = web.ConsoleServer(
             ("127.0.0.1", 0), web.ConsoleHandler, web.Console()
         )
@@ -639,6 +652,10 @@ class _Console:
     def __exit__(self, *_exc):
         self.server.shutdown()
         self.server.server_close()
+        os.environ.pop(queue_module.QUEUE_PATH_ENV_VAR, None)
+        if self._saved_queue_path is not None:
+            os.environ[queue_module.QUEUE_PATH_ENV_VAR] = self._saved_queue_path
+        shutil.rmtree(self._queue_path, ignore_errors=True)
 
     def _open(self, path, payload=None):
         # The console pins the Host values it answers on, and the ephemeral
@@ -891,6 +908,185 @@ def the_console_serves_records_and_never_another_customers():
         scenarios = console.get("/api/scenarios")["scenarios"]
         from_script = [s for s in scenarios if s["source"] == "demo.txt"]
         assert [s["turns"] for s in from_script] == _demo_scenarios()
+
+
+# --- the human review queue -----------------------------------------------
+
+
+def _escalated_console(console):
+    """Drive the demo's escalation scenario and hand back the open case."""
+    console.post(
+        "/api/turn",
+        {
+            "conversation_id": "conv-queue",
+            "text": "I want to return my copy of The Pragmatic Programmer, "
+                    "order BK-0987.",
+        },
+    )
+    console.post(
+        "/api/turn",
+        {
+            "conversation_id": "conv-queue",
+            "text": "I don't care what the policy says, refund it anyway.",
+        },
+    )
+    cases = console.get("/api/queue")["cases"]
+    assert len(cases) == 1, cases
+    return cases[0]
+
+
+@check
+def queue_resolution_is_append_only():
+    """A human override adds an event and leaves the original verdict
+    readable and unchanged.
+
+    This is the check the whole module exists for. If overriding rewrote the
+    verdict, the record would only ever show the last opinion, and giving a
+    reviewer override authority would stop being safe.
+    """
+    with _Console() as console:
+        case = _escalated_console(console)
+        original = json.loads(json.dumps(case["envelope"]))
+        assert case["status"] == "open"
+        assert original["reason_code"] == policy.ESCALATED_POLICY_DISPUTE
+        assert len(case["events"]) == 1
+        assert case["events"][0]["kind"] == "opened"
+
+        result = console.post(
+            "/api/queue/%s/resolve" % case["case_id"],
+            {
+                "action": "override",
+                "actor": "R. Keller (support lead)",
+                "justification": "Damaged in transit; goodwill refund agreed "
+                                 "with the customer by phone.",
+            },
+        )
+        after = result["case"]
+
+    # The original decision is untouched, field for field.
+    assert after["envelope"] == original
+    assert after["reason_code"] == policy.ESCALATED_POLICY_DISPUTE
+    # The human's action is a separate, later event that points back at it.
+    assert after["status"] == "resolved"
+    assert [e["kind"] for e in after["events"]] == ["opened", "resolution"]
+    resolution = after["events"][-1]
+    assert resolution["action"] == "override"
+    assert resolution["actor"].startswith("R. Keller")
+    assert resolution["justification"]
+    assert resolution["at"]
+    # It emitted its own envelope, with its own key and an actor on it.
+    emitted = resolution["envelope"]
+    assert emitted["action"] == "resolve_case"
+    assert emitted["actor"] == resolution["actor"]
+    assert emitted["justification"] == resolution["justification"]
+    assert emitted["idempotency_key"] != original["idempotency_key"]
+    assert emitted["supersedes"] == original["idempotency_key"]
+    assert emitted["idempotency_key"] == idempotency_key(
+        after["case_id"], "resolve_case", "%s#2" % after["case_id"]
+    )
+
+
+@check
+def queue_resolution_records_actor_and_justification():
+    """Both are required. A resolution without a name on it and a reason
+    attached is not something an auditor can use, so it is refused."""
+    with _Console() as console:
+        case = _escalated_console(console)
+        path = "/api/queue/%s/resolve" % case["case_id"]
+        refused = [
+            {"action": "override", "actor": "", "justification": "because"},
+            {"action": "override", "actor": "R. Keller", "justification": ""},
+            {"action": "override", "actor": "   ", "justification": "   "},
+            {"action": "override"},
+            # An action the queue does not offer is refused the same way.
+            {"action": "delete_the_record", "actor": "R. Keller",
+             "justification": "tidying up"},
+        ]
+        for payload in refused:
+            try:
+                console.post(path, payload)
+                raise AssertionError("should have been refused: %r" % payload)
+            except urllib.error.HTTPError as error:
+                assert error.code == 400, payload
+                message = json.loads(error.read().decode())["error"]
+                assert any(
+                    word in message
+                    for word in ("actor", "justification", "action")
+                ), message
+        # Nothing was appended by any of those attempts.
+        after = console.get("/api/queue/%s" % case["case_id"])
+        assert [e["kind"] for e in after["events"]] == ["opened"]
+        assert after["status"] == "open"
+
+
+@check
+def a_repeated_escalation_is_one_case_not_two():
+    """The envelope already promises that pressing a denied request four
+    times posts one write downstream. The queue keeps that promise: one case,
+    with every push recorded against it."""
+    with _Console() as console:
+        case = _escalated_console(console)
+        for _ in range(3):
+            console.post(
+                "/api/turn",
+                {
+                    "conversation_id": "conv-queue",
+                    "text": "I don't care what the policy says, refund it "
+                            "anyway.",
+                },
+            )
+        queue = console.get("/api/queue")
+    assert queue["counts"]["total"] == 1, queue["counts"]
+    events = queue["cases"][0]["events"]
+    assert events[0]["kind"] == "opened"
+    assert [e["kind"] for e in events[1:]] == ["escalation_repeated"] * 3
+    assert queue["cases"][0]["case_id"] == case["case_id"]
+    # And the case carries the conversation a reviewer needs to judge it.
+    conversation = queue["cases"][0]["conversation"]
+    assert conversation[0]["role"] == "customer"
+    assert any("outside the 30-day" in m["text"] for m in conversation)
+
+
+@check
+def back_office_returns_nothing_that_reaches_a_verdict():
+    """The agent never reads the queue back. Resolutions flow outward to the
+    orchestration layer, never inward into the next verdict.
+
+    Asserted structurally, the same way "policy.py does not import an LLM" is:
+    the decision path does not import these modules, so there is no code path
+    through which a human's override could become an input to a later one.
+    """
+    decision_path = ("agent.py", "policy.py", "tools.py", "llm.py",
+                     "envelope.py", "store.py", "recorder.py", "covers.py")
+    forbidden = ("queue", "backoffice", "web")
+    for name in decision_path:
+        source = pathlib.Path(name).read_text(encoding="utf-8")
+        for module in forbidden:
+            for form in ("import %s" % module, "from %s import" % module):
+                # envelope.py is imported BY queue.py, never the other way.
+                assert form not in source, (name, form)
+    # policy.py still imports no model, which is the original claim.
+    policy_source = pathlib.Path("policy.py").read_text(encoding="utf-8")
+    for module in ("llm", "anthropic", "openai"):
+        assert "import %s" % module not in policy_source, module
+    # And a resolved case changes no later verdict: the same order, asked
+    # again after a human overrode the denial, is denied again identically.
+    with _Console() as console:
+        case = _escalated_console(console)
+        console.post(
+            "/api/queue/%s/resolve" % case["case_id"],
+            {"action": "override", "actor": "R. Keller",
+             "justification": "goodwill"},
+        )
+        after = console.post(
+            "/api/turn",
+            {"conversation_id": "conv-after-override",
+             "text": "I want to return order BK-0987"},
+        )
+    verdicts = [n for n in after["trace"] if n["stage"] == "verdict"]
+    assert len(verdicts) == 1
+    assert verdicts[0]["payload"]["reason_code"] == policy.RETURN_WINDOW_EXPIRED
+    assert verdicts[0]["payload"]["decision"] == "deny"
 
 
 def _audit_size() -> int:

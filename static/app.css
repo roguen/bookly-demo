@@ -805,6 +805,191 @@ button:disabled {
   font-size: var(--step--2);
 }
 
+/* --- the review queue ---------------------------------------------------
+   The decision under review and the human's action are drawn as two separate
+   blocks, in that order, because that is what happened. Nothing here styles
+   a resolution as a correction of the thing above it. */
+
+.case {
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--raised);
+  padding: 10px;
+  margin-bottom: 12px;
+}
+
+.case-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.case-id {
+  font-family: var(--mono);
+  font-size: var(--step--2);
+  color: var(--muted);
+}
+
+.case-status {
+  font-size: var(--step--2);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  padding: 0 8px;
+}
+
+.case[data-status="open"] .case-status {
+  border-color: #c9873b;
+  color: #f0c07a;
+}
+
+.case[data-status="resolved"] .case-status {
+  border-color: var(--lilac);
+  color: var(--lilac);
+}
+
+.case-transcript {
+  margin: 8px 0;
+}
+
+.case-transcript summary {
+  cursor: pointer;
+  font-size: var(--step--2);
+  color: var(--muted);
+}
+
+.case-turn {
+  padding: 4px 0 4px 8px;
+  border-left: 2px solid var(--rule);
+  margin-top: 4px;
+  font-size: var(--step--1);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* The same provenance rule as everywhere else: the agent's words are model
+   output, the customer's are neither side. */
+.case-turn.agent {
+  border-left-color: var(--grey);
+  color: var(--lightgrey);
+}
+
+.case-turn.customer {
+  border-left-color: #5b5b8c;
+  color: #fff;
+}
+
+.case-turn .who {
+  display: block;
+  font-size: var(--step--2);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.case-events {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.case-events li {
+  border-left: 2px solid var(--rule);
+  padding: 4px 0 4px 10px;
+  font-size: var(--step--1);
+}
+
+/* A human's action is not the deterministic side and not the model side —
+   it is a third thing the system records rather than computes, so it takes
+   the neutral outline the customer's own words take. */
+.case-events li[data-kind="resolution"] {
+  border-left-color: var(--boundary);
+}
+
+.event-kind {
+  font-size: var(--step--2);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--neutral-ink);
+  margin-right: 8px;
+}
+
+.event-actor {
+  font-family: var(--mono);
+  font-size: var(--step--2);
+  color: var(--muted);
+}
+
+.event-action {
+  font-weight: 700;
+  color: #fff;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: var(--step--1);
+  margin-top: 2px;
+}
+
+.resolve {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--rule);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.resolve h4 {
+  margin: 0;
+  font-size: var(--step--2);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.resolve input,
+.resolve textarea,
+.resolve select {
+  font: inherit;
+  font-size: var(--step--1);
+  font-family: var(--sans);
+  color: #fff;
+  background: var(--deep);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 7px 9px;
+  width: 100%;
+  resize: vertical;
+}
+
+.resolve input::placeholder,
+.resolve textarea::placeholder {
+  color: var(--muted);
+}
+
+.resolve button {
+  align-self: flex-start;
+  background: var(--purple);
+  border-color: var(--purple);
+  color: #fff;
+  font-weight: 600;
+}
+
+.form-error {
+  margin: 0;
+  color: #f0c07a;
+  font-size: var(--step--1);
+}
+
+.form-error:empty {
+  display: none;
+}
+
 /* --- provider badge ---------------------------------------------------- */
 
 .provider {

@@ -81,6 +81,59 @@ def emit(
     return envelope, delivery
 
 
+def emit_resolution(
+    case_id: str,
+    resolution_id: str,
+    resolution: str,
+    actor: str,
+    justification: str,
+    order_id: Optional[str] = None,
+    conversation_id: Optional[str] = None,
+    supersedes: Optional[str] = None,
+) -> Tuple[dict, str]:
+    """A human's decision on an escalated case, emitted the same way.
+
+    Deliberately a separate function rather than an `actor` argument on
+    `emit`. Two reasons, and both matter more than the saved lines:
+
+    The agent's envelopes are unchanged, byte for byte, which keeps the
+    evidence in evidence/duplicate_receipt.txt valid against a receiver that
+    prints whatever it is sent.
+
+    And these are not the same kind of record. An agent envelope carries a
+    reason code, because a policy function produced it. A resolution carries
+    a person and a sentence, because a person produced it — inventing a
+    reason code for a human judgement would be the dishonest field on the
+    screen. `supersedes` points back at the decision under review without
+    touching it: the original stays exactly as policy computed it.
+    """
+    envelope = {
+        "envelope_id": uuid.uuid4().hex,
+        "idempotency_key": idempotency_key(
+            case_id, "resolve_case", resolution_id
+        ),
+        "action": "resolve_case",
+        "resolution": resolution,
+        "case_id": case_id,
+        "order_id": order_id,
+        "conversation_id": conversation_id,
+        # Who, and why. Both required upstream in queue.py.
+        "actor": actor,
+        "justification": justification,
+        "supersedes": supersedes,
+    }
+    _audit({"event": "emitted", "envelope": envelope})
+    delivery = _deliver(envelope)
+    _audit(
+        {
+            "event": "delivery",
+            "envelope_id": envelope["envelope_id"],
+            "delivery": delivery,
+        }
+    )
+    return envelope, delivery
+
+
 def _deliver(envelope: dict) -> str:
     url = os.environ.get(WEBHOOK_ENV_VAR)
     if not url:
