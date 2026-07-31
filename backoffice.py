@@ -147,11 +147,17 @@ class Ledger:
 
 
 class BackOffice:
-    def __init__(self) -> None:
+    def __init__(self, verbose: bool = False) -> None:
         self.ledger = Ledger()
         # The same queue file the console writes. Two processes, one shared
         # record — which is the point of running this separately at all.
         self.queue = review.ReviewQueue()
+        # Printing each arriving envelope is a property of running this as a
+        # program — it is how you watch deliveries land in a terminal, the
+        # same way stub_receiver.py does. It is not a property of the object,
+        # so a check that embeds one gets silence and the console's Checks
+        # panel shows check results rather than envelope dumps.
+        self.verbose = verbose
 
 
 class BackOfficeHandler(BaseHTTPRequestHandler):
@@ -294,11 +300,12 @@ class BackOfficeHandler(BaseHTTPRequestHandler):
         """
         payload = self._body()
         result = office.ledger.receive(payload)
-        marker = " (DUPLICATE — would not be re-executed)" if result[
-            "duplicate"
-        ] else ""
-        print("--- envelope received%s ---" % marker, flush=True)
-        print(json.dumps(payload, indent=2), flush=True)
+        if office.verbose:
+            marker = " (DUPLICATE — would not be re-executed)" if result[
+                "duplicate"
+            ] else ""
+            print("--- envelope received%s ---" % marker, flush=True)
+            print(json.dumps(payload, indent=2), flush=True)
         self._json({"ok": True, "duplicate": result["duplicate"]})
 
     def _resolve(self, office: BackOffice, case_id: str) -> None:
@@ -349,7 +356,9 @@ class BackOfficeServer(ThreadingHTTPServer):
 
 
 def serve(port: int = PORT) -> None:
-    server = BackOfficeServer((HOST, port), BackOfficeHandler, BackOffice())
+    server = BackOfficeServer(
+        (HOST, port), BackOfficeHandler, BackOffice(verbose=True)
+    )
     actual = server.server_address[1]
     print("Bookly back office on http://%s:%d" % (HOST, actual))
     print("webhook: http://%s:%d/webhook" % (HOST, actual))

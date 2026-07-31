@@ -1049,6 +1049,153 @@ body[data-view="customer"] .columns {
   grid-template-columns: var(--record-w) minmax(0, 1fr);
 }
 
+/* --- checks, run from inside the app ------------------------------------ */
+
+.checks-output {
+  margin-top: 10px;
+  max-height: 46vh;
+  overflow-y: auto;
+  border: 1px solid var(--rule-soft);
+  border-radius: var(--radius);
+  background: var(--deep);
+  padding: 8px 10px;
+  font-family: var(--mono);
+  font-size: var(--step--2);
+}
+
+.checks-output:empty {
+  display: none;
+}
+
+.check-line {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+}
+
+/* A passing check is the deterministic side reporting on itself, so it takes
+   the purple family. A failure is neither side — it is a fact about the
+   build — and takes the same warm neutral a failed delivery does. */
+.check-line[data-result="ok"] {
+  color: var(--lilac);
+}
+
+.check-line[data-result="FAIL"] {
+  color: #f0c07a;
+  font-weight: 700;
+}
+
+.checks-summary {
+  margin: 10px 0 0;
+  font-family: var(--mono);
+  font-weight: 700;
+}
+
+.checks-summary[data-state="pass"] {
+  color: var(--lilac);
+}
+
+.checks-summary[data-state="fail"] {
+  color: #f0c07a;
+}
+
+/* --- provider parity ---------------------------------------------------- */
+
+.parity {
+  margin-top: 18px;
+}
+
+.parity-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--rule-soft);
+  border-left: 3px solid var(--lilac);
+  border-radius: var(--radius);
+  background: var(--raised);
+  padding: 7px 10px;
+  margin-bottom: 6px;
+}
+
+.parity-provider {
+  font-size: var(--step--2);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  /* The provider is the model side; the decision beside it is not. */
+  color: var(--grey);
+}
+
+.parity-decision {
+  font-family: var(--mono);
+  font-size: var(--step--1);
+  color: var(--neutral-ink);
+  overflow-wrap: anywhere;
+}
+
+.parity-key {
+  font-family: var(--mono);
+  font-size: var(--step--2);
+  color: var(--lilac);
+  overflow-wrap: anywhere;
+}
+
+/* --- the provider switcher ---------------------------------------------- */
+
+button.provider {
+  cursor: pointer;
+}
+
+.provider-panel {
+  margin: 8px 16px 0;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--raised);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 640px;
+}
+
+.provider-panel[hidden] {
+  display: none;
+}
+
+.provider-panel h4 {
+  margin: 0;
+  font-size: var(--step--2);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.provider-choices {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.provider-choices button[aria-pressed="true"] {
+  background: var(--raised-2);
+  border-color: var(--lilac);
+  color: #fff;
+  font-weight: 600;
+}
+
+.provider-panel input {
+  font: inherit;
+  font-size: var(--step--1);
+  color: #fff;
+  background: var(--deep);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+}
+
+.provider-panel input::placeholder {
+  color: var(--muted);
+}
+
 /* --- the back office ----------------------------------------------------
    A second process on a second port, sharing this stylesheet so it reads as
    the deterministic side of the same boundary rather than a second product

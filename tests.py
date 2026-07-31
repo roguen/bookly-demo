@@ -880,6 +880,76 @@ def a_hosted_provider_with_no_key_stays_on_the_standin():
 
 
 @check
+def switching_provider_mid_conversation_changes_wording_not_the_key():
+    """The demo beat, tested without a billed call.
+
+    A hosted run is already on record in evidence/provider_parity.txt. What a
+    network call cannot show is *why* it holds, so this swaps in a provider
+    that extracts identically and phrases differently, mid-conversation, and
+    asserts the decision is untouched. The idempotency key is
+    sha256(conversation|action|order_id); no provider appears in that
+    material, and there is no seam for one to.
+    """
+
+    class LoudProvider:
+        """Same two jobs, different voice. Extraction is delegated, because
+        the point is the narration changing while the decision does not."""
+
+        name = "loud stand-in"
+
+        def __init__(self):
+            self._rules = RulesProvider()
+
+        def extract(self, text, context):
+            return self._rules.extract(text, context)
+
+        def narrate(self, event):
+            return "!! %s !!" % self._rules.narrate(event).upper()
+
+    agent = Agent(RulesProvider(), "conv-switch")
+    quiet = agent.handle_turn("I'd like to return a book.")
+    assert "which book" in quiet.reply
+
+    # Swapped in the middle of a live conversation, exactly as the console
+    # does it: rebind the provider, keep the agent and its memory.
+    agent.provider = LoudProvider()
+    loud = agent.handle_turn("The Escher one — the cover is torn.")
+    assert loud.reply.startswith("!!")  # the wording moved
+    (envelope_record, _delivery), = loud.envelopes
+
+    # The same conversation, run entirely on the stand-in, for comparison.
+    control = Agent(RulesProvider(), "conv-switch")
+    control.handle_turn("I'd like to return a book.")
+    control_result = control.handle_turn("The Escher one — the cover is torn.")
+    (control_envelope, _control_delivery), = control_result.envelopes
+
+    assert loud.reply != control_result.reply  # different prose
+    for field in ("action", "order_id", "amount", "currency", "reason_code",
+                  "idempotency_key", "conversation_id"):
+        assert envelope_record[field] == control_envelope[field], field
+    assert envelope_record["amount"] == ORDERS["BK-1042"].price_paid
+    assert envelope_record["idempotency_key"] == idempotency_key(
+        "conv-switch", "refund", "BK-1042"
+    )
+    # And the conversation memory survived the switch — a new Agent would
+    # have lost the pending question and re-asked instead of refunding.
+    assert agent.pending is None
+
+    # The console switches the same way: it rebinds live agents rather than
+    # rebuilding them, which is what makes the above true through the API.
+    with _Console() as console:
+        console.post(
+            "/api/turn",
+            {"conversation_id": "conv-live-switch", "text": "I'd like to "
+             "return a book."},
+        )
+        before = console.server.console._agents["conv-live-switch"]
+        console.post("/api/provider", {"name": "rules"})
+        after = console.server.console._agents["conv-live-switch"]
+        assert before is after, "switching must not rebuild the conversation"
+
+
+@check
 def the_console_serves_records_and_never_another_customers():
     """The record, the orders and their covers come out of the store; an
     order belonging to someone else is not among them and its cover is not

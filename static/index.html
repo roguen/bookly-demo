@@ -22,11 +22,15 @@
               Operator view
             </button>
           </div>
-          <span class="provider" id="provider-badge"></span>
+          <!-- The badge is the control: it shows the active provider and
+               the state of the key, and opens the switcher. -->
+          <button type="button" class="provider" id="provider-badge"></button>
           <button type="button" id="replay">Replay</button>
           <button type="button" id="reset">Reset</button>
         </div>
       </header>
+
+      <div class="provider-panel" id="provider-panel" hidden></div>
 
       <p class="notice" id="notice" hidden></p>
 

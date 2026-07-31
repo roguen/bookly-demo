@@ -117,6 +117,8 @@ const state = {
   trace: [],
   envelopes: [],
   busy: false,
+  checksRunning: false,
+  providerOpen: false,
 };
 
 const dom = {};
@@ -708,12 +710,193 @@ function resolveForm(kase, actions) {
   return form;
 }
 
+/* --- checks: the suite, run from inside the app -------------------------- */
+
+const CHECK_LINE = /^(ok|FAIL)\s+(\S+)/;
+const SUMMARY_LINE = /^(\d+) passed, (\d+) failed/;
+
 function renderChecks() {
   const panel = dom.panels.checks;
   clear(panel);
+
+  const output = el("div", { class: "checks-output" });
+  const summary = el("p", { class: "checks-summary" });
+  const run = el("button", {
+    text: state.checksRunning ? "Running…" : "Run the check suite",
+    attrs: { type: "button", ...(state.checksRunning ? { disabled: "" } : {}) },
+  });
+
+  run.addEventListener("click", async () => {
+    if (state.checksRunning) return;
+    state.checksRunning = true;
+    run.disabled = true;
+    run.textContent = "Running…";
+    clear(output);
+    summary.textContent = "";
+    summary.removeAttribute("data-state");
+    try {
+      /* Streamed, so the first result appears while the rest are still
+         running. A button that spins for ten seconds proves nothing. */
+      for await (const line of Api.checks()) {
+        const match = CHECK_LINE.exec(line);
+        const row = el("div", {
+          class: "check-line",
+          text: line,
+          attrs: match ? { "data-result": match[1] } : {},
+        });
+        output.appendChild(row);
+        output.scrollTop = output.scrollHeight;
+        const done = SUMMARY_LINE.exec(line);
+        if (done) {
+          summary.textContent = line;
+          summary.setAttribute(
+            "data-state",
+            Number(done[2]) === 0 ? "pass" : "fail"
+          );
+        }
+      }
+    } catch (error) {
+      summary.textContent = String(error);
+      summary.setAttribute("data-state", "fail");
+    } finally {
+      state.checksRunning = false;
+      run.disabled = false;
+      run.textContent = "Run the check suite again";
+    }
+  });
+
   panel.appendChild(
-    emptyState("Checks not run yet", "Run the suite from inside the app.")
+    el("p", {
+      class: "policy-source",
+      text: "tests.py, run in a subprocess with this interpreter, no shell, and an environment with every vendor key stripped out. The same suite the repo ships; nothing here is a separate copy.",
+    })
   );
+  panel.appendChild(run);
+  panel.appendChild(summary);
+  panel.appendChild(output);
+  panel.appendChild(renderParity());
+}
+
+/* --- provider parity ----------------------------------------------------
+   The claim is that the provider changes the wording and not the decision.
+   This shows it for whatever has actually happened in this session: every
+   envelope emitted, tagged with the provider that phrased the reply around
+   it. Switch provider mid-conversation, ask the same thing again, and the
+   idempotency key is the same value in both rows. */
+
+function renderParity() {
+  const block = el("div", { class: "parity" }, [
+    el("h3", { class: "col-head", text: "Provider parity" }),
+  ]);
+  if (!state.envelopes.length) {
+    block.appendChild(
+      emptyState(
+        "Nothing emitted yet",
+        "Take a turn that decides something, switch provider from the badge above, and ask again. The wording changes; the idempotency key does not."
+      )
+    );
+    return block;
+  }
+  const providers = new Set(state.envelopes.map((e) => e.provider));
+  block.appendChild(
+    el("p", {
+      class: "policy-source",
+      text:
+        providers.size > 1
+          ? `${providers.size} providers used this session. Matching keys below were produced by different models.`
+          : "One provider so far. Switch from the badge above and repeat a request to compare.",
+    })
+  );
+  for (const entry of state.envelopes) {
+    const e = entry.envelope;
+    block.appendChild(
+      el("div", { class: "parity-row" }, [
+        el("span", { class: "parity-provider", text: entry.provider }),
+        el("span", {
+          class: "parity-decision",
+          text: `${e.action} · ${e.order_id || "—"} · ${money(e.amount)} · ${
+            e.reason_code
+          }`,
+        }),
+        el("span", { class: "parity-key", text: e.idempotency_key }),
+      ])
+    );
+  }
+  return block;
+}
+
+/* --- the provider control ------------------------------------------------
+   A key is held in memory for the session, shown only as a badge, and never
+   written anywhere. Switching mid-conversation is allowed and is itself the
+   demonstration. */
+
+function renderProviderPanel() {
+  const panel = dom.providerPanel;
+  clear(panel);
+  if (!state.providerOpen || !state.provider) {
+    panel.hidden = true;
+    return;
+  }
+  panel.hidden = false;
+
+  const key = el("input", {
+    attrs: {
+      type: "password",
+      placeholder: "API key (held in memory for this session only)",
+      autocomplete: "off",
+      spellcheck: "false",
+    },
+  });
+  const message = el("p", { class: "form-error" });
+  const choices = el("div", { class: "provider-choices" });
+
+  for (const name of state.provider.available) {
+    const active = name === state.provider.active;
+    choices.appendChild(
+      el("button", {
+        text: name,
+        attrs: {
+          type: "button",
+          "aria-pressed": String(active),
+        },
+        on: {
+          click: async () => {
+            message.textContent = "";
+            try {
+              const result = await Api.setProvider(name, key.value || null);
+              state.provider = result;
+              key.value = "";
+              renderProvider();
+              renderProviderPanel();
+              if (!result.ok) message.textContent = result.message;
+            } catch (error) {
+              message.textContent = String(error);
+            }
+          },
+        },
+      })
+    );
+  }
+
+  panel.appendChild(el("h4", { text: "Model provider" }));
+  panel.appendChild(choices);
+  panel.appendChild(key);
+  panel.appendChild(
+    el("p", {
+      class: "policy-source",
+      text: "The key is accepted by POST body, held on one object in the server's memory, and shown only as a badge. It is never written to disk, never logged, never put in a URL, and never exported to the environment — the checks run in a subprocess, and an exported key would ride into it. Selecting a hosted provider with no key leaves the stand-in running and says so.",
+    })
+  );
+  const environment = state.provider.environment_keys;
+  if (environment.length) {
+    panel.appendChild(
+      el("p", {
+        class: "policy-source",
+        text: `Keys found in the environment: ${environment.join(", ")}.`,
+      })
+    );
+  }
+  panel.appendChild(message);
 }
 
 /* --- provider ----------------------------------------------------------- */
@@ -758,7 +941,11 @@ async function send(text) {
     const result = await Api.turn(CONVERSATION_ID, text);
     state.messages.push({ role: "agent", text: result.reply });
     state.trace = result.trace;
-    state.envelopes.push(...result.envelopes);
+    // Tagged at emission, so the parity view can show that two providers
+    // produced the same key.
+    state.envelopes.push(
+      ...result.envelopes.map((entry) => ({ ...entry, provider: result.provider }))
+    );
     renderMessages();
     renderTrace(true);
     if (state.tab === "audit") await renderAudit();
@@ -809,6 +996,11 @@ async function boot() {
   dom.tabs = document.getElementById("tabs");
   dom.notice = document.getElementById("notice");
   dom.providerBadge = document.getElementById("provider-badge");
+  dom.providerPanel = document.getElementById("provider-panel");
+  dom.providerBadge.addEventListener("click", () => {
+    state.providerOpen = !state.providerOpen;
+    renderProviderPanel();
+  });
   dom.viewCustomer = document.getElementById("view-customer");
   dom.viewOperator = document.getElementById("view-operator");
   dom.panels = {
@@ -841,7 +1033,9 @@ async function boot() {
     renderMessages();
     renderTrace(false);
     state.provider = await Api.provider();
+    state.providerOpen = false;
     renderProvider();
+    renderProviderPanel();
     if (state.tab === "audit") renderAudit();
     notify(null);
   });
@@ -875,6 +1069,7 @@ async function boot() {
      this telemetry — before anyone has to ask it. */
   setView("customer");
   setTab("trace");
+  renderProviderPanel();
   renderRecord();
   renderMessages();
   renderTrace(false);
