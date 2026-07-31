@@ -56,6 +56,8 @@ export const Api = {
   turn: (conversationId, text) =>
     api("/api/turn", { conversation_id: conversationId, text }),
   reset: () => api("/api/reset"),
+  restart: (conversationId) =>
+    api("/api/conversation/restart", { conversation_id: conversationId }),
 
   /* The check suite streams, so this yields lines as they arrive rather
      than resolving once at the end. A button that spins for ten seconds
@@ -105,7 +107,7 @@ export function clear(node) {
 
 /* --- state -------------------------------------------------------------- */
 
-const CONVERSATION_ID = "conv-console";
+const FREE_CONVERSATION_ID = "conv-console";
 
 const state = {
   view: "customer",
@@ -119,6 +121,9 @@ const state = {
   busy: false,
   checksRunning: false,
   providerOpen: false,
+  replaying: false,
+  scenarios: null,
+  conversationId: FREE_CONVERSATION_ID,
 };
 
 const dom = {};
@@ -929,6 +934,126 @@ function notify(message) {
   dom.notice.textContent = message;
 }
 
+/* --- scripted replay -----------------------------------------------------
+   A recording is the leave-behind, and a live demo can always fail. Replay
+   makes both survivable: it plays a scripted conversation into the real UI,
+   through the real API, at a readable pace.
+
+   Deliberately no randomness in the cadence. A replay that varies is not
+   reproducible, and reproducibility is the whole reason this exists. */
+
+const TYPE_TICK_MS = 26;
+/* Long turns type in chunks so the whole line lands in a bounded number of
+   ticks. Two reasons, and the second is the one that bit: a 110-character
+   injection string is dead air at one character a tick, and a browser that
+   has backgrounded the tab clamps timers to about a second, which turns that
+   dead air into a stall. Bounding the ticks makes the cadence readable and
+   the replay robust to a tab that is not in front. */
+const MAX_TYPE_TICKS = 34;
+const PAUSE_BETWEEN_TURNS_MS = 1100;
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function typeInto(input, text) {
+  input.value = "";
+  if (reducedMotion.matches) {
+    input.value = text;
+    return;
+  }
+  const chunk = Math.max(1, Math.ceil(text.length / MAX_TYPE_TICKS));
+  for (let at = 0; at < text.length; at += chunk) {
+    if (!state.replaying) return;
+    input.value = text.slice(0, at + chunk);
+    await wait(TYPE_TICK_MS);
+  }
+}
+
+async function toggleReplay() {
+  if (state.replaying) {
+    state.replaying = false;
+    notify("Replay stopped.");
+    return;
+  }
+  if (!state.scenarios) {
+    try {
+      state.scenarios = (await Api.scenarios()).scenarios;
+    } catch (error) {
+      notify(String(error));
+      return;
+    }
+  }
+  renderReplayPanel();
+}
+
+function renderReplayPanel() {
+  const panel = dom.replayPanel;
+  clear(panel);
+  panel.hidden = false;
+  panel.appendChild(el("h4", { text: "Scripted replay" }));
+  panel.appendChild(
+    el("p", {
+      class: "policy-source",
+      text: "Played into the real interface through the real API at a fixed cadence — nothing is pre-recorded, and the decisions are computed live. The four numbered scenarios are read from demo.txt, so the CLI script and the console cannot drift.",
+    })
+  );
+  const list = el("div", { class: "replay-list" });
+  for (const scenario of state.scenarios) {
+    list.appendChild(
+      el("button", {
+        text: `${scenario.title} · ${scenario.turns.length} turns`,
+        attrs: { type: "button" },
+        on: {
+          click: () => {
+            panel.hidden = true;
+            runReplay(scenario);
+          },
+        },
+      })
+    );
+  }
+  panel.appendChild(list);
+  panel.appendChild(
+    el("button", {
+      text: "Close",
+      attrs: { type: "button" },
+      on: { click: () => (panel.hidden = true) },
+    })
+  );
+}
+
+async function runReplay(scenario) {
+  state.replaying = true;
+  dom.replay.textContent = "Stop replay";
+  notify(`Replaying: ${scenario.title}`);
+  /* Each scenario is its own conversation, the same way `---` starts a new
+     Agent in demo.txt. The id is derived from the scenario rather than being
+     random, so replaying it twice produces the same idempotency keys — and
+     with the back office running, the second run lands as suppressed
+     duplicates rather than a second write. */
+  state.conversationId = `conv-${scenario.id}`;
+  state.messages = [];
+  state.trace = [];
+  renderMessages();
+  renderTrace(false);
+  try {
+    await Api.restart(state.conversationId);
+    for (const turn of scenario.turns) {
+      if (!state.replaying) break;
+      await typeInto(dom.message, turn);
+      if (!state.replaying) break;
+      dom.message.value = "";
+      await send(turn);
+      await wait(PAUSE_BETWEEN_TURNS_MS);
+    }
+  } finally {
+    state.replaying = false;
+    state.conversationId = FREE_CONVERSATION_ID;
+    dom.replay.textContent = "Replay";
+    dom.message.value = "";
+    if (!dom.notice.hidden) notify(null);
+  }
+}
+
 /* --- interactions ------------------------------------------------------- */
 
 async function send(text) {
@@ -938,7 +1063,7 @@ async function send(text) {
   state.messages.push({ role: "customer", text });
   renderMessages();
   try {
-    const result = await Api.turn(CONVERSATION_ID, text);
+    const result = await Api.turn(state.conversationId, text);
     state.messages.push({ role: "agent", text: result.reply });
     state.trace = result.trace;
     // Tagged at emission, so the parity view can show that two providers
@@ -997,6 +1122,8 @@ async function boot() {
   dom.notice = document.getElementById("notice");
   dom.providerBadge = document.getElementById("provider-badge");
   dom.providerPanel = document.getElementById("provider-panel");
+  dom.replayPanel = document.getElementById("replay-panel");
+  dom.replay = document.getElementById("replay");
   dom.providerBadge.addEventListener("click", () => {
     state.providerOpen = !state.providerOpen;
     renderProviderPanel();
@@ -1026,10 +1153,13 @@ async function boot() {
     button.addEventListener("click", () => setRegion(button.dataset.region));
   }
   document.getElementById("reset").addEventListener("click", async () => {
+    state.replaying = false;
+    dom.replayPanel.hidden = true;
     await Api.reset();
     state.messages = [];
     state.trace = [];
     state.envelopes = [];
+    state.conversationId = FREE_CONVERSATION_ID;
     renderMessages();
     renderTrace(false);
     state.provider = await Api.provider();
@@ -1039,9 +1169,7 @@ async function boot() {
     if (state.tab === "audit") renderAudit();
     notify(null);
   });
-  document.getElementById("replay").addEventListener("click", () => {
-    notify("Scripted replay arrives with the demo scenarios.");
-  });
+  document.getElementById("replay").addEventListener("click", toggleReplay);
 
   try {
     const [customer, provider] = await Promise.all([
@@ -1067,6 +1195,15 @@ async function boot() {
   /* Open in customer view so it reads as a finished product, then peel it
      open on stage. It also answers the obvious question — do customers see
      this telemetry — before anyone has to ask it. */
+  /* The page was just reloaded, so the transcript on screen is empty. The
+     server's conversation must agree, or the agent is still holding a
+     pending question nobody can see. */
+  try {
+    await Api.restart(FREE_CONVERSATION_ID);
+  } catch (error) {
+    notify(String(error));
+  }
+
   setView("customer");
   setTab("trace");
   renderProviderPanel();

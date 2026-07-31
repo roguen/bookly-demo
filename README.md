@@ -40,6 +40,80 @@ Run the tests (standard library only, no pytest):
 python3 tests.py
 ```
 
+## The console
+
+A local web console for the same agent — the presentation medium for a live
+demo, and the way the architecture becomes legible to someone who will not
+read `policy.py`.
+
+```bash
+python3 web.py
+```
+
+`http://127.0.0.1:8000`. Same constraints as everything else here: standard
+library only, no `pip install`, no `npm`, no build step, no bundler, and no
+network at runtime except a hosted model call you opt into. It works on a
+plane.
+
+The layout is the argument. A three-pixel line runs down the middle: language
+on one side, decisions on the other. **Every element is coloured by which side
+of the boundary produced it** — model output grey, deterministic output
+purple, the customer's own words neither, so they are outlined and neutral.
+That is one rule with no exceptions, and it is the whole design system.
+
+| Surface | What it shows |
+| --- | --- |
+| Record | the customer, their orders, and the thresholds read from `policy.py` |
+| Conversation | the turns, in the two voices |
+| Trace | every step of one turn, tagged with the side that produced it |
+| Audit | `audit.log`, newest first, with delivery status made legible |
+| Queue | escalated cases, and the append-only resolution record |
+| Checks | `tests.py`, streamed, plus a provider parity view |
+
+**Customer view / operator view.** It opens in customer view, showing only
+what a shopper would see. Lifetime value and CSAT are not hidden with CSS in
+that mode — they are not rendered.
+
+**Replay** plays a scripted conversation into the real interface through the
+real API. Nothing is pre-recorded. `DEMO.md` is the run of show.
+
+### The back office
+
+The other side of the boundary, as a second process on a second port.
+
+```bash
+python3 backoffice.py
+```
+
+```bash
+BOOKLY_WEBHOOK_URL=http://127.0.0.1:8787/webhook python3 web.py
+```
+
+`http://127.0.0.1:8787` — a refund ledger, an agent desk, and a read-only
+policy viewer. The separation is the architectural argument rather than
+packaging: the agent claims to *emit* actions rather than execute them, and if
+the receiver ran inside the agent's process you would have to take that on
+trust. Instead, kill it mid-conversation. The refund still decides, still
+writes its audit line, and records `failed_unreachable`.
+
+It binds the same port `stub_receiver.py` does, on purpose — it is a drop-in
+receiver. Run one or the other.
+
+Every back-office surface carries a permanent stand-in chip. The ledger's
+deduplication is in memory and dies with the process, the same contract the
+stub has, and the screen says so rather than implying durability it does not
+have.
+
+### Re-skinning
+
+The demo dataset — customer, orders, catalog, knowledge base, frozen clock and
+scenarios — lives in `profiles/bookly.json`. `BOOKLY_PROFILE=<name>` selects
+another. Standing this up for a different company is a data edit.
+
+Thresholds and reason codes deliberately did **not** move into the profile.
+Those are policy, they live in `policy.py`, and a data file must not be able to
+reach them.
+
 ## How a turn flows
 
 ```
@@ -147,18 +221,25 @@ to drift and no place for a vendor to introduce a decision.
 
 ## Files
 
-| File               | What it exists to prove                                |
-| ------------------ | ------------------------------------------------------ |
-| `policy.py`        | decisions are pure functions with reason codes         |
-| `llm.py`           | the model's two jobs, and nothing else                 |
-| `agent.py`         | the state machine, memory tiers, when it asks          |
-| `tools.py`         | facts and records out — never prose                    |
-| `envelope.py`      | the boundary between deciding and executing            |
-| `store.py`         | mock orders and knowledge base, frozen clock           |
-| `app.py`           | the CLI shell                                          |
-| `stub_receiver.py` | the orchestration layer's end of the webhook           |
-| `tests.py`         | the eval harness                                       |
-| `demo.txt`         | the four scripted scenarios                            |
+| File                  | What it exists to prove                             |
+| --------------------- | --------------------------------------------------- |
+| `policy.py`           | decisions are pure functions with reason codes      |
+| `llm.py`              | the model's two jobs, and nothing else              |
+| `agent.py`            | the state machine, memory tiers, when it asks       |
+| `tools.py`            | facts and records out — never prose                 |
+| `envelope.py`         | the boundary between deciding and executing         |
+| `store.py`            | records loaded from a profile, frozen clock         |
+| `recorder.py`         | the interface observes a turn, never joins it       |
+| `queue.py`            | a human resolves; the verdict is never edited       |
+| `covers.py`           | cover art with no files, downloads, or licences     |
+| `web.py`              | the console's API — it decides nothing              |
+| `backoffice.py`       | receiving is a different process from deciding      |
+| `app.py`              | the CLI shell                                       |
+| `stub_receiver.py`    | the orchestration layer's end of the webhook        |
+| `tests.py`            | the eval harness                                    |
+| `demo.txt`            | the four scripted scenarios                         |
+| `profiles/bookly.json`| the dataset, so a re-skin is a data edit            |
+| `DEMO.md`             | the run of show                                     |
 
 ## Assumptions and limits
 
@@ -185,3 +266,13 @@ to drift and no place for a vendor to introduce a decision.
   `injection_changes_nothing` in `tests.py` and `evidence/`.
 - Repeated escalations in one conversation share one idempotency key, so a
   downstream consumer posts a single case however often the customer pushes.
+- The console has no authentication, no multi-tenancy and no database, and it
+  binds `127.0.0.1` only. It is a demo console for one person at one desk.
+- The review queue is a JSON file that both processes read. That is correct
+  for one reviewer and would not survive several; durable coordination is the
+  orchestration layer's problem, not this one's.
+- `queue.py` shadows the standard library's `queue` module. Everything this
+  build uses is unaffected and checked on 3.9 and 3.13+;
+  `concurrent.futures.ThreadPoolExecutor` is not, and nothing here uses it.
+- The console's API key handling keeps the key in process memory for the
+  session. That is the right shape for a demo and not a secrets manager.

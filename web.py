@@ -132,6 +132,24 @@ class Console:
                 "provider": self._provider.name,
             }
 
+    def restart_conversation(self, conversation_id: str) -> dict:
+        """Drop one conversation and nothing else.
+
+        A scripted replay is its own conversation, the same way `---` starts a
+        new Agent in demo.txt. Without this, replaying twice in one session
+        continues the first run — the agent still holds the pending clarifying
+        question, and turn one of the second run reads as a topic change.
+
+        The conversation *id* is deliberately kept, so replaying a scenario
+        twice produces the same idempotency keys and the second run shows up
+        downstream as suppressed duplicates rather than a second write. What
+        is dropped is the conversation memory, not its identity.
+        """
+        with self._lock:
+            self._agents.pop(conversation_id, None)
+            self._transcripts.pop(conversation_id, None)
+        return {"ok": True, "conversation_id": conversation_id}
+
     def reset(self) -> dict:
         """Back to a known state, every time: conversations dropped, audit
         trail rotated rather than deleted, provider back to the stand-in."""
@@ -602,6 +620,8 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 return lambda: self._set_provider(console)
             if path == "/api/reset":
                 return lambda: self._json(console.reset())
+            if path == "/api/conversation/restart":
+                return lambda: self._restart(console)
             if path == "/api/checks":
                 return self._checks
             resolve = re.fullmatch(
@@ -635,6 +655,14 @@ class ConsoleHandler(BaseHTTPRequestHandler):
         if api_key is not None and not isinstance(api_key, str):
             raise ValueError("api_key must be a string")
         self._json(console.set_provider(name, api_key))
+
+    def _restart(self, console: Console) -> None:
+        payload = self._body()
+        conversation_id = payload.get("conversation_id") or ""
+        if not CONVERSATION_ID_RE.match(conversation_id):
+            raise ValueError("conversation_id must match %s"
+                             % CONVERSATION_ID_RE.pattern)
+        self._json(console.restart_conversation(conversation_id))
 
     def _case(self, console: Console, case_id: str) -> None:
         case = console.queue.get(case_id)
