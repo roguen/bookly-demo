@@ -108,14 +108,27 @@ from the order record, so no model — regex or hosted — can alter a decision.
 What a hosted model would change is slot-extraction quality on messier
 phrasing. Verifying that is the first job of the eval harness.
 
-To use Claude instead:
+To use a hosted model instead:
 
 ```bash
 pip install anthropic
 ANTHROPIC_API_KEY=your-key python3 app.py
 ```
 
-Nothing else changes — the decision layer is identical either way.
+```bash
+pip install openai
+OPENAI_API_KEY=your-key python3 app.py
+```
+
+`BOOKLY_PROVIDER=rules|anthropic|openai` forces a choice when more than one
+key is set. `BOOKLY_ANTHROPIC_MODEL` / `BOOKLY_OPENAI_MODEL` override the
+model, so a renamed model is an env fix rather than a code change.
+
+Nothing else changes — the decision layer is identical either way. Both
+hosted providers subclass `HostedProvider` and define exactly two things:
+a name and the network call. Prompt construction, output parsing, and the
+untrusted-output validation are inherited, so there is no per-vendor copy
+to drift and no place for a vendor to introduce a decision.
 
 ## Files
 

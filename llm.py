@@ -7,8 +7,9 @@ Nothing else crosses this boundary. No verdict, amount, or reason code is
 ever produced here — those come from policy.py, which this module never
 imports. The default provider is a rules-based stand-in so the demo runs
 with no dependencies and no API key; because both jobs are narrow and
-structured, the stand-in is serviceable. Setting ANTHROPIC_API_KEY swaps in
-the hosted model without changing any other file.
+structured, the stand-in is serviceable. Setting a vendor key swaps in a
+hosted model — Anthropic or OpenAI — without changing any other file. The
+two hosted providers differ by one method: the network call.
 """
 from __future__ import annotations
 
@@ -382,7 +383,7 @@ _TEMPLATES = {
 
 
 # ---------------------------------------------------------------------------
-# Hosted model provider. Reached only when ANTHROPIC_API_KEY is set.
+# Hosted model providers. Reached only when a vendor key is set.
 # ---------------------------------------------------------------------------
 
 EXTRACTION_SYSTEM_PROMPT = """\
@@ -409,37 +410,39 @@ not add facts, amounts, dates, or promises that are not in the event. You
 must not change or soften the decision."""
 
 
-class AnthropicProvider:
-    """Same two jobs, hosted model. Decisions still never cross into here."""
+# Models change names faster than this repo will; both are overridable so a
+# stale default is a one-line env fix rather than a code change.
+ANTHROPIC_MODEL = os.environ.get("BOOKLY_ANTHROPIC_MODEL", "claude-sonnet-5")
+OPENAI_MODEL = os.environ.get("BOOKLY_OPENAI_MODEL", "gpt-4o")
 
-    name = "anthropic"
+# Models sometimes wrap JSON in a markdown fence despite being told not to.
+JSON_FENCE_RE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.IGNORECASE)
 
-    def __init__(self) -> None:
-        import anthropic  # imported here so the default path needs no deps
 
-        self._client = anthropic.Anthropic()
-        self._model = "claude-sonnet-5"
+class HostedProvider:
+    """Everything a hosted model needs except the network call.
+
+    Prompt construction, output validation, and the untrusted-output rules
+    live here, so a new vendor is one subclass supplying one method. That is
+    the whole reason swapping providers cannot change a decision: no
+    subclass is given anywhere to put one.
+    """
+
+    name = "hosted"
 
     def extract(self, text: str, context: ExtractionContext) -> List[Request]:
         system = EXTRACTION_SYSTEM_PROMPT.format(
             titles=", ".join(context.known_titles) or "(none)",
             pending=self._describe_pending(context.pending),
         )
-        raw = self._complete(system, text)
-        return self._parse_requests(raw, text)
+        return self._parse_requests(self._complete(system, text), text)
 
     def narrate(self, event: NarrationEvent) -> str:
         payload = json.dumps({"kind": event.kind, "facts": event.facts})
         return self._complete(NARRATION_SYSTEM_PROMPT, payload).strip()
 
     def _complete(self, system: str, user: str) -> str:
-        response = self._client.messages.create(
-            model=self._model,
-            max_tokens=700,
-            system=system,
-            messages=[{"role": "user", "content": user}],
-        )
-        return response.content[0].text
+        raise NotImplementedError  # the one thing a vendor subclass supplies
 
     def _describe_pending(self, pending: Optional[PendingQuestion]) -> str:
         if pending is None:
@@ -448,10 +451,12 @@ class AnthropicProvider:
 
     def _parse_requests(self, raw: str, original_text: str) -> List[Request]:
         try:
-            items = json.loads(raw)
+            items = json.loads(JSON_FENCE_RE.sub("", raw))
         except ValueError:
             # An unparseable extraction yields one empty request; the agent
             # will ask rather than act on a guess.
+            return [Request(intent=None, text=original_text)]
+        if not isinstance(items, list):
             return [Request(intent=None, text=original_text)]
         requests = []
         for item in items:
@@ -488,8 +493,71 @@ class AnthropicProvider:
         )
 
 
+class AnthropicProvider(HostedProvider):
+    name = "anthropic"
+
+    def __init__(self) -> None:
+        import anthropic  # imported here so the default path needs no deps
+
+        self._client = anthropic.Anthropic()
+
+    def _complete(self, system: str, user: str) -> str:
+        response = self._client.messages.create(
+            model=ANTHROPIC_MODEL,
+            max_tokens=700,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+        )
+        return response.content[0].text
+
+
+class OpenAIProvider(HostedProvider):
+    name = "openai"
+
+    def __init__(self) -> None:
+        from openai import OpenAI  # imported here so the default path is clean
+
+        self._client = OpenAI()
+
+    def _complete(self, system: str, user: str) -> str:
+        # OpenAI carries the system prompt as the first message rather than a
+        # separate field. That difference is the entire port.
+        response = self._client.chat.completions.create(
+            model=OPENAI_MODEL,
+            max_tokens=700,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        )
+        return response.choices[0].message.content or ""
+
+
+PROVIDERS = {
+    "rules": RulesProvider,
+    "anthropic": AnthropicProvider,
+    "openai": OpenAIProvider,
+}
+
+
 def make_provider() -> Provider:
-    """The hosted model is opt-in; the stand-in is the default path."""
+    """Hosted models are opt-in; the stand-in is the default path.
+
+    BOOKLY_PROVIDER forces a choice; otherwise whichever vendor key is set
+    wins, and with no key set the demo runs on the stand-in.
+    """
+    name = os.environ.get("BOOKLY_PROVIDER") or _provider_from_keys()
+    if name not in PROVIDERS:
+        raise ValueError(
+            "BOOKLY_PROVIDER must be one of %s (got %r)"
+            % (", ".join(sorted(PROVIDERS)), name)
+        )
+    return PROVIDERS[name]()
+
+
+def _provider_from_keys() -> str:
     if os.environ.get("ANTHROPIC_API_KEY"):
-        return AnthropicProvider()
-    return RulesProvider()
+        return "anthropic"
+    if os.environ.get("OPENAI_API_KEY"):
+        return "openai"
+    return "rules"

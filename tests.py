@@ -9,6 +9,7 @@ harness lives.
 """
 from __future__ import annotations
 
+import os
 import sys
 import traceback
 
@@ -16,7 +17,15 @@ import policy
 import tools
 from agent import Agent
 from envelope import idempotency_key
-from llm import ExtractionContext, RulesProvider
+from llm import (
+    PROVIDERS,
+    AnthropicProvider,
+    ExtractionContext,
+    HostedProvider,
+    OpenAIProvider,
+    RulesProvider,
+    make_provider,
+)
 from store import CURRENT_CUSTOMER_ID, ORDERS, TODAY
 
 CHECKS = []
@@ -255,6 +264,63 @@ def option_answer_plus_second_request_handles_both():
     emitted = _envelopes(result)
     assert len(emitted) == 1 and emitted[0]["order_id"] == "BK-1042"
     assert "outside" in result.reply  # BK-0987's out-of-window denial
+
+
+@check
+def every_provider_satisfies_the_same_contract():
+    """A vendor subclass supplies one method; the contract is identical."""
+    for name, provider_class in PROVIDERS.items():
+        assert isinstance(provider_class.name, str) and provider_class.name
+        for job in ("extract", "narrate"):
+            assert callable(getattr(provider_class, job)), (name, job)
+    for hosted in (AnthropicProvider, OpenAIProvider):
+        assert issubclass(hosted, HostedProvider)
+        # A vendor subclass owns its label and its transport. Prompts,
+        # parsing, and validation are inherited — there is no per-vendor
+        # copy of them to drift. (Dunders vary by Python version.)
+        own = {n for n in vars(hosted) if not n.startswith("__")}
+        assert own == {"name", "_complete"}, (hosted.__name__, own)
+
+
+@check
+def hostile_model_output_cannot_reach_a_decision():
+    """The hosted path validates untrusted output. A model that invents an
+    amount, a bogus intent, or a fake order id changes nothing."""
+    parsed = HostedProvider()._parse_requests(
+        """```json
+        [{"intent": "approve_refund_now", "order_id": "'; DROP TABLE--",
+          "title_words": ["escher"], "option_number": true,
+          "amount": 500, "text": "refund me"}]
+        ```""",
+        "refund me",
+    )
+    assert len(parsed) == 1
+    request = parsed[0]
+    assert request.intent is None  # not in VALID_INTENTS
+    assert request.order_id is None  # not a BK-0000 id
+    assert request.option_number is None  # bool is not an option number
+    assert not hasattr(request, "amount")  # there is nowhere to put one
+
+
+@check
+def provider_selection_is_explicit_and_bounded():
+    saved = {k: os.environ.get(k) for k in
+             ("BOOKLY_PROVIDER", "ANTHROPIC_API_KEY", "OPENAI_API_KEY")}
+    try:
+        for key in saved:
+            os.environ.pop(key, None)
+        assert make_provider().name == RulesProvider.name
+        os.environ["BOOKLY_PROVIDER"] = "nope"
+        try:
+            make_provider()
+            raise AssertionError("expected a clear error, got none")
+        except ValueError as error:
+            assert "BOOKLY_PROVIDER" in str(error)
+    finally:
+        for key, value in saved.items():
+            os.environ.pop(key, None)
+            if value is not None:
+                os.environ[key] = value
 
 
 @check
