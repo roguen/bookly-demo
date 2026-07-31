@@ -13,7 +13,9 @@ import os
 import sys
 import traceback
 import types
+from datetime import date
 
+import covers
 import policy
 import tools
 from agent import Agent
@@ -109,6 +111,86 @@ def idempotency_key_is_stable_and_distinct():
     again = idempotency_key("conv-1", "refund", "BK-1042")
     other = idempotency_key("conv-1", "refund", "BK-0987")
     assert first == again and first != other
+
+
+@check
+def profile_load_preserves_the_fixtures():
+    """The dataset moved to profiles/bookly.json; the four orders the rest of
+    these checks are written against came through it unchanged."""
+    fixtures = {
+        "BK-1041": ("C-1001", "Dune", 18.99, "shipped", None),
+        "BK-1042": ("C-1001", "Godel, Escher, Bach", 22.50, "delivered",
+                    date(2026, 7, 18)),
+        "BK-0987": ("C-1001", "The Pragmatic Programmer", 39.99, "delivered",
+                    date(2026, 5, 2)),
+        # Another customer's order, kept so ownership checks stay testable.
+        "BK-2077": ("C-2002", "Snow Crash", 17.25, "delivered",
+                    date(2026, 7, 20)),
+    }
+    for order_id, expected in fixtures.items():
+        order = ORDERS[order_id]
+        actual = (
+            order.customer_id, order.title, order.price_paid, order.status,
+            order.delivered_on,
+        )
+        assert actual == expected, (order_id, actual, expected)
+    assert TODAY == date(2026, 7, 30)
+    assert CURRENT_CUSTOMER_ID == "C-1001"
+    # The clarifying question numbers its options in store order, so the
+    # order the profile lists them in is load bearing, not incidental.
+    assert [o.order_id for o in tools.delivered_orders(CURRENT_CUSTOMER_ID)] \
+        == ["BK-1042", "BK-0987"]
+
+
+@check
+def enriched_record_stays_off_the_write_path():
+    """The record grew a returned order and a cancelled one so it reads like
+    a real CRM. Neither may become something the agent can refund."""
+    assert ORDERS["BK-0771"].status == "returned"
+    assert ORDERS["BK-0318"].status == "cancelled"
+    returnable = tools.delivered_orders(CURRENT_CUSTOMER_ID)
+    assert "BK-0771" not in [o.order_id for o in returnable]
+    assert "BK-0318" not in [o.order_id for o in returnable]
+    # "not delivered" is not the same fact as "in transit", and only one of
+    # them should resolve a status question.
+    assert [o.order_id for o in tools.in_transit_orders(CURRENT_CUSTOMER_ID)] \
+        == ["BK-1041"]
+    # Asking to return either one is denied by its own reason code, not by
+    # the "hasn't arrived yet" one, which would be false.
+    for order_id, expected in (
+        ("BK-0771", policy.ORDER_ALREADY_RETURNED),
+        ("BK-0318", policy.ORDER_CANCELLED),
+    ):
+        verdict = policy.decide_return(
+            ORDERS[order_id], CURRENT_CUSTOMER_ID, TODAY
+        )
+        assert verdict.decision == "deny" and verdict.reason_code == expected
+    reply = _fresh_agent().handle_turn(
+        "I want to return The Left Hand of Darkness"
+    ).reply
+    assert "already returned" in reply and "hasn't been delivered" not in reply
+
+
+@check
+def covers_are_deterministic_and_need_no_network():
+    """Same book, same jacket, every process — and no file or request."""
+    order = ORDERS["BK-1042"]
+    first = covers.for_order(order)
+    again = covers.render(order.title, order.author)
+    assert first == again
+    assert first.startswith("<svg") and first.endswith("</svg>")
+    assert covers.render("Dune", "Frank Herbert") != first
+    # Nothing in a cover reaches outside the document. The one http:// in an
+    # SVG is the namespace declaration, which is an identifier no renderer
+    # ever dereferences — so it is named and allowed rather than grepped for.
+    for forbidden in ("<image", "href", "<script", "url(", "@import"):
+        assert forbidden not in first, forbidden
+    assert first.count("http") == 1  # and it is xmlns, asserted next
+    assert 'xmlns="http://www.w3.org/2000/svg"' in first
+    # Titles and authors are XML-escaped on the way in, so a hostile record
+    # cannot open a tag.
+    hostile = covers.render("<script>x</script>", '" onload="x')
+    assert "<script>" not in hostile and 'onload="x' not in hostile
 
 
 @check

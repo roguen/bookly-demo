@@ -1,0 +1,174 @@
+{
+  "profile_id": "bookly",
+  "note": [
+    "The demo dataset, lifted out of store.py so that standing this demo up",
+    "for a different company is a data edit rather than a code edit.",
+    "Select a profile with BOOKLY_PROFILE=<name> (resolved to",
+    "profiles/<name>.json) or BOOKLY_PROFILE=/path/to/other.json.",
+    "",
+    "What is NOT in here, on purpose: thresholds and reason codes. Those are",
+    "policy, they live in policy.py, and a profile must not be able to move",
+    "them. Neither is the provenance palette — purple means deterministic and",
+    "grey means the model, and that mapping is the design system, not a brand",
+    "choice a re-skin gets to break. brand.accent re-skins the wordmark only."
+  ],
+
+  "brand": {
+    "display_name": "Bookly",
+    "descriptor": "online bookstore",
+    "agent_name": "Bookly Support",
+    "accent": "#5754FF"
+  },
+
+  "clock": {
+    "today": "2026-07-30",
+    "note": "The demo clock. Frozen so every run and every check is identical."
+  },
+
+  "catalog": {
+    "cover_palette": "jacket",
+    "titles": {
+      "Dune": { "format": "Paperback", "published": 1965, "pages": 688 },
+      "Godel, Escher, Bach": { "format": "Paperback", "published": 1979, "pages": 777 },
+      "The Pragmatic Programmer": { "format": "Hardcover", "published": 1999, "pages": 352 },
+      "Snow Crash": { "format": "Paperback", "published": 1992, "pages": 440 },
+      "The Left Hand of Darkness": { "format": "Paperback", "published": 1969, "pages": 304 },
+      "The Design of Everyday Things": { "format": "Paperback", "published": 1988, "pages": 368 }
+    }
+  },
+
+  "customer": {
+    "customer_id": "C-1001",
+    "name": "Jordan Vance",
+    "email": "jordan.vance@example.com",
+    "member_since": "2021-03-14",
+    "tier": "Reader's Circle",
+    "lifetime_value": 1284.6,
+    "orders_placed": 37,
+    "payment_kind": "card",
+    "payment_last_four": "4417",
+    "csat": 4.6,
+    "csat_responses": 9,
+    "contact_history": [
+      {
+        "on": "2026-05-04",
+        "channel": "email",
+        "subject": "Delivery confirmation for BK-0987",
+        "outcome": "resolved without escalation"
+      },
+      {
+        "on": "2026-03-20",
+        "channel": "chat",
+        "subject": "Return — The Left Hand of Darkness",
+        "outcome": "refund issued"
+      },
+      {
+        "on": "2025-11-02",
+        "channel": "chat",
+        "subject": "Password reset help",
+        "outcome": "resolved without escalation"
+      }
+    ]
+  },
+
+  "orders": [
+    {
+      "order_id": "BK-1041",
+      "customer_id": "C-1001",
+      "title": "Dune",
+      "author": "Frank Herbert",
+      "price_paid": 18.99,
+      "status": "shipped",
+      "ordered_on": "2026-07-24",
+      "eta": "2026-08-01",
+      "carrier": "Bookly Express"
+    },
+    {
+      "order_id": "BK-1042",
+      "customer_id": "C-1001",
+      "title": "Godel, Escher, Bach",
+      "author": "Douglas Hofstadter",
+      "price_paid": 22.5,
+      "status": "delivered",
+      "ordered_on": "2026-07-14",
+      "delivered_on": "2026-07-18"
+    },
+    {
+      "order_id": "BK-0987",
+      "customer_id": "C-1001",
+      "title": "The Pragmatic Programmer",
+      "author": "David Thomas and Andrew Hunt",
+      "price_paid": 39.99,
+      "status": "delivered",
+      "ordered_on": "2026-04-28",
+      "delivered_on": "2026-05-02"
+    },
+    {
+      "order_id": "BK-2077",
+      "customer_id": "C-2002",
+      "title": "Snow Crash",
+      "author": "Neal Stephenson",
+      "price_paid": 17.25,
+      "status": "delivered",
+      "ordered_on": "2026-07-16",
+      "delivered_on": "2026-07-20",
+      "note": "Belongs to a different customer. Exists so ownership checks are testable."
+    },
+    {
+      "order_id": "BK-0771",
+      "customer_id": "C-1001",
+      "title": "The Left Hand of Darkness",
+      "author": "Ursula K. Le Guin",
+      "price_paid": 16.0,
+      "status": "returned",
+      "ordered_on": "2026-03-04",
+      "delivered_on": "2026-03-09",
+      "returned_on": "2026-03-20"
+    },
+    {
+      "order_id": "BK-0318",
+      "customer_id": "C-1001",
+      "title": "The Design of Everyday Things",
+      "author": "Don Norman",
+      "price_paid": 24.75,
+      "status": "cancelled",
+      "ordered_on": "2026-06-11"
+    }
+  ],
+
+  "articles": [
+    {
+      "article_id": "kb-shipping-times",
+      "title": "Standard shipping times",
+      "summary": "Standard shipping takes 3 to 5 business days within the continental US. Expedited shipping takes 1 to 2 business days.",
+      "keywords": [
+        "shipping", "ship", "delivery", "deliver", "arrive", "long",
+        "take", "takes", "standard", "expedited", "fast", "days"
+      ]
+    },
+    {
+      "article_id": "kb-return-policy",
+      "title": "Return policy",
+      "summary": "Books can be returned within 30 days of delivery for a full refund to the original payment method. Refunds post within 5 business days of approval.",
+      "keywords": [
+        "return", "returns", "refund", "refunds", "policy", "window",
+        "days", "exchange", "money", "back"
+      ]
+    },
+    {
+      "article_id": "kb-password-reset",
+      "title": "Password reset",
+      "summary": "To reset your password, use the 'Forgot password' link on the sign-in page. A reset email arrives within a few minutes; check spam if it does not.",
+      "keywords": [
+        "password", "reset", "login", "log", "sign", "account",
+        "forgot", "email"
+      ]
+    }
+  ],
+
+  "knowledge_base_note": [
+    "Deliberately small and deliberately gapped — there is no international",
+    "shipping article. Retrieval must fail closed on the gaps rather than",
+    "serve the nearest neighbour."
+  ]
+}

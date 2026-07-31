@@ -180,11 +180,7 @@ class Agent:
             return by_title[0]
         if self.focus_order_id:
             return tools.get_order(self.focus_order_id)
-        in_transit = [
-            o
-            for o in tools.orders_for_customer(self.customer_id)
-            if o.status != "delivered"
-        ]
+        in_transit = tools.in_transit_orders(self.customer_id)
         if len(in_transit) == 1:
             return in_transit[0]
         return _most_recent(tools.orders_for_customer(self.customer_id))
@@ -384,6 +380,9 @@ def _order_facts(order: Order) -> dict:
         "status": order.status,
         "delivered_on": (
             order.delivered_on.isoformat() if order.delivered_on else None
+        ),
+        "returned_on": (
+            order.returned_on.isoformat() if order.returned_on else None
         ),
         "eta": order.eta.isoformat() if order.eta else None,
         "carrier": order.carrier,

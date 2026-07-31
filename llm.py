@@ -295,6 +295,17 @@ def _return_denied(f: dict) -> str:
             "for it. Once it arrives, I'd be happy to."
             % (f["title"], f["order_id"])
         )
+    if f["reason_code"] == "ORDER_ALREADY_RETURNED":
+        return (
+            "It looks like %s (%s) was already returned on %s, so there's "
+            "nothing further to send back on that order."
+            % (f["title"], f["order_id"], _fmt_date(f["returned_on"]))
+        )
+    if f["reason_code"] == "ORDER_CANCELLED":
+        return (
+            "%s (%s) was cancelled before it shipped, so there's no delivery "
+            "to return." % (f["title"], f["order_id"])
+        )
     return (
         "I'm sorry — %s (%s) was delivered on %s, which is outside the "
         "%d-day return window, so I can't issue a refund for it."

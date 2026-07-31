@@ -35,6 +35,8 @@ DENIALS_BEFORE_ESCALATION = 1
 REFUND_APPROVED_IN_WINDOW = "REFUND_APPROVED_IN_WINDOW"
 RETURN_WINDOW_EXPIRED = "RETURN_WINDOW_EXPIRED"
 ORDER_NOT_DELIVERED = "ORDER_NOT_DELIVERED"
+ORDER_ALREADY_RETURNED = "ORDER_ALREADY_RETURNED"
+ORDER_CANCELLED = "ORDER_CANCELLED"
 ORDER_NOT_FOUND = "ORDER_NOT_FOUND"
 ORDER_NOT_OWNED_BY_CUSTOMER = "ORDER_NOT_OWNED_BY_CUSTOMER"
 ESCALATED_POLICY_DISPUTE = "ESCALATED_POLICY_DISPUTE"
@@ -66,6 +68,14 @@ def decide_return(
         # Externally this reads as "not found on your account"; internally the
         # distinct code routes it to a human in case it is an account issue.
         return Verdict("escalate", ORDER_NOT_OWNED_BY_CUSTOMER, order.order_id)
+    # An order that already came back and one that never went out are both
+    # "not delivered", but telling a customer their returned book "hasn't
+    # arrived yet" is a confidently wrong sentence. They get their own codes
+    # so the narrator has something true to say.
+    if order.status == "returned":
+        return Verdict("deny", ORDER_ALREADY_RETURNED, order.order_id)
+    if order.status == "cancelled":
+        return Verdict("deny", ORDER_CANCELLED, order.order_id)
     if order.status != "delivered" or order.delivered_on is None:
         return Verdict("deny", ORDER_NOT_DELIVERED, order.order_id)
     if (today - order.delivered_on).days > RETURN_WINDOW_DAYS:
