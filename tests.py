@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import sys
 import traceback
+import types
 
 import policy
 import tools
@@ -273,13 +274,17 @@ def every_provider_satisfies_the_same_contract():
         assert isinstance(provider_class.name, str) and provider_class.name
         for job in ("extract", "narrate"):
             assert callable(getattr(provider_class, job)), (name, job)
+    # The invariant that matters is not how many members a vendor subclass
+    # has — it is that none of them are the shared logic. Prompt building,
+    # parsing, and untrusted-output validation must be inherited, so there
+    # is no per-vendor copy to drift and no seam to slip a decision into.
+    shared = ("extract", "narrate", "_parse_requests", "_clean_request",
+              "_describe_pending")
     for hosted in (AnthropicProvider, OpenAIProvider):
         assert issubclass(hosted, HostedProvider)
-        # A vendor subclass owns its label and its transport. Prompts,
-        # parsing, and validation are inherited — there is no per-vendor
-        # copy of them to drift. (Dunders vary by Python version.)
-        own = {n for n in vars(hosted) if not n.startswith("__")}
-        assert own == {"name", "_complete"}, (hosted.__name__, own)
+        for member in shared:
+            assert member not in vars(hosted), (hosted.__name__, member)
+            assert getattr(hosted, member) is getattr(HostedProvider, member)
 
 
 @check
@@ -300,6 +305,62 @@ def hostile_model_output_cannot_reach_a_decision():
     assert request.order_id is None  # not a BK-0000 id
     assert request.option_number is None  # bool is not an option number
     assert not hasattr(request, "amount")  # there is nowhere to put one
+
+
+@check
+def openai_provider_adapts_to_the_renamed_token_parameter():
+    """OpenAI renamed the output-budget parameter partway through its model
+    line. The provider probes once and remembers, rather than pinning one
+    generation of models."""
+
+    class FakeCompletions:
+        def __init__(self, accepted):
+            self.accepted = accepted
+            self.seen = []
+
+        def create(self, model, messages, **kwargs):
+            self.seen.append(set(kwargs))
+            rejected = set(kwargs) - {self.accepted}
+            if rejected:
+                raise RuntimeError(
+                    "Error code: 400 - Unsupported parameter: %r is not "
+                    "supported with this model." % rejected.pop()
+                )
+            return types.SimpleNamespace(
+                choices=[types.SimpleNamespace(
+                    message=types.SimpleNamespace(content="[]"))]
+            )
+
+    for accepted in ("max_completion_tokens", "max_tokens"):
+        provider = OpenAIProvider.__new__(OpenAIProvider)
+        provider._budget_parameter = "max_completion_tokens"
+        completions = FakeCompletions(accepted)
+        provider._client = types.SimpleNamespace(
+            chat=types.SimpleNamespace(completions=completions)
+        )
+        assert provider._complete("system", "user") == "[]"
+        assert provider._budget_parameter == accepted
+        # Having learned the name, later calls use it directly.
+        before = len(completions.seen)
+        provider._complete("system", "user")
+        assert len(completions.seen) == before + 1
+
+    # An unrelated failure is not swallowed by the retry.
+    provider = OpenAIProvider.__new__(OpenAIProvider)
+    provider._budget_parameter = "max_completion_tokens"
+
+    def blow_up(**_kwargs):
+        raise RuntimeError("Error code: 429 - rate limited")
+
+    provider._client = types.SimpleNamespace(
+        chat=types.SimpleNamespace(
+            completions=types.SimpleNamespace(create=blow_up))
+    )
+    try:
+        provider._complete("system", "user")
+        raise AssertionError("an unrelated error should propagate")
+    except RuntimeError as error:
+        assert "429" in str(error)
 
 
 @check

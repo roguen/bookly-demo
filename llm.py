@@ -421,6 +421,13 @@ must not change or soften the decision."""
 ANTHROPIC_MODEL = os.environ.get("BOOKLY_ANTHROPIC_MODEL", "claude-sonnet-5")
 OPENAI_MODEL = os.environ.get("BOOKLY_OPENAI_MODEL", "gpt-5.4-mini")
 
+# Both jobs emit at most a short JSON array or three sentences, so the cap is
+# generous. It is larger on the OpenAI side because that budget also covers
+# reasoning tokens on current models — too small a cap there spends the whole
+# allowance on reasoning and returns empty content rather than an error.
+ANTHROPIC_MAX_OUTPUT_TOKENS = 700
+OPENAI_MAX_OUTPUT_TOKENS = 4000
+
 # Models sometimes wrap JSON in a markdown fence despite being told not to.
 JSON_FENCE_RE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.IGNORECASE)
 
@@ -510,11 +517,17 @@ class AnthropicProvider(HostedProvider):
     def _complete(self, system: str, user: str) -> str:
         response = self._client.messages.create(
             model=ANTHROPIC_MODEL,
-            max_tokens=700,
+            max_tokens=ANTHROPIC_MAX_OUTPUT_TOKENS,
             system=system,
             messages=[{"role": "user", "content": user}],
         )
         return response.content[0].text
+
+
+def _rejects_parameter(error: Exception, parameter: str) -> bool:
+    """True when the API refused a request because of one named parameter."""
+    message = str(error)
+    return parameter in message and "not supported with this model" in message
 
 
 class OpenAIProvider(HostedProvider):
@@ -524,17 +537,36 @@ class OpenAIProvider(HostedProvider):
         from openai import OpenAI  # imported here so the default path is clean
 
         self._client = OpenAI()
+        # OpenAI renamed this parameter partway through the model line:
+        # current models reject "max_tokens", older ones reject
+        # "max_completion_tokens". Start on the current name and remember
+        # what the API accepts, so the probe costs one failed call at most.
+        self._budget_parameter = "max_completion_tokens"
 
     def _complete(self, system: str, user: str) -> str:
         # OpenAI carries the system prompt as the first message rather than a
         # separate field. That difference is the entire port.
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ]
+        try:
+            return self._request(messages)
+        except Exception as error:
+            if not _rejects_parameter(error, self._budget_parameter):
+                raise
+            self._budget_parameter = (
+                "max_tokens"
+                if self._budget_parameter == "max_completion_tokens"
+                else "max_completion_tokens"
+            )
+            return self._request(messages)
+
+    def _request(self, messages: List[dict]) -> str:
         response = self._client.chat.completions.create(
             model=OPENAI_MODEL,
-            max_tokens=700,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
+            messages=messages,
+            **{self._budget_parameter: OPENAI_MAX_OUTPUT_TOKENS},
         )
         return response.choices[0].message.content or ""
 
