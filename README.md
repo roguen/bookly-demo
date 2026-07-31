@@ -95,7 +95,20 @@ delivery never loses the record of the decision.
 
 By default the two model jobs run on a rules-based stand-in so the demo is
 dependency-free and deterministic. Because both jobs are narrow and
-structured, the stand-in is serviceable. To use Claude instead:
+structured, the stand-in is serviceable.
+
+**Everything in `evidence/` was produced by the stand-in.** The Anthropic
+provider is implemented but has not been exercised — treat it as untested
+code. Note also that API access is billed separately from a claude.ai
+subscription, so a Pro or Max plan alone will not authorize these calls.
+
+What does *not* depend on the provider: the extraction schema has no amount
+field, and `policy.py` re-derives every verdict, reason code, and amount
+from the order record, so no model — regex or hosted — can alter a decision.
+What a hosted model would change is slot-extraction quality on messier
+phrasing. Verifying that is the first job of the eval harness.
+
+To use Claude instead:
 
 ```bash
 pip install anthropic

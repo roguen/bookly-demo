@@ -296,7 +296,8 @@ TALKING POINTS
 IF ASKED
 
 - Why not let the model call tools directly?: Then the model chooses when it has enough information, and that judgment is exactly what I don't want it making on a write path.
-- How much would swapping in a real LLM change?: For a given order, nothing — same verdict, same reason code, same amount. What changes is how well it reads the customer's sentence. There's a Provider protocol, and both providers satisfy it.`);
+- How much would swapping in a real LLM change?: For a given order, nothing — same verdict, same reason code, same amount. What changes is how well it reads the customer's sentence. There's a Provider protocol, and both providers satisfy it.
+- Have you actually run it against a hosted model?: No — everything you've seen is the rules-based stand-in, and I'd rather say that than imply otherwise. The Anthropic provider is implemented but not exercised. The reason I'm still confident about the verdict is structural, not empirical: the extraction schema has no amount field, and policy re-derives the amount from the order record, so there's no path for a model to change one. What a real model would change is slot quality — and that's exactly what the eval harness on the last slide is for.`);
 
 // ---------------------------------------------------------------------------
 // Slide 3 — Key decisions
