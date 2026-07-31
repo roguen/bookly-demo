@@ -45,6 +45,17 @@
   --ink: #0a0a0b; /* text on light */
   --paper: #ffffff;
 
+  /* Surfaces derived from the ground. Neutral by construction: a raised
+     panel must not imply a side. */
+  --raised: #0b0a2e;
+  --raised-2: #14133b;
+  --rule: #292856;
+  --rule-soft: #1d1c47;
+  /* Neutral body text on the dark ground: 13.1:1. */
+  --neutral-ink: #d7d7e4;
+  /* Neutral secondary. 5.9:1 on --deep — AA, and no side. */
+  --muted: #9292a8;
+
   /* --- type: two roles, no third face, no webfont ----------------------- */
   /* Offline is a requirement, so both stacks are system faces only. */
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
@@ -54,6 +65,7 @@
 
   /* Data looks like data: the trace, the audit and the envelope cards are
      mono, because that content is machine output and should read as it. */
+  --step--2: 0.6875rem;
   --step--1: 0.75rem;
   --step-0: 0.875rem;
   --step-1: 1rem;
@@ -62,6 +74,9 @@
 
   --radius: 6px;
   --gap: 12px;
+
+  --record-w: 288px;
+  --decisions-w: 428px;
 }
 
 * {
@@ -76,10 +91,11 @@ body {
 
 body {
   background: var(--deep);
-  color: var(--lightgrey);
+  color: var(--neutral-ink);
   font-family: var(--sans);
   font-size: var(--step-0);
   line-height: 1.5;
+  overflow: hidden;
 }
 
 /* Keyboard focus is visible everywhere, on both grounds. */
@@ -97,5 +113,823 @@ body {
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
+  }
+}
+
+/* --- shell ------------------------------------------------------------- */
+
+#console {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap);
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--deep);
+  flex: 0 0 auto;
+}
+
+.brand {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-weight: 700;
+  font-size: var(--step-1);
+  color: #fff;
+  letter-spacing: -0.01em;
+}
+
+.brand .descriptor {
+  font-weight: 400;
+  font-size: var(--step--1);
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+
+.topbar-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+button {
+  font: inherit;
+  font-size: var(--step--1);
+  color: var(--neutral-ink);
+  background: var(--raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 6px 11px;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--lilac);
+  color: #fff;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.segmented button {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.segmented button[aria-pressed="true"] {
+  /* The toggle is a control, not an output, so it takes the neutral raised
+     surface rather than either side's colour. */
+  background: var(--raised-2);
+  color: #fff;
+  font-weight: 600;
+}
+
+/* --- columns ----------------------------------------------------------- */
+
+.columns {
+  display: grid;
+  grid-template-columns: var(--record-w) minmax(0, 1fr) 3px var(--decisions-w);
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.col {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.col-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--step--2);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 12px;
+}
+
+.record {
+  border-right: 1px solid var(--rule-soft);
+}
+
+.conversation {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+
+/* The subject of slide 1, made into actual chrome. Deliberately not purple:
+   purple means "the deterministic side", and this line belongs to neither. */
+.boundary {
+  background: var(--boundary);
+  opacity: 0.9;
+}
+
+.decisions {
+  border-left: 1px solid var(--rule-soft);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* --- record column ----------------------------------------------------- */
+
+.identity {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.avatar {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  border: 1px solid var(--rule);
+  background: var(--raised-2);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: var(--step-0);
+  letter-spacing: 0.02em;
+}
+
+.identity-name {
+  font-weight: 600;
+  color: #fff;
+}
+
+.identity-sub {
+  font-size: var(--step--1);
+  color: var(--muted);
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.fact {
+  background: var(--raised);
+  border: 1px solid var(--rule-soft);
+  border-radius: var(--radius);
+  padding: 7px 9px;
+}
+
+.fact dt {
+  margin: 0;
+  font-size: var(--step--2);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.fact dd {
+  margin: 2px 0 0;
+  font-weight: 600;
+  color: #fff;
+  font-size: var(--step-0);
+}
+
+.fact.wide {
+  grid-column: 1 / -1;
+}
+
+.orders {
+  list-style: none;
+  margin: 0 0 18px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.order {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  background: var(--raised);
+  border: 1px solid var(--rule-soft);
+  border-radius: var(--radius);
+  padding: 8px;
+}
+
+.order img {
+  width: 44px;
+  height: 66px;
+  flex: 0 0 auto;
+  border-radius: 2px;
+  display: block;
+}
+
+.order-title {
+  font-weight: 600;
+  color: #fff;
+  line-height: 1.25;
+}
+
+.order-meta {
+  font-size: var(--step--1);
+  color: var(--muted);
+}
+
+.order-id {
+  font-family: var(--mono);
+  font-size: var(--step--2);
+  color: var(--muted);
+}
+
+.status {
+  display: inline-block;
+  font-size: var(--step--2);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  padding: 0 7px;
+  color: var(--neutral-ink);
+}
+
+/* Order status is a record fact, not a verdict, so it is neutral. Only the
+   shade varies, never the hue — nothing here may read as a decision. */
+.status[data-status="shipped"] {
+  border-color: #4a4a7a;
+  color: #fff;
+}
+.status[data-status="cancelled"],
+.status[data-status="returned"] {
+  opacity: 0.72;
+}
+
+/* Policy constants are the deterministic side describing itself, so this is
+   the one block in the record column that takes the purple family. */
+.policy-block {
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--lilac);
+  border-radius: var(--radius);
+  background: var(--raised);
+  padding: 10px;
+}
+
+.policy-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--rule-soft);
+}
+
+.policy-row:last-child {
+  border-bottom: 0;
+}
+
+.policy-name {
+  font-family: var(--mono);
+  font-size: var(--step--2);
+  color: var(--lilac);
+}
+
+.policy-value {
+  font-family: var(--mono);
+  font-weight: 700;
+  color: #fff;
+}
+
+.policy-source {
+  margin-top: 8px;
+  font-size: var(--step--2);
+  color: var(--muted);
+}
+
+/* --- conversation ------------------------------------------------------ */
+
+.messages {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.bubble {
+  /* Narrow enough that which side a bubble sits on is legible at a glance.
+     At full column width the alignment carries no information. */
+  max-width: min(34em, 82%);
+  padding: 10px 13px;
+  border-radius: 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.bubble .who {
+  display: block;
+  font-size: var(--step--2);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+/* The customer's own words: neither side, so neutral with an outline. */
+.bubble.customer {
+  align-self: flex-end;
+  background: transparent;
+  border: 1.5px solid #5b5b8c;
+  color: #fff;
+}
+
+/* Nothing to apologise for and something to do next. Doubles as the opener
+   list for a live demo, so the first turn is one click. */
+.opener {
+  margin: auto 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+  max-width: 34em;
+}
+
+.opener h3 {
+  margin: 0;
+  font-size: var(--step-2);
+  color: #fff;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.opener p {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: var(--step--1);
+}
+
+.opener button {
+  text-align: left;
+  white-space: normal;
+}
+
+.bubble.customer .who {
+  color: var(--muted);
+}
+
+/* The agent's reply is model output. Grey, always. */
+.bubble.agent {
+  align-self: flex-start;
+  background: #17172b;
+  border: 1px solid var(--grey);
+  color: var(--lightgrey);
+}
+
+.bubble.agent .who {
+  color: var(--grey);
+}
+
+.composer {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 8px;
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--rule-soft);
+}
+
+.composer input {
+  flex: 1 1 auto;
+  font: inherit;
+  color: #fff;
+  background: var(--raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+
+.composer input::placeholder {
+  color: var(--muted);
+}
+
+.composer button {
+  background: var(--purple);
+  border-color: var(--purple);
+  color: #fff;
+  font-weight: 600;
+  padding: 6px 16px;
+}
+
+.thinking {
+  font-size: var(--step--1);
+  color: var(--muted);
+  padding: 0 20px 8px;
+  min-height: 1.2em;
+}
+
+/* --- decisions column -------------------------------------------------- */
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  padding: 10px 12px 0;
+  border-bottom: 1px solid var(--rule);
+  flex: 0 0 auto;
+}
+
+.tabs button {
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: var(--radius) var(--radius) 0 0;
+  color: var(--muted);
+  padding: 6px 12px;
+}
+
+.tabs button[aria-selected="true"] {
+  background: var(--raised);
+  border-color: var(--rule);
+  color: #fff;
+  font-weight: 600;
+}
+
+.panel {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 14px 12px;
+}
+
+.panel[hidden] {
+  display: none;
+}
+
+.empty {
+  border: 1px dashed var(--rule);
+  border-radius: var(--radius);
+  padding: 16px;
+  color: var(--muted);
+  font-size: var(--step--1);
+}
+
+.empty strong {
+  display: block;
+  color: var(--neutral-ink);
+  font-size: var(--step-0);
+  margin-bottom: 4px;
+}
+
+/* --- trace: the provenance rule at its most literal --------------------- */
+
+.trace {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.note {
+  border: 1px solid var(--rule-soft);
+  border-left-width: 3px;
+  border-radius: var(--radius);
+  background: var(--raised);
+  padding: 7px 10px;
+}
+
+.note[data-side="model"] {
+  border-left-color: var(--grey);
+}
+
+.note[data-side="deterministic"] {
+  border-left-color: var(--lilac);
+}
+
+.note-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.note-stage {
+  font-family: var(--mono);
+  font-size: var(--step--1);
+  font-weight: 700;
+  color: #fff;
+}
+
+.note-side {
+  font-size: var(--step--2);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  margin-left: auto;
+}
+
+.note[data-side="model"] .note-side {
+  color: var(--grey);
+}
+
+.note[data-side="deterministic"] .note-side {
+  color: var(--lilac);
+}
+
+.note-summary {
+  font-family: var(--mono);
+  font-size: var(--step--1);
+  color: var(--neutral-ink);
+  overflow-wrap: anywhere;
+}
+
+.note details {
+  margin-top: 6px;
+}
+
+.note summary {
+  cursor: pointer;
+  font-size: var(--step--2);
+  color: var(--muted);
+}
+
+.kv {
+  margin: 6px 0 0;
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  gap: 2px 10px;
+  font-family: var(--mono);
+  font-size: var(--step--2);
+}
+
+.kv dt {
+  color: var(--muted);
+}
+
+.kv dd {
+  margin: 0;
+  color: var(--neutral-ink);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/* The trace streams in, in pipeline order. This is the whole animation
+   budget, and it is spent here and on the envelope card below. */
+@keyframes note-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.note.streaming {
+  animation: note-in 220ms ease-out both;
+}
+
+/* --- envelope cards ---------------------------------------------------- */
+
+.envelope {
+  border: 1px solid var(--purple);
+  border-radius: var(--radius);
+  background: #16153f;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  font-family: var(--mono);
+}
+
+.envelope-action {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: var(--step-1);
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.04em;
+}
+
+.envelope-amount {
+  color: var(--lilac);
+}
+
+.envelope-row {
+  font-size: var(--step--1);
+  color: var(--neutral-ink);
+  overflow-wrap: anywhere;
+}
+
+.envelope-reason {
+  color: var(--lilac);
+}
+
+.delivery {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: var(--step--2);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  padding: 0 8px;
+  color: var(--neutral-ink);
+}
+
+/* A failed hop is a fact about the network, not about the decision — which
+   was already audited before the hop. It is called out so it is legible on
+   stage, in a warm neutral that belongs to neither side of the boundary. */
+.delivery[data-state="failed"] {
+  border-color: #c9873b;
+  color: #f0c07a;
+}
+
+.delivery[data-state="delivered"] {
+  border-color: var(--lilac);
+  color: var(--lilac);
+}
+
+@keyframes envelope-in {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.envelope.landing {
+  animation: envelope-in 340ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+
+/* --- audit ------------------------------------------------------------- */
+
+.audit-line {
+  border: 1px solid var(--rule-soft);
+  border-radius: var(--radius);
+  background: var(--raised);
+  padding: 7px 10px;
+  margin-bottom: 6px;
+  font-family: var(--mono);
+  font-size: var(--step--1);
+  overflow-wrap: anywhere;
+}
+
+.audit-event {
+  font-weight: 700;
+  color: var(--lilac);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-size: var(--step--2);
+}
+
+/* --- provider badge ---------------------------------------------------- */
+
+.provider {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: var(--step--1);
+  color: var(--neutral-ink);
+}
+
+.provider .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--grey);
+}
+
+.provider[data-hosted="true"] .dot {
+  background: var(--lilac);
+}
+
+.provider .key-badge {
+  font-family: var(--mono);
+  font-size: var(--step--2);
+  color: var(--muted);
+}
+
+.notice {
+  margin: 8px 16px 0;
+  border: 1px solid #c9873b;
+  border-radius: var(--radius);
+  background: #241a12;
+  color: #f0c07a;
+  padding: 8px 12px;
+  font-size: var(--step--1);
+}
+
+.notice[hidden] {
+  display: none;
+}
+
+/* --- customer view ------------------------------------------------------
+   Not a CSS toggle over rendered data: the operator regions are removed from
+   the document and the record is re-rendered with only fields a shopper
+   would see. Lifetime value and CSAT are things support knows about you, not
+   things you are shown. */
+
+body[data-view="customer"] .boundary,
+body[data-view="customer"] .decisions {
+  display: none;
+}
+
+body[data-view="customer"] .columns {
+  grid-template-columns: var(--record-w) minmax(0, 1fr);
+}
+
+/* --- responsive: one column and a tab bar under 900px ------------------- */
+
+.mobilebar {
+  display: none;
+  gap: 2px;
+  padding: 8px 12px 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+@media (max-width: 900px) {
+  .mobilebar {
+    display: flex;
+  }
+
+  /* Both selectors, because the customer-view rule above is more specific
+     than a bare .columns and would otherwise keep the desktop tracks — which
+     left the conversation column exactly --record-w too narrow. */
+  .columns,
+  body[data-view="customer"] .columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* The header is chrome, not content: it gets one line, and the model
+     string is the first thing to go. */
+  .topbar {
+    flex-wrap: wrap;
+    padding: 8px 12px;
+  }
+
+  .brand {
+    font-size: var(--step-0);
+  }
+
+  .brand .descriptor,
+  .provider .key-badge {
+    display: none;
+  }
+
+  .provider {
+    max-width: 45vw;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .boundary {
+    display: none;
+  }
+
+  .col {
+    display: none;
+    border: 0;
+  }
+
+  body[data-region="record"] .record,
+  body[data-region="conversation"] .conversation,
+  body[data-region="decisions"] .decisions {
+    display: flex;
+    flex-direction: column;
+  }
+
+  body[data-region="record"] .record {
+    display: block;
+  }
+
+  body[data-view="customer"] .mobilebar button[data-region="decisions"] {
+    display: none;
   }
 }
