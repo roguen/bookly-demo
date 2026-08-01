@@ -44,5 +44,13 @@
         }
       ]
     }
+  ],
+  "known_gaps": [
+    {
+      "rule": "repeated_sentence",
+      "occurrences": 1,
+      "issue": 22,
+      "why": "Both turns open with the refusal line, for the same reason as the hero sequence."
+    }
   ]
 }

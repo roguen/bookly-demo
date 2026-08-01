@@ -31,6 +31,7 @@ import llm
 import policy
 import queue as queue_module  # this repo's queue.py, not the stdlib
 import recorder
+import rubric
 import store as store_module
 import tools
 import web
@@ -711,6 +712,90 @@ def transcripts_are_present_and_blessed():
         fn.__name__ for fn in CHECKS if fn.__name__.startswith("transcript_")
     }
     assert len(generated) == len(transcripts), (generated, len(transcripts))
+
+
+@check
+def the_rubric_catches_the_recorded_hosted_drift():
+    """The rubric has to catch the drift that actually happened.
+
+    `evidence/provider_parity.txt` records a real hosted run where every
+    decision field matched and the knowledge-base miss dropped the offer of a
+    human agent the template makes every time. No verdict moved; every check
+    in this suite passed; the customer got a worse answer.
+
+    So the recorded reply is graded here, offline and with no billed call, and
+    the rubric must fail it. A rubric that has never caught anything is a
+    proposal rather than an instrument.
+    """
+    # Copied verbatim from the evidence, and checked against it below — the
+    # same discipline deck/README.md imposes on slide excerpts.
+    recorded = (
+        "I couldn’t find a help article for that yet. Please share a bit "
+        "more detail about what you’re trying to do, and I’ll help "
+        "from there."
+    )
+    evidence = pathlib.Path("evidence/provider_parity.txt").read_text(
+        encoding="utf-8"
+    )
+    assert recorded in evidence, "the quoted reply is no longer in the evidence"
+
+    findings = rubric.grade_narration("kb_miss", {}, recorded, "recorded")
+    dropped = [f for f in findings if f.rule == "must_offer"]
+    assert dropped, findings
+    assert "offer" in dropped[0].detail
+
+    # And it does not simply fail everything: the template's own miss, which
+    # keeps the offer, grades clean.
+    template = llm.RulesProvider().narrate(llm.NarrationEvent("kb_miss", {}))
+    assert not rubric.grade_narration("kb_miss", {}, template, "template"), (
+        template
+    )
+
+    # The whole point is that no decision test could have caught it. The two
+    # replies decline identically as far as the decision layer is concerned:
+    # a kb_miss narrates a miss, and there is no envelope, verdict or reason
+    # code on either side to differ.
+    assert "human" not in recorded.lower()
+    assert "human" in template.lower()
+
+
+@check
+def the_rubric_cannot_reach_a_decision():
+    """Grading prose must never become a second place that decides.
+
+    Asserted structurally, the same way "policy.py does not import an LLM" is:
+    nothing on the decision path imports the rubric, so there is no code path
+    by which a grade could become an input to a verdict. And the rubric
+    imports nothing that would let it judge one — no policy, no store, no
+    tools, no order record. It cannot tell you whether a refund was correct,
+    because it is never told what the refund was.
+    """
+    decision_path = ("agent.py", "policy.py", "tools.py", "llm.py",
+                     "envelope.py", "store.py", "recorder.py", "covers.py")
+    for name in decision_path:
+        source = pathlib.Path(name).read_text(encoding="utf-8")
+        for form in ("import rubric", "from rubric import"):
+            assert form not in source, (name, form)
+
+    rubric_source = pathlib.Path("rubric.py").read_text(encoding="utf-8")
+    for module in ("policy", "store", "tools", "agent", "envelope", "llm"):
+        for form in ("import %s" % module, "from %s import" % module):
+            assert form not in rubric_source, module
+    # It is handed three things and holds no state that could accumulate one.
+    assert "def grade_narration(kind: str, facts: dict, text: str" in (
+        rubric_source
+    )
+
+    # A finding is inert. Grading a real conversation produces findings and
+    # changes nothing about it: the same conversation replayed with and
+    # without a grading pass returns identical replies and envelopes.
+    transcript = [t for t in harness.load_all() if t.id == "hero-sequence"][0]
+    first = harness.replay(transcript)
+    findings = rubric.grade([(t.reply, t.narration_events) for t in first])
+    assert findings, "the hero sequence should still have open findings"
+    second = harness.replay(transcript)
+    assert [t.reply for t in first] == [t.reply for t in second]
+    assert [t.envelopes for t in first] == [t.envelopes for t in second]
 
 
 def _register_transcript_checks() -> None:

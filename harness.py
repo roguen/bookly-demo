@@ -41,6 +41,7 @@ import pathlib
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+import rubric
 from agent import Agent
 from llm import RulesProvider
 from recorder import ListRecorder
@@ -94,6 +95,10 @@ class Transcript:
     conversation_id: str
     turns: Tuple[Turn, ...]
     path: pathlib.Path
+    # Rubric findings this fixture knowingly still produces, each pointing at
+    # the issue that will remove it. See _compare_rubric for why an
+    # acknowledgement is a different thing from a suppression.
+    known_gaps: Tuple[dict, ...] = ()
 
     @property
     def blessed(self) -> bool:
@@ -161,6 +166,7 @@ def load(path: pathlib.Path) -> Transcript:
         conversation_id=raw["conversation_id"],
         turns=tuple(turns),
         path=path,
+        known_gaps=tuple(raw.get("known_gaps", ())),
     )
 
 
@@ -300,6 +306,64 @@ def compare(
                     "%s customer_note:\n    expected: %r\n    actual:   %r"
                     % (where, expected.customer, note)
                 )
+    failures.extend(_compare_rubric(transcript, observed))
+    return failures
+
+
+def _compare_rubric(
+    transcript: Transcript, observed: Sequence[Observed]
+) -> List[str]:
+    """Grade the prose, and hold the fixture to what it admits to.
+
+    The rubric runs on every provider, because prose is the thing that is not
+    otherwise pinned. Its findings are compared against `known_gaps` — an
+    explicit list of defects this fixture still produces, each carrying the
+    issue number that will close it.
+
+    An acknowledgement is not a suppression, and the difference is enforced
+    in both directions:
+
+      * a finding nobody acknowledged fails, so a new defect cannot hide
+        behind an old one — acknowledgements carry a count, not just a rule
+        name, and a second occurrence of an acknowledged rule is a new defect.
+      * an acknowledgement with no matching finding fails, so a gap that was
+        fixed cannot leave its excuse behind. The fix has to delete the
+        admission, which is what stops this list from becoming the place
+        failures go to be forgotten.
+      * an acknowledgement with no issue number and no reason fails, because
+        that is a suppression wearing an acknowledgement's clothes.
+    """
+    findings = rubric.grade(
+        [(turn.reply, turn.narration_events) for turn in observed]
+    )
+    counted: Dict[str, int] = {}
+    for finding in findings:
+        counted[finding.rule] = counted.get(finding.rule, 0) + 1
+
+    failures = []
+    allowed: Dict[str, int] = {}
+    for gap in transcript.known_gaps:
+        rule = gap.get("rule")
+        if not gap.get("issue") or not gap.get("why"):
+            failures.append(
+                "%s known_gap %r has no issue number or no reason, which "
+                "makes it a suppression rather than an acknowledgement"
+                % (transcript.id, rule)
+            )
+            continue
+        allowed[rule] = allowed.get(rule, 0) + int(gap.get("occurrences", 1))
+
+    for rule, seen in sorted(counted.items()):
+        if seen > allowed.get(rule, 0):
+            for finding in findings:
+                if finding.rule == rule:
+                    failures.append("%s rubric %s" % (transcript.id, finding))
+    for rule, expected_count in sorted(allowed.items()):
+        if counted.get(rule, 0) < expected_count:
+            failures.append(
+                "%s known_gap %r is stale: the rubric no longer reports it, "
+                "so the acknowledgement should be deleted" % (transcript.id, rule)
+            )
     return failures
 
 
@@ -356,6 +420,12 @@ def bless(transcript: Transcript, observed: Sequence[Observed]) -> None:
         "conversation_id": transcript.conversation_id,
         "turns": [turn.as_fixture_turn() for turn in observed],
     }
+    # Blessing rewrites what the agent did. It deliberately does not touch
+    # what the fixture admits to still getting wrong: an acknowledgement is a
+    # human's statement about an open defect, and regenerating it from a run
+    # would let a re-bless quietly launder one.
+    if transcript.known_gaps:
+        payload["known_gaps"] = [dict(gap) for gap in transcript.known_gaps]
     transcript.path.write_text(
         json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",

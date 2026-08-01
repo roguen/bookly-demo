@@ -99,5 +99,19 @@
         }
       ]
     }
+  ],
+  "known_gaps": [
+    {
+      "rule": "must_not_invent",
+      "occurrences": 1,
+      "issue": 24,
+      "why": "The same templated 'within 5 business days' promise as return-with-clarification, on the refund turn of the demo."
+    },
+    {
+      "rule": "repeated_sentence",
+      "occurrences": 1,
+      "issue": 22,
+      "why": "Turns 4 and 5 both open with the refusal line. It is a 2001 reference and it is meant to land once; fired twice in consecutive turns it reads as a template rather than a joke. Fix is a conversation-tier first_refusal fact on the narration event."
+    }
   ]
 }

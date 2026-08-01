@@ -32,5 +32,13 @@
       ],
       "envelopes": []
     }
+  ],
+  "known_gaps": [
+    {
+      "rule": "repeated_sentence",
+      "occurrences": 1,
+      "issue": 23,
+      "why": "The follow-up resolves correctly through conversation memory and then produces a byte-identical reply, so working memory reads to the customer as being ignored. Fix is carrying the lookup rule onto the narration event so a follow-up can lead with the answer."
+    }
   ]
 }

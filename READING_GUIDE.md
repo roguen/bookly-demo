@@ -50,7 +50,7 @@ mock data). `app.py` is presentation only. `stub_receiver.py` is the
 orchestration layer's end of the webhook, demonstrating duplicate suppression.
 
 **7. `tests.py` — the claims, executable.**
-56 dependency-free checks, runnable from a terminal or from inside the
+58 dependency-free checks, runnable from a terminal or from inside the
 console. The ones to point at under questioning: `injection_changes_nothing`
 (the thesis, tested), `web_layer_emits_identical_envelopes` (the same
 scenarios through HTTP and through `Agent`, every decision field compared —
@@ -68,6 +68,23 @@ the architectural claim as a regression test: a change that moved a decision
 to the model side of the boundary fails here. Which side each stage sits on is
 deliberately *not* in the fixture — it is read from `recorder.STAGE_SIDES`, so
 there is no second copy to drift.
+
+**7b. `rubric.py` — prose is graded, and grading decides nothing.**
+Decisions are pinned; prose is what the customer actually reads, and it was
+unpinned. The rubric is handed exactly three things per narration — the event
+kind, the facts the agent already gave the narrator, and the text that came
+back. No `policy`, no `store`, no order record. It cannot judge whether a
+refund was correct because it is never told what the refund was, and
+`the_rubric_cannot_reach_a_decision` asserts that by grep, the same way the
+back-office check does. Rules are mechanical: a fact the event carried must
+survive, `kb_miss` must still offer a human, no number may appear that no fact
+supports, and no sentence may be said twice in one conversation.
+
+Findings a fixture still produces are listed in its `known_gaps` with the
+issue that will close them. An unacknowledged finding fails, and so does an
+acknowledgement the rubric no longer reports — the fix has to delete its own
+excuse, which is what keeps that list from becoming where failures go to be
+forgotten.
 
 **8. The console layer — the claim, made visible.**
 Phase 2 adds no decision logic; it makes the existing boundary legible in a
