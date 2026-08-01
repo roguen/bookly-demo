@@ -13,14 +13,24 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import socket
 import urllib.error
 import urllib.request
 import uuid
 from typing import Optional, Tuple
 
 AUDIT_PATH = "audit.log"
+AUDIT_PATH_ENV_VAR = "BOOKLY_AUDIT_PATH"
 WEBHOOK_ENV_VAR = "BOOKLY_WEBHOOK_URL"
 DELIVERY_TIMEOUT_SECONDS = 3
+
+
+def audit_path() -> str:
+    """Where the audit line goes. Overridable so the console can run the
+    check suite in a subprocess without fifteen test envelopes landing in
+    the trail the demo is about to show on screen. Read per call, not at
+    import, so a test can redirect it and put it back."""
+    return os.environ.get(AUDIT_PATH_ENV_VAR) or AUDIT_PATH
 
 
 def idempotency_key(conversation_id: str, action: str, order_id: str) -> str:
@@ -72,6 +82,59 @@ def emit(
     return envelope, delivery
 
 
+def emit_resolution(
+    case_id: str,
+    resolution_id: str,
+    resolution: str,
+    actor: str,
+    justification: str,
+    order_id: Optional[str] = None,
+    conversation_id: Optional[str] = None,
+    supersedes: Optional[str] = None,
+) -> Tuple[dict, str]:
+    """A human's decision on an escalated case, emitted the same way.
+
+    Deliberately a separate function rather than an `actor` argument on
+    `emit`. Two reasons, and both matter more than the saved lines:
+
+    The agent's envelopes are unchanged, byte for byte, which keeps the
+    evidence in evidence/duplicate_receipt.txt valid against a receiver that
+    prints whatever it is sent.
+
+    And these are not the same kind of record. An agent envelope carries a
+    reason code, because a policy function produced it. A resolution carries
+    a person and a sentence, because a person produced it — inventing a
+    reason code for a human judgement would be the dishonest field on the
+    screen. `supersedes` points back at the decision under review without
+    touching it: the original stays exactly as policy computed it.
+    """
+    envelope = {
+        "envelope_id": uuid.uuid4().hex,
+        "idempotency_key": idempotency_key(
+            case_id, "resolve_case", resolution_id
+        ),
+        "action": "resolve_case",
+        "resolution": resolution,
+        "case_id": case_id,
+        "order_id": order_id,
+        "conversation_id": conversation_id,
+        # Who, and why. Both required upstream in queue.py.
+        "actor": actor,
+        "justification": justification,
+        "supersedes": supersedes,
+    }
+    _audit({"event": "emitted", "envelope": envelope})
+    delivery = _deliver(envelope)
+    _audit(
+        {
+            "event": "delivery",
+            "envelope_id": envelope["envelope_id"],
+            "delivery": delivery,
+        }
+    )
+    return envelope, delivery
+
+
 def _deliver(envelope: dict) -> str:
     url = os.environ.get(WEBHOOK_ENV_VAR)
     if not url:
@@ -85,10 +148,18 @@ def _deliver(envelope: dict) -> str:
             request, timeout=DELIVERY_TIMEOUT_SECONDS
         ) as response:
             return "delivered_%d" % response.status
-    except urllib.error.URLError as error:
-        return "failed_%s" % getattr(error, "reason", "unreachable")
+    except urllib.error.HTTPError as error:
+        # The receiver answered and refused. Its status is the useful fact.
+        return "failed_%d" % error.code
+    except (urllib.error.URLError, socket.timeout, TimeoutError):
+        # Nobody answered. Normalised to one stable value rather than the
+        # platform's errno text, because this string is read off a screen
+        # during the failure demo and "failed_[Errno 61] Connection refused"
+        # is noise where "failed_unreachable" is the point: the decision was
+        # already made and already audited, and only the hop was lost.
+        return "failed_unreachable"
 
 
 def _audit(record: dict) -> None:
-    with open(AUDIT_PATH, "a", encoding="utf-8") as audit_file:
+    with open(audit_path(), "a", encoding="utf-8") as audit_file:
         audit_file.write(json.dumps(record) + "\n")

@@ -50,10 +50,28 @@ mock data). `app.py` is presentation only. `stub_receiver.py` is the
 orchestration layer's end of the webhook, demonstrating duplicate suppression.
 
 **7. `tests.py` — the claims, executable.**
-Twenty dependency-free checks. The ones to point at under questioning:
-`injection_changes_nothing` (the thesis, tested), and
+Fifty dependency-free checks, runnable from a terminal or from inside the
+console. The ones to point at under questioning: `injection_changes_nothing`
+(the thesis, tested), `web_layer_emits_identical_envelopes` (the same
+scenarios through HTTP and through `Agent`, every decision field compared —
+the answer to "did you just bolt a UI onto it"), `queue_resolution_is_append_only`
+(a human may override an outcome and may not rewrite the record), and
 `golden_transcript_return_flow` (exact strings on purpose — the seed of the
 golden-transcript harness proposed as future work).
+
+**8. The console layer — the claim, made visible.**
+Phase 2 adds no decision logic; it makes the existing boundary legible in a
+browser. `recorder.py` is a null object the agent talks to, so the CLI's
+behaviour cannot depend on whether anyone is watching. `web.py` serves the
+same `handle_turn` the CLI calls and computes nothing. `queue.py` is where
+escalations land, append-only, so an override adds an event and never edits
+the verdict. `backoffice.py` runs on a second port on purpose — the agent
+claims to emit rather than execute, and you can kill the receiver mid-turn to
+prove it. `covers.py` draws jackets from a hash. `profiles/*.json` holds the
+dataset, so re-skinning is a data edit.
+
+Read them in that order if you want the console; skip all of them if you only
+want the argument, because none of them can change an outcome.
 
 ## Glossary
 

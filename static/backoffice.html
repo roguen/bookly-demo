@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Back Office — Bookly</title>
+    <!-- Same stylesheet as the console, so these screens read as the
+         deterministic side of the same boundary rather than a second
+         product with its own opinions. -->
+    <link rel="stylesheet" href="/static/app.css" />
+  </head>
+  <body class="backoffice" data-surface="ledger">
+    <div id="console">
+      <header class="topbar">
+        <div class="brand">
+          <span>Back office</span>
+          <span class="descriptor">receives and displays · port 8787</span>
+        </div>
+        <div class="topbar-controls">
+          <!-- Persistent, visible, on every surface. These are honest mocks
+               and they say so. -->
+          <span class="standin-chip" id="standin-chip">Stand-in</span>
+          <button type="button" id="refresh">Refresh</button>
+        </div>
+      </header>
+
+      <p class="standin-notice" id="standin-notice"></p>
+
+      <nav class="tabs" id="surfaces" role="tablist" aria-label="Surfaces">
+        <button type="button" role="tab" data-surface="ledger" aria-selected="true">
+          Refund ledger
+        </button>
+        <button type="button" role="tab" data-surface="desk" aria-selected="false">
+          Agent desk
+        </button>
+        <button type="button" role="tab" data-surface="policy" aria-selected="false">
+          Policy viewer
+        </button>
+      </nav>
+
+      <main class="office">
+        <section class="panel" id="panel-ledger" role="tabpanel"></section>
+        <section class="panel" id="panel-desk" role="tabpanel" hidden></section>
+        <section class="panel" id="panel-policy" role="tabpanel" hidden></section>
+      </main>
+    </div>
+    <script type="module" src="/static/backoffice.js"></script>
+  </body>
+</html>

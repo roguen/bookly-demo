@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bookly Support Console</title>
+    <!-- Same-origin only. No CDN, no webfont, no analytics, no image host.
+         The Content-Security-Policy header the server sends says the same
+         thing in a form a sceptic can read in devtools. -->
+    <link rel="stylesheet" href="/static/app.css" />
+  </head>
+  <body data-view="customer" data-region="conversation">
+    <div id="console">
+      <header class="topbar">
+        <div class="brand" id="brand"></div>
+        <div class="topbar-controls">
+          <div class="segmented" role="group" aria-label="View mode">
+            <button type="button" id="view-customer" aria-pressed="true">
+              Customer view
+            </button>
+            <button type="button" id="view-operator" aria-pressed="false">
+              Operator view
+            </button>
+          </div>
+          <!-- The badge is the control: it shows the active provider and
+               the state of the key, and opens the switcher. -->
+          <button type="button" class="provider" id="provider-badge"></button>
+          <button type="button" id="replay">Replay</button>
+          <button type="button" id="reset">Reset</button>
+        </div>
+      </header>
+
+      <div class="provider-panel" id="provider-panel" hidden></div>
+      <div class="provider-panel" id="replay-panel" hidden></div>
+
+      <p class="notice" id="notice" hidden></p>
+
+      <nav class="mobilebar" aria-label="Region">
+        <button type="button" data-region="record">Record</button>
+        <button type="button" data-region="conversation">Conversation</button>
+        <button type="button" data-region="decisions">Decisions</button>
+      </nav>
+
+      <div class="columns">
+        <!-- The customer's record. Neutral: it is neither side. -->
+        <section class="col record" aria-label="Customer record">
+          <h2 class="col-head">Record</h2>
+          <div id="record-body"></div>
+        </section>
+
+        <!-- The conversation. The customer's words are outlined and neutral;
+             the agent's are grey, because they are model output. -->
+        <section class="col conversation" aria-label="Conversation">
+          <div class="messages" id="messages" aria-live="polite"></div>
+          <p class="thinking" id="thinking"></p>
+          <form class="composer" id="composer" autocomplete="off">
+            <label class="visually-hidden" for="message" hidden>Message</label>
+            <input
+              id="message"
+              name="message"
+              type="text"
+              placeholder="Type a message…"
+            />
+            <button type="submit">Send</button>
+          </form>
+        </section>
+
+        <!-- The subject of slide 1, as actual chrome. Belongs to neither
+             side, which is why it is --boundary and not purple. -->
+        <div class="boundary" role="separator" aria-orientation="vertical"></div>
+
+        <!-- The deterministic side. -->
+        <section class="col decisions" aria-label="Decisions">
+          <nav class="tabs" id="tabs" role="tablist" aria-label="Decisions">
+            <button type="button" role="tab" data-tab="trace" aria-selected="true">
+              Trace
+            </button>
+            <button type="button" role="tab" data-tab="audit" aria-selected="false">
+              Audit
+            </button>
+            <button type="button" role="tab" data-tab="queue" aria-selected="false">
+              Queue
+            </button>
+            <button type="button" role="tab" data-tab="checks" aria-selected="false">
+              Checks
+            </button>
+          </nav>
+          <div class="panel" id="panel-trace" role="tabpanel"></div>
+          <div class="panel" id="panel-audit" role="tabpanel" hidden></div>
+          <div class="panel" id="panel-queue" role="tabpanel" hidden></div>
+          <div class="panel" id="panel-checks" role="tabpanel" hidden></div>
+        </section>
+      </div>
+    </div>
+    <script type="module" src="/static/app.js"></script>
+  </body>
+</html>

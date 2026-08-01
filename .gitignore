@@ -1,6 +1,11 @@
 __pycache__/
 *.pyc
+# The live audit trail and its rotations. /api/reset rotates rather than
+# truncates, so a demo reset never destroys the previous run's record.
 audit.log
+audit.log.*
+# The human review queue's persisted state. Demo data, rebuilt by /api/reset.
+queue.json
 .claude/
 .DS_Store
 

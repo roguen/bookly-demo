@@ -32,6 +32,15 @@ def delivered_orders(customer_id: str) -> List[Order]:
     ]
 
 
+def in_transit_orders(customer_id: str) -> List[Order]:
+    """Orders actually on their way. Named as the positive fact rather than
+    "not delivered", because a returned or cancelled order is also not
+    delivered and is emphatically not in transit."""
+    return [
+        o for o in orders_for_customer(customer_id) if o.status == "shipped"
+    ]
+
+
 def find_orders_by_title_word(customer_id: str, word: str) -> List[Order]:
     """Match a single title word against this customer's own orders only."""
     needle = word.lower()

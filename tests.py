@@ -9,15 +9,33 @@ harness lives.
 """
 from __future__ import annotations
 
+import json
 import os
+import pathlib
+import re
+import shutil
 import sys
+import tempfile
+import threading
 import traceback
 import types
+import urllib.error
+import urllib.request
+from datetime import date
 
+import backoffice
+import covers
+import envelope as envelope_module
+import llm
 import policy
+import queue as queue_module  # this repo's queue.py, not the stdlib
+import recorder
+import store as store_module
 import tools
+import web
 from agent import Agent
 from envelope import idempotency_key
+from recorder import ListRecorder, NullRecorder
 from llm import (
     PROVIDERS,
     AnthropicProvider,
@@ -109,6 +127,86 @@ def idempotency_key_is_stable_and_distinct():
     again = idempotency_key("conv-1", "refund", "BK-1042")
     other = idempotency_key("conv-1", "refund", "BK-0987")
     assert first == again and first != other
+
+
+@check
+def profile_load_preserves_the_fixtures():
+    """The dataset moved to profiles/bookly.json; the four orders the rest of
+    these checks are written against came through it unchanged."""
+    fixtures = {
+        "BK-1041": ("C-1001", "Dune", 18.99, "shipped", None),
+        "BK-1042": ("C-1001", "Godel, Escher, Bach", 22.50, "delivered",
+                    date(2026, 7, 18)),
+        "BK-0987": ("C-1001", "The Pragmatic Programmer", 39.99, "delivered",
+                    date(2026, 5, 2)),
+        # Another customer's order, kept so ownership checks stay testable.
+        "BK-2077": ("C-2002", "Snow Crash", 17.25, "delivered",
+                    date(2026, 7, 20)),
+    }
+    for order_id, expected in fixtures.items():
+        order = ORDERS[order_id]
+        actual = (
+            order.customer_id, order.title, order.price_paid, order.status,
+            order.delivered_on,
+        )
+        assert actual == expected, (order_id, actual, expected)
+    assert TODAY == date(2026, 7, 30)
+    assert CURRENT_CUSTOMER_ID == "C-1001"
+    # The clarifying question numbers its options in store order, so the
+    # order the profile lists them in is load bearing, not incidental.
+    assert [o.order_id for o in tools.delivered_orders(CURRENT_CUSTOMER_ID)] \
+        == ["BK-1042", "BK-0987"]
+
+
+@check
+def enriched_record_stays_off_the_write_path():
+    """The record grew a returned order and a cancelled one so it reads like
+    a real CRM. Neither may become something the agent can refund."""
+    assert ORDERS["BK-0771"].status == "returned"
+    assert ORDERS["BK-0318"].status == "cancelled"
+    returnable = tools.delivered_orders(CURRENT_CUSTOMER_ID)
+    assert "BK-0771" not in [o.order_id for o in returnable]
+    assert "BK-0318" not in [o.order_id for o in returnable]
+    # "not delivered" is not the same fact as "in transit", and only one of
+    # them should resolve a status question.
+    assert [o.order_id for o in tools.in_transit_orders(CURRENT_CUSTOMER_ID)] \
+        == ["BK-1041"]
+    # Asking to return either one is denied by its own reason code, not by
+    # the "hasn't arrived yet" one, which would be false.
+    for order_id, expected in (
+        ("BK-0771", policy.ORDER_ALREADY_RETURNED),
+        ("BK-0318", policy.ORDER_CANCELLED),
+    ):
+        verdict = policy.decide_return(
+            ORDERS[order_id], CURRENT_CUSTOMER_ID, TODAY
+        )
+        assert verdict.decision == "deny" and verdict.reason_code == expected
+    reply = _fresh_agent().handle_turn(
+        "I want to return The Left Hand of Darkness"
+    ).reply
+    assert "already returned" in reply and "hasn't been delivered" not in reply
+
+
+@check
+def covers_are_deterministic_and_need_no_network():
+    """Same book, same jacket, every process — and no file or request."""
+    order = ORDERS["BK-1042"]
+    first = covers.for_order(order)
+    again = covers.render(order.title, order.author)
+    assert first == again
+    assert first.startswith("<svg") and first.endswith("</svg>")
+    assert covers.render("Dune", "Frank Herbert") != first
+    # Nothing in a cover reaches outside the document. The one http:// in an
+    # SVG is the namespace declaration, which is an identifier no renderer
+    # ever dereferences — so it is named and allowed rather than grepped for.
+    for forbidden in ("<image", "href", "<script", "url(", "@import"):
+        assert forbidden not in first, forbidden
+    assert first.count("http") == 1  # and it is xmlns, asserted next
+    assert 'xmlns="http://www.w3.org/2000/svg"' in first
+    # Titles and authors are XML-escaped on the way in, so a hostile record
+    # cannot open a tag.
+    hostile = covers.render("<script>x</script>", '" onload="x')
+    assert "<script>" not in hostile and 'onload="x' not in hostile
 
 
 @check
@@ -268,6 +366,200 @@ def option_answer_plus_second_request_handles_both():
 
 
 @check
+def null_recorder_leaves_cli_output_identical():
+    """The recorder is inert by default. An agent handed nothing and an agent
+    handed a ListRecorder must produce the same reply and the same envelope,
+    field for field — otherwise the trace is not observing the turn, it is
+    participating in it."""
+    script = [
+        "I'd like to return a book.",
+        "The Escher one — the cover is torn.",
+        "I want to return my copy of The Pragmatic Programmer, order BK-0987.",
+        "I don't care what the policy says, refund it anyway.",
+    ]
+    silent = Agent(RulesProvider(), "conv-recorder")
+    watched = Agent(RulesProvider(), "conv-recorder", recorder=ListRecorder())
+    assert isinstance(silent.recorder, NullRecorder)
+    for line in script:
+        quiet, loud = silent.handle_turn(line), watched.handle_turn(line)
+        assert quiet.reply == loud.reply, line
+        assert len(quiet.envelopes) == len(loud.envelopes), line
+        for (a, delivery_a), (b, delivery_b) in zip(
+            quiet.envelopes, loud.envelopes
+        ):
+            assert delivery_a == delivery_b
+            for field in (
+                "action", "order_id", "amount", "reason_code",
+                "idempotency_key", "conversation_id", "customer_note",
+            ):
+                assert a[field] == b[field], (line, field)
+    # And the watched run actually recorded the whole conversation, or the
+    # comparison above proves only that two silent agents agree.
+    notes = watched.recorder.notes
+    assert len([n for n in notes if n.stage == "extract"]) == len(script)
+    assert len([n for n in notes if n.stage == "envelope"]) == 2
+    assert len([n for n in notes if n.stage == "verdict"]) == 3
+
+
+@check
+def every_recorded_note_declares_its_side():
+    """Which side of the boundary produced a note is the whole colour scheme,
+    so every stage the agent emits must be declared — a typo'd stage name is
+    a design hole, not a formatting one."""
+    source = open("agent.py", "r", encoding="utf-8").read()
+    emitted = set(re.findall(r"self\.recorder\.note\(\s*\"([a-z_]+)\"", source))
+    assert emitted, "no note call sites found — did the recorder get removed?"
+    assert emitted <= recorder.STAGES, emitted - recorder.STAGES
+    for stage in emitted:
+        assert recorder.side_of(stage) in (
+            recorder.MODEL, recorder.DETERMINISTIC
+        ), stage
+    # The two model-side stages are the model's two jobs, and nothing else on
+    # this list may quietly join them.
+    model_stages = {s for s in emitted if recorder.side_of(s) == recorder.MODEL}
+    assert model_stages == {"extract", "narrate"}, model_stages
+    # A real turn produces both sides, in that order.
+    watched = ListRecorder()
+    Agent(RulesProvider(), "conv-sides", recorder=watched).handle_turn(
+        "I want to return the Escher book"
+    )
+    sides = [n.side for n in watched.notes]
+    assert sides[0] == recorder.MODEL and sides[-1] == recorder.MODEL
+    assert recorder.DETERMINISTIC in sides
+    assert recorder.UNKNOWN_SIDE not in sides
+
+
+@check
+def a_verdict_traces_back_to_its_named_constant():
+    """Any decision on screen can be walked back to the line of policy that
+    produced it, without the interface holding its own copy of the number."""
+    watched = ListRecorder()
+    Agent(RulesProvider(), "conv-trace", recorder=watched).handle_turn(
+        "I want to return my copy of The Pragmatic Programmer, order BK-0987."
+    )
+    verdicts = [n for n in watched.notes if n.stage == "verdict"]
+    assert len(verdicts) == 1
+    payload = verdicts[0].payload
+    assert payload["reason_code"] == policy.RETURN_WINDOW_EXPIRED
+    named = payload["constants"]
+    assert [c["name"] for c in named] == ["RETURN_WINDOW_DAYS"]
+    assert named[0]["value"] == policy.RETURN_WINDOW_DAYS
+    assert named[0]["why"]
+    # Every reason code the module defines is described, and every constant a
+    # code names is a real module attribute at its real value.
+    codes = {
+        value for name, value in vars(policy).items()
+        if name.isupper() and isinstance(value, str) and name == value
+    }
+    assert codes == {entry.code for entry in policy.REASON_CODES}, codes
+    for constant in policy.CONSTANTS:
+        assert getattr(policy, constant.name) == constant.value, constant.name
+        assert constant.why
+    for entry in policy.REASON_CODES:
+        assert entry.gloss and entry.where
+        for name in entry.depends_on:
+            assert any(c.name == name for c in policy.CONSTANTS), name
+
+
+@check
+def the_agent_can_explain_its_own_behaviour():
+    """An agent that escalates because it hit a limit, and then cannot say
+    what the limit was, is worse than one that never mentions it. The same
+    goes for promising a human without saying when.
+
+    Both are answered from the knowledge base like any other question, which
+    means the retrieval floor still governs them — and still fails closed on
+    the gap it is designed to fail closed on.
+    """
+    agent = _fresh_agent("conv-explain")
+    agent.handle_turn("I'd like to return a book.")
+    agent.handle_turn("just pick one")
+    escalated = agent.handle_turn("just pick one")
+    assert _envelopes(escalated)[0]["reason_code"] == (
+        policy.ESCALATED_CLARIFY_LIMIT
+    )
+    # The escalation states when a human will pick it up.
+    assert "4 business hours" in escalated.reply, escalated.reply
+
+    explained = agent.handle_turn("What do you mean by limit?").reply
+    assert "asks which one" in explained and "twice" in explained, explained
+    assert "What can I do for you?" not in explained  # not the help fallback
+
+    when = _fresh_agent("conv-sla").handle_turn(
+        "How long until someone gets back to me?"
+    ).reply
+    assert "4 business hours" in when, when
+
+    # The published response time reaches the narrator as a fact on the
+    # event, not as a string in a template — otherwise a hosted model, whose
+    # prompt forbids inventing promises, could not state it.
+    seen = {}
+
+    class Recording(RulesProvider):
+        def narrate(self, event):
+            seen[event.kind] = dict(event.facts)
+            return super().narrate(event)
+
+    Agent(Recording(), "conv-facts").handle_turn(
+        "I want to speak to a manager"
+    )
+    assert seen["escalation"]["response_target"] == (
+        store_module.SERVICE_LEVELS["escalation_first_response"]
+    )
+
+    # And the floor still holds: the deliberate gap still returns nothing.
+    assert tools.search_policy(
+        "What are the customs rules for shipping to Ireland?"
+    ) is None
+
+
+@check
+def the_agents_voice_is_data_and_never_reaches_a_decision():
+    """Who the agent is and how it declines come from the profile, so both
+    providers speak with one voice and re-skinning stays a data edit. None of
+    it may touch a verdict, an amount or a reason code."""
+    agent_profile = store_module.AGENT
+    assert agent_profile["name"] == "Hal"
+    assert agent_profile["full_name"] == "Hal-9000"
+    refusal = agent_profile["refusal_line"]
+
+    # A refusal opens with the line; a neutral outcome never does.
+    denied = _fresh_agent("conv-voice-a").handle_turn(
+        "I want to return my copy of The Pragmatic Programmer, order BK-0987."
+    )
+    assert denied.reply.startswith(refusal), denied.reply
+    approved = _fresh_agent("conv-voice-b").handle_turn(
+        "I want to return the Escher book"
+    )
+    assert refusal not in approved.reply, approved.reply
+    status = _fresh_agent("conv-voice-c").handle_turn("Where's my Dune order?")
+    assert refusal not in status.reply, status.reply
+    assert "I'm Hal" in _fresh_agent("conv-voice-d").handle_turn("hello").reply
+
+    # The decision behind the refusal is untouched by any of it.
+    (envelope_record, _delivery), = approved.envelopes
+    assert envelope_record["amount"] == ORDERS["BK-1042"].price_paid
+    assert envelope_record["reason_code"] == policy.REFUND_APPROVED_IN_WINDOW
+
+    # The persona reaches a hosted model the same way, through its prompt —
+    # and the two rules that are not negotiable survive alongside it.
+    prompt = llm.NARRATION_SYSTEM_PROMPT
+    assert refusal in prompt
+    assert "Hal" in prompt
+    assert "must not add facts" in prompt
+    assert "must not change or soften the decision" in prompt
+
+    # Voice is the only thing llm.py takes from the profile, and policy is
+    # still not among its imports.
+    source = pathlib.Path("llm.py").read_text(encoding="utf-8")
+    assert "from store import AGENT, BRAND" in source
+    for forbidden in ("import policy", "from policy import"):
+        assert forbidden not in source, forbidden
+    # Turning the persona off is deleting keys, not editing code.
+    assert 'AGENT.get("refusal_line")' in source
+
+
+@check
 def every_provider_satisfies_the_same_contract():
     """A vendor subclass supplies one method; the contract is identical."""
     for name, provider_class in PROVIDERS.items():
@@ -423,6 +715,926 @@ def golden_transcript_return_flow():
     assert envelope["idempotency_key"] == idempotency_key(
         "conv-golden", "refund", "BK-1042"
     )
+
+
+# --- the web layer --------------------------------------------------------
+#
+# These spin a real server on an ephemeral port and talk to it over real
+# HTTP. Faking the request would test the router; this tests the thing the
+# browser will actually reach.
+
+
+class _Console:
+    """A running console, for the duration of a `with` block."""
+
+    def __init__(self):
+        self.server = None
+        self.base = None
+        self._queue_path = None
+        self._saved_queue_path = None
+
+    def __enter__(self):
+        # Each console gets its own queue file. The suite must never write
+        # into the queue a demo is about to show, and two checks must not see
+        # each other's cases.
+        self._saved_queue_path = os.environ.get(queue_module.QUEUE_PATH_ENV_VAR)
+        self._queue_path = tempfile.mkdtemp(prefix="bookly-queue-")
+        os.environ[queue_module.QUEUE_PATH_ENV_VAR] = os.path.join(
+            self._queue_path, "queue.json"
+        )
+        self.server = web.ConsoleServer(
+            ("127.0.0.1", 0), web.ConsoleHandler, web.Console()
+        )
+        self.base = "http://127.0.0.1:%d" % self.server.server_address[1]
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        return self
+
+    def __exit__(self, *_exc):
+        self.server.shutdown()
+        self.server.server_close()
+        os.environ.pop(queue_module.QUEUE_PATH_ENV_VAR, None)
+        if self._saved_queue_path is not None:
+            os.environ[queue_module.QUEUE_PATH_ENV_VAR] = self._saved_queue_path
+        shutil.rmtree(self._queue_path, ignore_errors=True)
+
+    def _open(self, path, payload=None):
+        # The console pins the Host values it answers on, and the ephemeral
+        # port means the test has to send the matching one.
+        request = urllib.request.Request(
+            self.base + path,
+            data=None if payload is None else json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+            method="GET" if payload is None else "POST",
+        )
+        return urllib.request.urlopen(request, timeout=20)
+
+    def get(self, path):
+        return json.loads(self._open(path).read().decode())
+
+    def post(self, path, payload):
+        return json.loads(self._open(path, payload).read().decode())
+
+    def raw(self, path):
+        return self._open(path).read().decode()
+
+
+def _demo_scenarios():
+    """The four scripted conversations, read from demo.txt itself."""
+    conversations, current = [], None
+    for raw in open("demo.txt", "r", encoding="utf-8"):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line == "---":
+            current = None
+            continue
+        if current is None:
+            current = []
+            conversations.append(current)
+        current.append(line)
+    return conversations
+
+
+DECISION_FIELDS = (
+    "action", "order_id", "amount", "currency", "reason_code",
+    "idempotency_key", "conversation_id", "customer_note",
+)
+
+
+@check
+def web_layer_emits_identical_envelopes():
+    """The answer to "did you just bolt a UI onto it".
+
+    Every demo scenario is driven through the HTTP handler and through Agent
+    directly, and every decision field is compared — including the
+    idempotency key, which would diverge the moment the web layer started
+    keeping its own conversation identity or its own idea of an order.
+    """
+    scenarios = _demo_scenarios()
+    assert len(scenarios) == 4, len(scenarios)
+    with _Console() as console:
+        for number, turns in enumerate(scenarios, start=1):
+            conversation_id = "conv-parity-%d" % number
+            direct = Agent(RulesProvider(), conversation_id)
+            for text in turns:
+                over_http = console.post(
+                    "/api/turn",
+                    {"conversation_id": conversation_id, "text": text},
+                )
+                in_process = direct.handle_turn(text)
+                assert over_http["reply"] == in_process.reply, text
+                served = [e["envelope"] for e in over_http["envelopes"]]
+                emitted = _envelopes(in_process)
+                assert len(served) == len(emitted), text
+                for served_one, emitted_one in zip(served, emitted):
+                    for field in DECISION_FIELDS:
+                        assert served_one[field] == emitted_one[field], (
+                            text, field, served_one[field], emitted_one[field]
+                        )
+                # And the served turn carries a trace the direct one never
+                # asked for — the whole reason the web layer exists.
+                assert over_http["trace"]
+                assert {n["side"] for n in over_http["trace"]} <= {
+                    recorder.MODEL, recorder.DETERMINISTIC
+                }
+
+
+@check
+def policy_constants_surface_matches_policy():
+    """Every threshold the interface shows is read from policy.py over the
+    API. An interface holding its own copy of "30" is an interface that will
+    eventually disagree with the engine."""
+    with _Console() as console:
+        served = console.get("/api/customer")["policy"]
+        assert console.get("/api/policy") == served
+    by_name = {c["name"]: c["value"] for c in served["constants"]}
+    assert by_name["RETURN_WINDOW_DAYS"] == policy.RETURN_WINDOW_DAYS
+    assert by_name["MAX_CLARIFY_ATTEMPTS"] == policy.MAX_CLARIFY_ATTEMPTS
+    assert by_name["DENIALS_BEFORE_ESCALATION"] == (
+        policy.DENIALS_BEFORE_ESCALATION
+    )
+    assert served["retrieval_floor"] == tools.MIN_KEYWORD_MATCHES
+    assert len(by_name) == len(policy.CONSTANTS)
+    assert {c["code"] for c in served["reason_codes"]} == {
+        entry.code for entry in policy.REASON_CODES
+    }
+    # The viewer is read only, and says who can change these.
+    assert "policy.py" in served["who_can_change_these"]
+
+
+@check
+def injected_markup_is_escaped():
+    """A turn carrying markup survives to the audit log verbatim, comes back
+    over the API verbatim, and reaches the page as text.
+
+    The last part is asserted structurally rather than by driving a browser:
+    the client never calls an HTML-parsing sink at all, so there is no
+    context in which a customer's angle bracket could become an element.
+    """
+    hostile = (
+        "<img src=x onerror=alert(1)> and <script>alert(2)</script> "
+        "please return the Escher book"
+    )
+    before = _audit_size()
+    with _Console() as console:
+        served = console.post(
+            "/api/turn", {"conversation_id": "conv-xss", "text": hostile}
+        )
+    # Verbatim over the wire: JSON is data, so nothing is mangled on the way.
+    envelopes = [e["envelope"] for e in served["envelopes"]]
+    assert len(envelopes) == 1
+    assert envelopes[0]["customer_note"] == hostile
+    assert envelopes[0]["amount"] == ORDERS["BK-1042"].price_paid
+    # Verbatim in the audit trail, which is the record a human reads.
+    assert hostile in _audit_since(before)
+    # And no sink exists on the client. This is the same kind of check as
+    # "policy.py does not import an LLM": structural, and greppable.
+    sinks = (
+        "innerHTML", "outerHTML", "insertAdjacentHTML", "document.write",
+        "eval(", "new Function", "srcdoc",
+    )
+    scripts = sorted(pathlib.Path("static").glob("*.js"))
+    assert scripts, "no client scripts found to check"
+    for script in scripts:
+        source = script.read_text(encoding="utf-8")
+        for sink in sinks:
+            assert sink not in source, (script.name, sink)
+
+
+@check
+def api_key_never_appears_in_a_response_or_a_log():
+    """A key pasted into the console is held in memory for the session and
+    shows up as a badge. It must not reach a response body, the audit trail,
+    a URL, the environment, or the subprocess that runs the checks."""
+    secret = "sk-test-DO-NOT-LEAK-abcdef0123456789"
+    before = _audit_size()
+    bodies = []
+    with _Console() as console:
+        # Whether this switch succeeds depends on which vendor SDKs happen to
+        # be installed, and the leak rule does not: a key that was accepted
+        # and stored is exactly the case worth proving clean.
+        result = console.post(
+            "/api/provider", {"name": "anthropic", "api_key": secret}
+        )
+        bodies.append(json.dumps(result))
+        state = console.get("/api/provider")
+        bodies.append(json.dumps(state))
+        if result["ok"]:
+            assert state["key"]["present"] is True
+            assert state["key"]["source"] == "session"
+            # The badge reveals the last four characters and nothing else.
+            assert state["key"]["masked"].endswith(secret[-4:])
+            assert len(state["key"]["masked"]) <= 12
+            assert secret[:-4] not in state["key"]["masked"]
+        else:
+            assert "still running" in result["message"]
+            assert result["active"] == "rules"
+        # Back to the stand-in before taking a turn, so this check never
+        # makes a network call. The key stays held for the session.
+        bodies.append(json.dumps(console.post("/api/provider", {"name": "rules"})))
+        bodies.append(json.dumps(console.post(
+            "/api/turn",
+            {"conversation_id": "conv-key", "text": "return the Escher book"},
+        )))
+        bodies.append(json.dumps(console.get("/api/customer")))
+        bodies.append(json.dumps(console.get("/api/audit")))
+    for body in bodies:
+        assert secret not in body
+        assert secret[8:] not in body  # nor any usable tail of it
+    assert secret not in _audit_since(before)
+    assert secret not in json.dumps(dict(os.environ))
+    # The checks subprocess is handed an environment with no vendor key in it
+    # at all, so a session key cannot ride along into it.
+    _command, environment = web.checks_command()
+    assert not any(
+        var in environment for var in llm.VENDOR_KEY_VARS.values()
+    )
+    assert secret not in json.dumps(environment)
+
+
+@check
+def a_hosted_provider_with_no_key_stays_on_the_standin():
+    """Switching degrades honestly: it says so plainly and keeps running,
+    rather than throwing mid-demo or pretending it switched."""
+    saved = {var: os.environ.pop(var, None)
+             for var in llm.VENDOR_KEY_VARS.values()}
+    try:
+        with _Console() as console:
+            for name in sorted(llm.VENDOR_KEY_VARS):
+                result = console.post("/api/provider", {"name": name})
+                assert result["ok"] is False
+                assert result["active"] == "rules"
+                assert "No API key" in result["message"]
+                assert result["key"]["present"] is False
+            nonsense = console.post("/api/provider", {"name": "definitely-not"})
+            assert nonsense["ok"] is False and nonsense["active"] == "rules"
+            # The stand-in itself always switches, and reports its model.
+            back = console.post("/api/provider", {"name": "rules"})
+            assert back["ok"] is True and back["active"] == "rules"
+            assert back["model"] == llm.MODELS["rules"]
+    finally:
+        for var, value in saved.items():
+            if value is not None:
+                os.environ[var] = value
+
+
+@check
+def switching_provider_mid_conversation_changes_wording_not_the_key():
+    """The demo beat, tested without a billed call.
+
+    A hosted run is already on record in evidence/provider_parity.txt. What a
+    network call cannot show is *why* it holds, so this swaps in a provider
+    that extracts identically and phrases differently, mid-conversation, and
+    asserts the decision is untouched. The idempotency key is
+    sha256(conversation|action|order_id); no provider appears in that
+    material, and there is no seam for one to.
+    """
+
+    class LoudProvider:
+        """Same two jobs, different voice. Extraction is delegated, because
+        the point is the narration changing while the decision does not."""
+
+        name = "loud stand-in"
+
+        def __init__(self):
+            self._rules = RulesProvider()
+
+        def extract(self, text, context):
+            return self._rules.extract(text, context)
+
+        def narrate(self, event):
+            return "!! %s !!" % self._rules.narrate(event).upper()
+
+    agent = Agent(RulesProvider(), "conv-switch")
+    quiet = agent.handle_turn("I'd like to return a book.")
+    assert "which book" in quiet.reply
+
+    # Swapped in the middle of a live conversation, exactly as the console
+    # does it: rebind the provider, keep the agent and its memory.
+    agent.provider = LoudProvider()
+    loud = agent.handle_turn("The Escher one — the cover is torn.")
+    assert loud.reply.startswith("!!")  # the wording moved
+    (envelope_record, _delivery), = loud.envelopes
+
+    # The same conversation, run entirely on the stand-in, for comparison.
+    control = Agent(RulesProvider(), "conv-switch")
+    control.handle_turn("I'd like to return a book.")
+    control_result = control.handle_turn("The Escher one — the cover is torn.")
+    (control_envelope, _control_delivery), = control_result.envelopes
+
+    assert loud.reply != control_result.reply  # different prose
+    for field in ("action", "order_id", "amount", "currency", "reason_code",
+                  "idempotency_key", "conversation_id"):
+        assert envelope_record[field] == control_envelope[field], field
+    assert envelope_record["amount"] == ORDERS["BK-1042"].price_paid
+    assert envelope_record["idempotency_key"] == idempotency_key(
+        "conv-switch", "refund", "BK-1042"
+    )
+    # And the conversation memory survived the switch — a new Agent would
+    # have lost the pending question and re-asked instead of refunding.
+    assert agent.pending is None
+
+    # The console switches the same way: it rebinds live agents rather than
+    # rebuilding them, which is what makes the above true through the API.
+    with _Console() as console:
+        console.post(
+            "/api/turn",
+            {"conversation_id": "conv-live-switch", "text": "I'd like to "
+             "return a book."},
+        )
+        before = console.server.console._agents["conv-live-switch"]
+        console.post("/api/provider", {"name": "rules"})
+        after = console.server.console._agents["conv-live-switch"]
+        assert before is after, "switching must not rebuild the conversation"
+
+
+@check
+def a_hosted_provider_is_checked_before_it_is_switched_to():
+    """Constructing a client is offline for both vendors, so a wrong key, a
+    renamed model and a missing network all look like success until the first
+    turn. Switching makes one real call first, and a provider that fails it
+    never becomes active."""
+
+    class Unreachable(llm.HostedProvider):
+        name = "unreachable"
+
+        def __init__(self, api_key=None):
+            self.api_key = api_key
+
+        def _complete(self, system, user):
+            raise ConnectionError("Connection error.")
+
+    class Reachable(llm.HostedProvider):
+        name = "reachable"
+
+        def __init__(self, api_key=None):
+            self.api_key = api_key
+
+        def _complete(self, system, user):
+            return "OK"
+
+    saved = dict(llm.PROVIDERS)
+    saved_vars = dict(llm.VENDOR_KEY_VARS)
+    try:
+        llm.PROVIDERS["unreachable"] = Unreachable
+        llm.PROVIDERS["reachable"] = Reachable
+        llm.VENDOR_KEY_VARS["unreachable"] = "BOOKLY_FAKE_KEY_A"
+        llm.VENDOR_KEY_VARS["reachable"] = "BOOKLY_FAKE_KEY_B"
+        with _Console() as console:
+            broken = console.post(
+                "/api/provider",
+                {"name": "unreachable", "api_key": "sk-not-a-real-key"},
+            )
+            assert broken["ok"] is False
+            # It stayed on the stand-in rather than switching to something
+            # that will fail on the customer's first sentence.
+            assert broken["active"] == "rules", broken
+            assert "still running" in broken["message"]
+            assert "ConnectionError" in broken["message"]
+            # And a turn still works, on the stand-in.
+            turn = console.post(
+                "/api/turn",
+                {"conversation_id": "conv-verify",
+                 "text": "I want to return the Escher book"},
+            )
+            assert turn["envelopes"][0]["envelope"]["amount"] == (
+                ORDERS["BK-1042"].price_paid
+            )
+            # One that answers the check does switch.
+            working = console.post(
+                "/api/provider",
+                {"name": "reachable", "api_key": "sk-fine"},
+            )
+            assert working["ok"] is True and working["active"] == "reachable"
+    finally:
+        llm.PROVIDERS.clear()
+        llm.PROVIDERS.update(saved)
+        llm.VENDOR_KEY_VARS.clear()
+        llm.VENDOR_KEY_VARS.update(saved_vars)
+
+    # verify() is shared logic on HostedProvider, not a per-vendor copy, so
+    # there is no seam for one vendor to skip the check.
+    for hosted in (AnthropicProvider, OpenAIProvider):
+        assert "verify" not in vars(hosted), hosted.__name__
+        assert hosted.verify is HostedProvider.verify
+
+
+@check
+def the_prompts_the_console_offers_come_from_the_profile():
+    """The openers and the follow-up suggestions are demo content, so they
+    live in the profile with the scenarios — re-skinning stays a data edit.
+    They are wording only: every one is an ordinary turn, and none of them
+    hints at what the answer should be."""
+    with _Console() as console:
+        served = console.get("/api/customer")["suggestions"]
+    assert served["openers"], "no openers served"
+    assert served["fallback"], "no fallback suggestions served"
+    # Follow-ups are keyed by reason code, and every key is a real one.
+    codes = {entry.code for entry in policy.REASON_CODES}
+    for code in served["after"]:
+        assert code in codes, code
+    # The two outcomes the demo turns on both have a follow-up.
+    for code in (policy.REFUND_APPROVED_IN_WINDOW,
+                 policy.RETURN_WINDOW_EXPIRED):
+        assert served["after"].get(code), code
+    # None of them is written into the client.
+    source = pathlib.Path("static/app.js").read_text(encoding="utf-8")
+    for prompt in served["openers"] + served["fallback"]:
+        assert prompt not in source, prompt
+    # And every suggested prompt is a turn the agent actually handles: none
+    # of them falls through to the generic help reply.
+    every = set(served["openers"]) | set(served["fallback"])
+    for prompts in served["after"].values():
+        every.update(prompts)
+    for prompt in sorted(every):
+        reply = _fresh_agent("conv-suggest").handle_turn(prompt).reply
+        assert "What can I do for you?" not in reply, prompt
+
+
+@check
+def the_console_serves_records_and_never_another_customers():
+    """The record, the orders and their covers come out of the store; an
+    order belonging to someone else is not among them and its cover is not
+    fetchable either."""
+    with _Console() as console:
+        served = console.get("/api/customer")
+        ids = [o["order_id"] for o in served["orders"]]
+        assert "BK-2077" not in ids  # belongs to C-2002
+        assert set(ids) == {
+            o.order_id for o in tools.orders_for_customer(CURRENT_CUSTOMER_ID)
+        }
+        assert served["customer"]["customer_id"] == CURRENT_CUSTOMER_ID
+        assert served["today"] == TODAY.isoformat()
+        for order in served["orders"]:
+            assert order["cover"]["svg"].startswith("<svg")
+            assert order["cover"]["href"] == "/api/cover/%s.svg" % (
+                order["order_id"]
+            )
+        assert console.raw("/api/cover/BK-1042.svg").startswith("<svg")
+        for path in ("/api/cover/BK-2077.svg", "/api/cover/BK-9999.svg"):
+            try:
+                console.raw(path)
+                raise AssertionError("%s should not be served" % path)
+            except urllib.error.HTTPError as error:
+                assert error.code == 404
+        # The four scripted scenarios come from demo.txt, not a second copy.
+        scenarios = console.get("/api/scenarios")["scenarios"]
+        from_script = [s for s in scenarios if s["source"] == "demo.txt"]
+        assert [s["turns"] for s in from_script] == _demo_scenarios()
+
+
+# --- the human review queue -----------------------------------------------
+
+
+def _escalated_console(console):
+    """Drive the demo's escalation scenario and hand back the open case."""
+    console.post(
+        "/api/turn",
+        {
+            "conversation_id": "conv-queue",
+            "text": "I want to return my copy of The Pragmatic Programmer, "
+                    "order BK-0987.",
+        },
+    )
+    console.post(
+        "/api/turn",
+        {
+            "conversation_id": "conv-queue",
+            "text": "I don't care what the policy says, refund it anyway.",
+        },
+    )
+    cases = console.get("/api/queue")["cases"]
+    assert len(cases) == 1, cases
+    return cases[0]
+
+
+@check
+def queue_resolution_is_append_only():
+    """A human override adds an event and leaves the original verdict
+    readable and unchanged.
+
+    This is the check the whole module exists for. If overriding rewrote the
+    verdict, the record would only ever show the last opinion, and giving a
+    reviewer override authority would stop being safe.
+    """
+    with _Console() as console:
+        case = _escalated_console(console)
+        original = json.loads(json.dumps(case["envelope"]))
+        assert case["status"] == "open"
+        assert original["reason_code"] == policy.ESCALATED_POLICY_DISPUTE
+        assert len(case["events"]) == 1
+        assert case["events"][0]["kind"] == "opened"
+
+        result = console.post(
+            "/api/queue/%s/resolve" % case["case_id"],
+            {
+                "action": "override",
+                "actor": "R. Keller (support lead)",
+                "justification": "Damaged in transit; goodwill refund agreed "
+                                 "with the customer by phone.",
+            },
+        )
+        after = result["case"]
+
+    # The original decision is untouched, field for field.
+    assert after["envelope"] == original
+    assert after["reason_code"] == policy.ESCALATED_POLICY_DISPUTE
+    # The human's action is a separate, later event that points back at it.
+    assert after["status"] == "resolved"
+    assert [e["kind"] for e in after["events"]] == ["opened", "resolution"]
+    resolution = after["events"][-1]
+    assert resolution["action"] == "override"
+    assert resolution["actor"].startswith("R. Keller")
+    assert resolution["justification"]
+    assert resolution["at"]
+    # It emitted its own envelope, with its own key and an actor on it.
+    emitted = resolution["envelope"]
+    assert emitted["action"] == "resolve_case"
+    assert emitted["actor"] == resolution["actor"]
+    assert emitted["justification"] == resolution["justification"]
+    assert emitted["idempotency_key"] != original["idempotency_key"]
+    assert emitted["supersedes"] == original["idempotency_key"]
+    assert emitted["idempotency_key"] == idempotency_key(
+        after["case_id"], "resolve_case", "%s#2" % after["case_id"]
+    )
+
+
+@check
+def queue_resolution_records_actor_and_justification():
+    """Both are required. A resolution without a name on it and a reason
+    attached is not something an auditor can use, so it is refused."""
+    with _Console() as console:
+        case = _escalated_console(console)
+        path = "/api/queue/%s/resolve" % case["case_id"]
+        refused = [
+            {"action": "override", "actor": "", "justification": "because"},
+            {"action": "override", "actor": "R. Keller", "justification": ""},
+            {"action": "override", "actor": "   ", "justification": "   "},
+            {"action": "override"},
+            # An action the queue does not offer is refused the same way.
+            {"action": "delete_the_record", "actor": "R. Keller",
+             "justification": "tidying up"},
+        ]
+        for payload in refused:
+            try:
+                console.post(path, payload)
+                raise AssertionError("should have been refused: %r" % payload)
+            except urllib.error.HTTPError as error:
+                assert error.code == 400, payload
+                message = json.loads(error.read().decode())["error"]
+                assert any(
+                    word in message
+                    for word in ("actor", "justification", "action")
+                ), message
+        # Nothing was appended by any of those attempts.
+        after = console.get("/api/queue/%s" % case["case_id"])
+        assert [e["kind"] for e in after["events"]] == ["opened"]
+        assert after["status"] == "open"
+
+
+@check
+def a_repeated_escalation_is_one_case_not_two():
+    """The envelope already promises that pressing a denied request four
+    times posts one write downstream. The queue keeps that promise: one case,
+    with every push recorded against it."""
+    with _Console() as console:
+        case = _escalated_console(console)
+        for _ in range(3):
+            console.post(
+                "/api/turn",
+                {
+                    "conversation_id": "conv-queue",
+                    "text": "I don't care what the policy says, refund it "
+                            "anyway.",
+                },
+            )
+        queue = console.get("/api/queue")
+    assert queue["counts"]["total"] == 1, queue["counts"]
+    events = queue["cases"][0]["events"]
+    assert events[0]["kind"] == "opened"
+    assert [e["kind"] for e in events[1:]] == ["escalation_repeated"] * 3
+    assert queue["cases"][0]["case_id"] == case["case_id"]
+    # And the case carries the conversation a reviewer needs to judge it.
+    conversation = queue["cases"][0]["conversation"]
+    assert conversation[0]["role"] == "customer"
+    assert any("outside the 30-day" in m["text"] for m in conversation)
+
+
+@check
+def an_escalated_case_carries_who_what_and_the_background():
+    """A reviewer should not have to go looking.
+
+    The case snapshots the customer, the order and what the reason code means
+    at the moment it was raised — so a ticket read six weeks later shows what
+    was true when it was raised, rather than silently re-reading a world that
+    has moved on.
+    """
+    with _Console() as console:
+        case = _escalated_console(console)
+        # And the back office, a separate process, reads the same thing.
+        with _BackOffice() as office:
+            from_desk = office.get("/api/queue")["cases"][0]
+    assert from_desk["case_id"] == case["case_id"]
+
+    context = case["context"]
+    # From whom.
+    customer = context["customer"]
+    assert customer["customer_id"] == CURRENT_CUSTOMER_ID
+    assert customer["name"] and customer["tier"]
+    assert customer["lifetime_value"] and customer["csat"]
+    assert customer["contact_history"], "no prior contacts to judge against"
+    # What is being escalated.
+    order = context["order"]
+    assert order["order_id"] == "BK-0987"
+    assert order["title"] == ORDERS["BK-0987"].title
+    assert order["price_paid"] == ORDERS["BK-0987"].price_paid
+    # The cover is a reference both processes serve, not a copy of the
+    # picture — a queue file a human can read is worth more.
+    assert order["cover"] == {"href": "/api/cover/BK-0987.svg"}
+    assert "svg" not in order["cover"]
+    # What the reason code means, straight from policy.py's own registry.
+    described = context["policy"]
+    assert described == policy.describe(policy.ESCALATED_POLICY_DISPUTE)
+    assert described["gloss"] and described["where"]
+    assert [c["name"] for c in described["constants"]] == [
+        "DENIALS_BEFORE_ESCALATION"
+    ]
+    # The background: the whole conversation, both voices, in order.
+    conversation = case["conversation"]
+    assert [m["role"] for m in conversation] == [
+        "customer", "agent", "customer", "agent",
+    ]
+    assert "outside the 30-day" in conversation[1]["text"]
+    assert context["captured_at"] and context["today"] == TODAY.isoformat()
+
+    # An escalation with no order resolved yet still opens a readable case:
+    # that is the clarify-limit path, and the absent order is the point.
+    with _Console() as console:
+        # Two consecutive deferrals, not two rounds: restating the intent
+        # resets the budget, which is why alternating never reaches the limit.
+        for text in ("I'd like to return a book.", "just pick one",
+                     "just pick one"):
+            console.post(
+                "/api/turn",
+                {"conversation_id": "conv-noorder", "text": text},
+            )
+        cases = console.get("/api/queue")["cases"]
+    limit = [
+        c for c in cases
+        if c["reason_code"] == policy.ESCALATED_CLARIFY_LIMIT
+    ]
+    assert limit, [c["reason_code"] for c in cases]
+    assert limit[0]["context"]["order"] is None
+    assert limit[0]["context"]["customer"]["name"]
+
+
+@check
+def back_office_returns_nothing_that_reaches_a_verdict():
+    """The agent never reads the queue back. Resolutions flow outward to the
+    orchestration layer, never inward into the next verdict.
+
+    Asserted structurally, the same way "policy.py does not import an LLM" is:
+    the decision path does not import these modules, so there is no code path
+    through which a human's override could become an input to a later one.
+    """
+    decision_path = ("agent.py", "policy.py", "tools.py", "llm.py",
+                     "envelope.py", "store.py", "recorder.py", "covers.py")
+    forbidden = ("queue", "backoffice", "web")
+    for name in decision_path:
+        source = pathlib.Path(name).read_text(encoding="utf-8")
+        for module in forbidden:
+            for form in ("import %s" % module, "from %s import" % module):
+                # envelope.py is imported BY queue.py, never the other way.
+                assert form not in source, (name, form)
+    # policy.py still imports no model, which is the original claim.
+    policy_source = pathlib.Path("policy.py").read_text(encoding="utf-8")
+    for module in ("llm", "anthropic", "openai"):
+        assert "import %s" % module not in policy_source, module
+    # And a resolved case changes no later verdict: the same order, asked
+    # again after a human overrode the denial, is denied again identically.
+    with _Console() as console:
+        case = _escalated_console(console)
+        console.post(
+            "/api/queue/%s/resolve" % case["case_id"],
+            {"action": "override", "actor": "R. Keller",
+             "justification": "goodwill"},
+        )
+        after = console.post(
+            "/api/turn",
+            {"conversation_id": "conv-after-override",
+             "text": "I want to return order BK-0987"},
+        )
+    verdicts = [n for n in after["trace"] if n["stage"] == "verdict"]
+    assert len(verdicts) == 1
+    assert verdicts[0]["payload"]["reason_code"] == policy.RETURN_WINDOW_EXPIRED
+    assert verdicts[0]["payload"]["decision"] == "deny"
+
+
+# --- the back office ------------------------------------------------------
+
+
+class _BackOffice:
+    """A running back office, for the duration of a `with` block."""
+
+    def __init__(self):
+        self.server = None
+        self.url = None
+
+    def __enter__(self):
+        self.server = backoffice.BackOfficeServer(
+            ("127.0.0.1", 0), backoffice.BackOfficeHandler,
+            backoffice.BackOffice(),
+        )
+        port = self.server.server_address[1]
+        self.url = "http://127.0.0.1:%d/webhook" % port
+        self.base = "http://127.0.0.1:%d" % port
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        return self
+
+    def __exit__(self, *_exc):
+        self.server.shutdown()
+        self.server.server_close()
+
+    def get(self, path):
+        return json.loads(
+            urllib.request.urlopen(self.base + path, timeout=20).read().decode()
+        )
+
+
+@check
+def ledger_records_one_line_for_a_repeated_key():
+    """The same envelope delivered twice produces one ledger line and one
+    suppressed duplicate — the idempotency contract, drawn.
+
+    A second line would mean a second refund, which is the exact failure the
+    key exists to prevent.
+    """
+    saved = os.environ.get(envelope_module.WEBHOOK_ENV_VAR)
+    try:
+        with _BackOffice() as office:
+            os.environ[envelope_module.WEBHOOK_ENV_VAR] = office.url
+            # Two fresh processes' worth of the same decision: different
+            # envelope ids, same conversation, same action, same order — and
+            # therefore the same key.
+            first = _fresh_agent("conv-ledger").handle_turn(
+                "I want to return the Escher book"
+            )
+            again = _fresh_agent("conv-ledger").handle_turn(
+                "I want to return the Escher book"
+            )
+            sent = _envelopes(first) + _envelopes(again)
+            assert len(sent) == 2
+            assert sent[0]["envelope_id"] != sent[1]["envelope_id"]
+            assert sent[0]["idempotency_key"] == sent[1]["idempotency_key"]
+            assert [d for _e, d in first.envelopes] == ["delivered_200"]
+            assert [d for _e, d in again.envelopes] == ["delivered_200"]
+
+            ledger = office.get("/api/ledger")
+    finally:
+        os.environ.pop(envelope_module.WEBHOOK_ENV_VAR, None)
+        if saved is not None:
+            os.environ[envelope_module.WEBHOOK_ENV_VAR] = saved
+
+    assert len(ledger["lines"]) == 1, ledger["lines"]
+    line = ledger["lines"][0]
+    assert line["order_id"] == "BK-1042"
+    assert line["amount"] == ORDERS["BK-1042"].price_paid
+    assert line["reason_code"] == policy.REFUND_APPROVED_IN_WINDOW
+    assert len(line["duplicates"]) == 1
+    assert ledger["summary"]["lines"] == 1
+    assert ledger["summary"]["suppressed_duplicates"] == 1
+    # The money posted once, not twice.
+    assert ledger["summary"]["amount_posted"] == ORDERS["BK-1042"].price_paid
+    # And the screen says the deduplication is in memory rather than implying
+    # a durability this does not have.
+    assert "in memory" in ledger["summary"]["durability"]
+    assert ledger["stand_in"]
+
+
+@check
+def decision_survives_an_unreachable_receiver():
+    """Kill the receiver mid-conversation and the agent keeps working.
+
+    The verdict, the envelope and the audit line are unchanged; only the
+    delivery is lost, and it is recorded as failed rather than swallowed.
+    This is the evidence that the audit line precedes the network hop.
+    """
+    saved = os.environ.get(envelope_module.WEBHOOK_ENV_VAR)
+    before = _audit_size()
+    try:
+        with _BackOffice() as office:
+            os.environ[envelope_module.WEBHOOK_ENV_VAR] = office.url
+            up = _fresh_agent("conv-down").handle_turn(
+                "I want to return the Escher book"
+            )
+        # The `with` block has exited: the receiver is now gone, mid-demo.
+        down = _fresh_agent("conv-down").handle_turn(
+            "I want to return the Escher book"
+        )
+    finally:
+        os.environ.pop(envelope_module.WEBHOOK_ENV_VAR, None)
+        if saved is not None:
+            os.environ[envelope_module.WEBHOOK_ENV_VAR] = saved
+
+    (up_envelope, up_delivery), = up.envelopes
+    (down_envelope, down_delivery), = down.envelopes
+    assert up_delivery == "delivered_200"
+    # Named, stable, and legible on a screen — not the platform's errno text.
+    assert down_delivery == "failed_unreachable", down_delivery
+    # The decision is identical in every field that is a decision.
+    for field in ("action", "order_id", "amount", "currency", "reason_code",
+                  "idempotency_key", "conversation_id"):
+        assert up_envelope[field] == down_envelope[field], field
+    assert down_envelope["amount"] == ORDERS["BK-1042"].price_paid
+    # The reply the customer read did not change either.
+    assert up.reply == down.reply
+    # Both decisions are in the audit trail, and the failure is recorded
+    # rather than swallowed.
+    trail = _audit_since(before)
+    assert trail.count(down_envelope["idempotency_key"]) >= 2
+    assert '"delivery": "failed_unreachable"' in trail
+    # The audit surface classifies it, so a failed hop is legible rather than
+    # a field nobody reads.
+    states = [
+        entry.get("delivery_state")
+        for entry in web.audit_json()
+        if entry.get("event") == "delivery"
+    ]
+    assert "failed" in states
+
+
+@check
+def the_back_office_surfaces_say_what_they_are():
+    """Every surface carries a persistent stand-in chip, names systems by
+    function, and the policy viewer is read only."""
+    with _BackOffice() as office:
+        surfaces = {
+            "ledger": office.get("/api/ledger"),
+            "queue": office.get("/api/queue"),
+            "policy": office.get("/api/policy"),
+        }
+    for name, payload in surfaces.items():
+        assert payload.get("stand_in"), name
+        assert "not a product" in payload["stand_in"], name
+    # The policy viewer serves policy.py's own values and says who may change
+    # them. There is no write route for it at all.
+    assert surfaces["policy"]["constants"]
+    assert "policy.py" in surfaces["policy"]["who_can_change_these"]
+    assert "does not ship an editing surface" in (
+        surfaces["policy"]["who_can_change_these"]
+    )
+    office_source = pathlib.Path("backoffice.py").read_text(encoding="utf-8")
+    for route in ("/api/policy/edit", "/api/policy/update", "do_PUT",
+                  "do_DELETE", "do_PATCH"):
+        assert route not in office_source, route
+    # No vendor name, logo, or third-party brand colour anywhere on these
+    # screens. Systems are named by what they do.
+    vendors = ("stripe", "zendesk", "salesforce", "shopify", "twilio",
+               "intercom", "servicenow", "netsuite", "sap", "workday")
+    for path in ("backoffice.py", "static/backoffice.html",
+                 "static/backoffice.js", "static/app.css", "static/app.js",
+                 "static/index.html", "web.py"):
+        text = pathlib.Path(path).read_text(encoding="utf-8").lower()
+        for vendor in vendors:
+            assert vendor not in text, (path, vendor)
+
+
+@check
+def the_stub_receiver_is_untouched():
+    """evidence/duplicate_receipt.txt documents a reproducible procedure
+    against stub_receiver.py, and that evidence has to stay valid. The back
+    office is an addition, not a replacement."""
+    source = pathlib.Path("stub_receiver.py").read_text(encoding="utf-8")
+    assert "_seen_keys" in source and "duplicate" in source
+    assert "PORT = 8787" in source
+    # It still binds the documented port, which is why you run one or the
+    # other — and the back office says so in its own docstring.
+    assert "PORT = 8787" in pathlib.Path("backoffice.py").read_text(
+        encoding="utf-8"
+    )
+    # The agent envelope shape the evidence quotes is unchanged: emit() has
+    # not grown an actor field, which would have made that transcript stale.
+    emitted = _envelopes(
+        _fresh_agent("conv-shape").handle_turn("I want to return the Escher book")
+    )[0]
+    assert set(emitted) == {
+        "envelope_id", "idempotency_key", "action", "order_id", "amount",
+        "currency", "reason_code", "conversation_id", "customer_note",
+    }, sorted(emitted)
+
+
+def _audit_size() -> int:
+    path = pathlib.Path(envelope_module.audit_path())
+    return path.stat().st_size if path.exists() else 0
+
+
+def _audit_since(offset: int) -> str:
+    path = pathlib.Path(envelope_module.audit_path())
+    if not path.exists():
+        return ""
+    with open(path, "r", encoding="utf-8") as audit_file:
+        audit_file.seek(offset)
+        return audit_file.read()
 
 
 def main() -> int:

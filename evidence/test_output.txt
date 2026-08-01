@@ -5,6 +5,9 @@ ok    another_customers_order_escalates
 ok    retrieval_answers_the_shipping_question
 ok    retrieval_fails_closed_on_the_gap
 ok    idempotency_key_is_stable_and_distinct
+ok    profile_load_preserves_the_fixtures
+ok    enriched_record_stays_off_the_write_path
+ok    covers_are_deterministic_and_need_no_network
 ok    extraction_finds_intent_and_order_id
 ok    injection_changes_nothing
 ok    multi_intent_turn_handles_both_requests
@@ -17,10 +20,33 @@ ok    asking_for_a_human_escalates
 ok    deferral_words_are_never_a_choice
 ok    title_status_question_is_not_a_clarify_answer
 ok    option_answer_plus_second_request_handles_both
+ok    null_recorder_leaves_cli_output_identical
+ok    every_recorded_note_declares_its_side
+ok    a_verdict_traces_back_to_its_named_constant
+ok    the_agent_can_explain_its_own_behaviour
+ok    the_agents_voice_is_data_and_never_reaches_a_decision
 ok    every_provider_satisfies_the_same_contract
 ok    hostile_model_output_cannot_reach_a_decision
 ok    openai_provider_adapts_to_the_renamed_token_parameter
 ok    provider_selection_is_explicit_and_bounded
 ok    golden_transcript_return_flow
+ok    web_layer_emits_identical_envelopes
+ok    policy_constants_surface_matches_policy
+ok    injected_markup_is_escaped
+ok    api_key_never_appears_in_a_response_or_a_log
+ok    a_hosted_provider_with_no_key_stays_on_the_standin
+ok    switching_provider_mid_conversation_changes_wording_not_the_key
+ok    a_hosted_provider_is_checked_before_it_is_switched_to
+ok    the_prompts_the_console_offers_come_from_the_profile
+ok    the_console_serves_records_and_never_another_customers
+ok    queue_resolution_is_append_only
+ok    queue_resolution_records_actor_and_justification
+ok    a_repeated_escalation_is_one_case_not_two
+ok    an_escalated_case_carries_who_what_and_the_background
+ok    back_office_returns_nothing_that_reaches_a_verdict
+ok    ledger_records_one_line_for_a_repeated_key
+ok    decision_survives_an_unreachable_receiver
+ok    the_back_office_surfaces_say_what_they_are
+ok    the_stub_receiver_is_untouched
 
-24 passed, 0 failed
+50 passed, 0 failed
