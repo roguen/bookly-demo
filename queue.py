@@ -71,6 +71,13 @@ class Case:
     envelope: dict
     conversation: List[dict] = field(default_factory=list)
     events: List[dict] = field(default_factory=list)
+    # Who the customer was, what the order was, and what the reason code
+    # means — snapshotted when the case opened rather than looked up when it
+    # is read. A ticket should show what was true at the moment it was
+    # raised; a record that silently re-reads the world is one you cannot
+    # reason about six weeks later. The console assembles it, so this module
+    # still knows nothing about the store.
+    context: dict = field(default_factory=dict)
 
     @property
     def status(self) -> str:
@@ -92,6 +99,7 @@ class Case:
             "conversation_id": self.envelope.get("conversation_id"),
             "conversation": self.conversation,
             "events": self.events,
+            "context": self.context,
         }
 
 
@@ -148,6 +156,7 @@ class ReviewQueue:
                 envelope=record["envelope"],
                 conversation=record.get("conversation", []),
                 events=record.get("events", []),
+                context=record.get("context", {}),
             )
 
     def _save(self) -> None:
@@ -188,7 +197,10 @@ class ReviewQueue:
     # -- writes ------------------------------------------------------------
 
     def open_case(
-        self, escalation: dict, conversation: Optional[List[dict]] = None
+        self,
+        escalation: dict,
+        conversation: Optional[List[dict]] = None,
+        context: Optional[dict] = None,
     ) -> dict:
         """Land an escalation envelope as a case.
 
@@ -207,6 +219,7 @@ class ReviewQueue:
                     opened_at=self._now(),
                     envelope=escalation,
                     conversation=list(conversation or []),
+                    context=dict(context or {}),
                 )
                 case.events.append(
                     {
@@ -220,6 +233,9 @@ class ReviewQueue:
                 self._cases[case_id] = case
             else:
                 case.conversation = list(conversation or case.conversation)
+                # The customer pushed again, so the background moved on. The
+                # snapshot of who and what does not: that is the state the
+                # case was raised against.
                 case.events.append(
                     {
                         "sequence": len(case.events) + 1,

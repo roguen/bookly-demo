@@ -30,6 +30,7 @@ import llm
 import policy
 import queue as queue_module  # this repo's queue.py, not the stdlib
 import recorder
+import store as store_module
 import tools
 import web
 from agent import Agent
@@ -458,6 +459,104 @@ def a_verdict_traces_back_to_its_named_constant():
         assert entry.gloss and entry.where
         for name in entry.depends_on:
             assert any(c.name == name for c in policy.CONSTANTS), name
+
+
+@check
+def the_agent_can_explain_its_own_behaviour():
+    """An agent that escalates because it hit a limit, and then cannot say
+    what the limit was, is worse than one that never mentions it. The same
+    goes for promising a human without saying when.
+
+    Both are answered from the knowledge base like any other question, which
+    means the retrieval floor still governs them — and still fails closed on
+    the gap it is designed to fail closed on.
+    """
+    agent = _fresh_agent("conv-explain")
+    agent.handle_turn("I'd like to return a book.")
+    agent.handle_turn("just pick one")
+    escalated = agent.handle_turn("just pick one")
+    assert _envelopes(escalated)[0]["reason_code"] == (
+        policy.ESCALATED_CLARIFY_LIMIT
+    )
+    # The escalation states when a human will pick it up.
+    assert "4 business hours" in escalated.reply, escalated.reply
+
+    explained = agent.handle_turn("What do you mean by limit?").reply
+    assert "asks which one" in explained and "twice" in explained, explained
+    assert "What can I do for you?" not in explained  # not the help fallback
+
+    when = _fresh_agent("conv-sla").handle_turn(
+        "How long until someone gets back to me?"
+    ).reply
+    assert "4 business hours" in when, when
+
+    # The published response time reaches the narrator as a fact on the
+    # event, not as a string in a template — otherwise a hosted model, whose
+    # prompt forbids inventing promises, could not state it.
+    seen = {}
+
+    class Recording(RulesProvider):
+        def narrate(self, event):
+            seen[event.kind] = dict(event.facts)
+            return super().narrate(event)
+
+    Agent(Recording(), "conv-facts").handle_turn(
+        "I want to speak to a manager"
+    )
+    assert seen["escalation"]["response_target"] == (
+        store_module.SERVICE_LEVELS["escalation_first_response"]
+    )
+
+    # And the floor still holds: the deliberate gap still returns nothing.
+    assert tools.search_policy(
+        "What are the customs rules for shipping to Ireland?"
+    ) is None
+
+
+@check
+def the_agents_voice_is_data_and_never_reaches_a_decision():
+    """Who the agent is and how it declines come from the profile, so both
+    providers speak with one voice and re-skinning stays a data edit. None of
+    it may touch a verdict, an amount or a reason code."""
+    agent_profile = store_module.AGENT
+    assert agent_profile["name"] == "Hal"
+    assert agent_profile["full_name"] == "Hal-9000"
+    refusal = agent_profile["refusal_line"]
+
+    # A refusal opens with the line; a neutral outcome never does.
+    denied = _fresh_agent("conv-voice-a").handle_turn(
+        "I want to return my copy of The Pragmatic Programmer, order BK-0987."
+    )
+    assert denied.reply.startswith(refusal), denied.reply
+    approved = _fresh_agent("conv-voice-b").handle_turn(
+        "I want to return the Escher book"
+    )
+    assert refusal not in approved.reply, approved.reply
+    status = _fresh_agent("conv-voice-c").handle_turn("Where's my Dune order?")
+    assert refusal not in status.reply, status.reply
+    assert "I'm Hal" in _fresh_agent("conv-voice-d").handle_turn("hello").reply
+
+    # The decision behind the refusal is untouched by any of it.
+    (envelope_record, _delivery), = approved.envelopes
+    assert envelope_record["amount"] == ORDERS["BK-1042"].price_paid
+    assert envelope_record["reason_code"] == policy.REFUND_APPROVED_IN_WINDOW
+
+    # The persona reaches a hosted model the same way, through its prompt —
+    # and the two rules that are not negotiable survive alongside it.
+    prompt = llm.NARRATION_SYSTEM_PROMPT
+    assert refusal in prompt
+    assert "Hal" in prompt
+    assert "must not add facts" in prompt
+    assert "must not change or soften the decision" in prompt
+
+    # Voice is the only thing llm.py takes from the profile, and policy is
+    # still not among its imports.
+    source = pathlib.Path("llm.py").read_text(encoding="utf-8")
+    assert "from store import AGENT, BRAND" in source
+    for forbidden in ("import policy", "from policy import"):
+        assert forbidden not in source, forbidden
+    # Turning the persona off is deleting keys, not editing code.
+    assert 'AGENT.get("refusal_line")' in source
 
 
 @check
@@ -1219,6 +1318,74 @@ def a_repeated_escalation_is_one_case_not_two():
     conversation = queue["cases"][0]["conversation"]
     assert conversation[0]["role"] == "customer"
     assert any("outside the 30-day" in m["text"] for m in conversation)
+
+
+@check
+def an_escalated_case_carries_who_what_and_the_background():
+    """A reviewer should not have to go looking.
+
+    The case snapshots the customer, the order and what the reason code means
+    at the moment it was raised — so a ticket read six weeks later shows what
+    was true when it was raised, rather than silently re-reading a world that
+    has moved on.
+    """
+    with _Console() as console:
+        case = _escalated_console(console)
+        # And the back office, a separate process, reads the same thing.
+        with _BackOffice() as office:
+            from_desk = office.get("/api/queue")["cases"][0]
+    assert from_desk["case_id"] == case["case_id"]
+
+    context = case["context"]
+    # From whom.
+    customer = context["customer"]
+    assert customer["customer_id"] == CURRENT_CUSTOMER_ID
+    assert customer["name"] and customer["tier"]
+    assert customer["lifetime_value"] and customer["csat"]
+    assert customer["contact_history"], "no prior contacts to judge against"
+    # What is being escalated.
+    order = context["order"]
+    assert order["order_id"] == "BK-0987"
+    assert order["title"] == ORDERS["BK-0987"].title
+    assert order["price_paid"] == ORDERS["BK-0987"].price_paid
+    # The cover is a reference both processes serve, not a copy of the
+    # picture — a queue file a human can read is worth more.
+    assert order["cover"] == {"href": "/api/cover/BK-0987.svg"}
+    assert "svg" not in order["cover"]
+    # What the reason code means, straight from policy.py's own registry.
+    described = context["policy"]
+    assert described == policy.describe(policy.ESCALATED_POLICY_DISPUTE)
+    assert described["gloss"] and described["where"]
+    assert [c["name"] for c in described["constants"]] == [
+        "DENIALS_BEFORE_ESCALATION"
+    ]
+    # The background: the whole conversation, both voices, in order.
+    conversation = case["conversation"]
+    assert [m["role"] for m in conversation] == [
+        "customer", "agent", "customer", "agent",
+    ]
+    assert "outside the 30-day" in conversation[1]["text"]
+    assert context["captured_at"] and context["today"] == TODAY.isoformat()
+
+    # An escalation with no order resolved yet still opens a readable case:
+    # that is the clarify-limit path, and the absent order is the point.
+    with _Console() as console:
+        # Two consecutive deferrals, not two rounds: restating the intent
+        # resets the budget, which is why alternating never reaches the limit.
+        for text in ("I'd like to return a book.", "just pick one",
+                     "just pick one"):
+            console.post(
+                "/api/turn",
+                {"conversation_id": "conv-noorder", "text": text},
+            )
+        cases = console.get("/api/queue")["cases"]
+    limit = [
+        c for c in cases
+        if c["reason_code"] == policy.ESCALATED_CLARIFY_LIMIT
+    ]
+    assert limit, [c["reason_code"] for c in cases]
+    assert limit[0]["context"]["order"] is None
+    assert limit[0]["context"]["customer"]["name"]
 
 
 @check

@@ -295,6 +295,14 @@ function renderRecord() {
    wording only — every one goes through the same handle_turn as anything
    typed by hand, and none carries a hint about what the answer should be. */
 
+/* The agent is labelled with the name it introduces itself by, read from
+   the profile rather than written here — and still tagged "model", because
+   what side of the boundary produced a reply does not change with its name. */
+function agentLabel() {
+  const agent = (state.customer && state.customer.agent) || {};
+  return `${agent.name || "Agent"} · model`;
+}
+
 function suggestions() {
   return (state.customer && state.customer.suggestions) || {};
 }
@@ -365,7 +373,7 @@ function renderMessages() {
       el("div", { class: `bubble ${message.role}` }, [
         el("span", {
           class: "who",
-          text: message.role === "customer" ? "Customer" : "Agent · model",
+          text: message.role === "customer" ? "Customer" : agentLabel(),
         }),
         el("span", { text: message.text }),
       ])

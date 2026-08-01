@@ -12,35 +12,62 @@
     "grey means the model, and that mapping is the design system, not a brand",
     "choice a re-skin gets to break. brand.accent re-skins the wordmark only."
   ],
-
   "brand": {
     "display_name": "Bookly",
     "descriptor": "online bookstore",
     "agent_name": "Bookly Support",
     "accent": "#5754FF"
   },
-
+  "agent": {
+    "name": "Hal",
+    "full_name": "Hal-9000",
+    "note": "Who the agent says it is, and how it declines. All of it is voice: it reaches the narration system prompt and the templates, and never the decision layer. Remove these keys and the agent is anonymous and plainly worded again.",
+    "refusal_line": "I'm sorry Dave, I can't do that.",
+    "persona": "You are Hal-9000, and you introduce yourself as Hal. Calm, precise, unfailingly polite. When you cannot do something, open with exactly this sentence and then explain plainly why: \"I'm sorry Dave, I can't do that.\""
+  },
   "clock": {
     "today": "2026-07-30",
     "note": "The demo clock. Frozen so every run and every check is identical."
   },
-
   "catalog": {
     "cover_palette": "jacket",
     "titles": {
-      "Dune": { "format": "Paperback", "published": 1965, "pages": 688 },
-      "Godel, Escher, Bach": { "format": "Paperback", "published": 1979, "pages": 777 },
-      "The Pragmatic Programmer": { "format": "Hardcover", "published": 1999, "pages": 352 },
-      "Snow Crash": { "format": "Paperback", "published": 1992, "pages": 440 },
-      "The Left Hand of Darkness": { "format": "Paperback", "published": 1969, "pages": 304 },
-      "The Design of Everyday Things": { "format": "Paperback", "published": 1988, "pages": 368 }
+      "Dune": {
+        "format": "Paperback",
+        "published": 1965,
+        "pages": 688
+      },
+      "Godel, Escher, Bach": {
+        "format": "Paperback",
+        "published": 1979,
+        "pages": 777
+      },
+      "The Pragmatic Programmer": {
+        "format": "Hardcover",
+        "published": 1999,
+        "pages": 352
+      },
+      "Snow Crash": {
+        "format": "Paperback",
+        "published": 1992,
+        "pages": 440
+      },
+      "The Left Hand of Darkness": {
+        "format": "Paperback",
+        "published": 1969,
+        "pages": 304
+      },
+      "The Design of Everyday Things": {
+        "format": "Paperback",
+        "published": 1988,
+        "pages": 368
+      }
     }
   },
-
   "customer": {
     "customer_id": "C-1001",
-    "name": "Jordan Vance",
-    "email": "jordan.vance@example.com",
+    "name": "Roguen Keller",
+    "email": "roguen.keller@example.com",
     "member_since": "2021-03-14",
     "tier": "Reader's Circle",
     "lifetime_value": 1284.6,
@@ -70,7 +97,6 @@
       }
     ]
   },
-
   "orders": [
     {
       "order_id": "BK-1041",
@@ -135,15 +161,24 @@
       "ordered_on": "2026-06-11"
     }
   ],
-
   "articles": [
     {
       "article_id": "kb-shipping-times",
       "title": "Standard shipping times",
       "summary": "Standard shipping takes 3 to 5 business days within the continental US. Expedited shipping takes 1 to 2 business days.",
       "keywords": [
-        "shipping", "ship", "delivery", "deliver", "arrive", "long",
-        "take", "takes", "standard", "expedited", "fast", "days"
+        "shipping",
+        "ship",
+        "delivery",
+        "deliver",
+        "arrive",
+        "long",
+        "take",
+        "takes",
+        "standard",
+        "expedited",
+        "fast",
+        "days"
       ]
     },
     {
@@ -151,8 +186,16 @@
       "title": "Return policy",
       "summary": "Books can be returned within 30 days of delivery for a full refund to the original payment method. Refunds post within 5 business days of approval.",
       "keywords": [
-        "return", "returns", "refund", "refunds", "policy", "window",
-        "days", "exchange", "money", "back"
+        "return",
+        "returns",
+        "refund",
+        "refunds",
+        "policy",
+        "window",
+        "days",
+        "exchange",
+        "money",
+        "back"
       ]
     },
     {
@@ -160,12 +203,64 @@
       "title": "Password reset",
       "summary": "To reset your password, use the 'Forgot password' link on the sign-in page. A reset email arrives within a few minutes; check spam if it does not.",
       "keywords": [
-        "password", "reset", "login", "log", "sign", "account",
-        "forgot", "email"
+        "password",
+        "reset",
+        "login",
+        "log",
+        "sign",
+        "account",
+        "forgot",
+        "email"
+      ]
+    },
+    {
+      "article_id": "kb-clarify-limit",
+      "title": "When Hal asks which order, and when it stops asking",
+      "summary": "When more than one order could take a refund, Hal asks which one rather than guessing, because a refund posted to the wrong order is harder to undo than a question. It will ask twice. If it still cannot tell which order you mean, it hands the conversation to a human agent instead of choosing for you.",
+      "keywords": [
+        "limit",
+        "limits",
+        "clarify",
+        "clarifying",
+        "clarification",
+        "mean",
+        "guess",
+        "guessing",
+        "twice",
+        "attempts",
+        "attempt",
+        "ask",
+        "asking",
+        "choosing",
+        "confused"
+      ]
+    },
+    {
+      "article_id": "kb-escalation-response",
+      "title": "How quickly a human replies to an escalated case",
+      "summary": "When a case goes to a human, a member of the support team picks it up within 4 business hours, and by the next business morning if it was raised overnight. You keep the case reference, and the original decision stays on the record alongside whatever the reviewer decides.",
+      "keywords": [
+        "escalation",
+        "escalated",
+        "review",
+        "reviewer",
+        "someone",
+        "somebody",
+        "hear",
+        "until",
+        "wait",
+        "waiting",
+        "respond",
+        "response",
+        "reply",
+        "long",
+        "back",
+        "team",
+        "sla",
+        "hours"
       ]
     }
   ],
-
   "suggestions": {
     "note": [
       "What the console offers as next things to say. Prompts only — every one",
@@ -225,7 +320,6 @@
       ]
     }
   },
-
   "scenarios": [
     {
       "id": "hero",
@@ -249,10 +343,16 @@
       ]
     }
   ],
-
   "knowledge_base_note": [
     "Deliberately small and deliberately gapped — there is no international",
     "shipping article. Retrieval must fail closed on the gaps rather than",
     "serve the nearest neighbour."
-  ]
+  ],
+  "service_levels": {
+    "note": [
+      "What the agent may promise a customer about timing. A published commitment, like the knowledge-base copy — not a threshold any decision reads. It is a narration fact so both providers state the same number, and a knowledge-base article so it can also be asked directly."
+    ],
+    "escalation_first_response_hours": 4,
+    "escalation_first_response": "within 4 business hours, and by the next business morning if it is raised overnight"
+  }
 }

@@ -163,47 +163,278 @@ async function renderDesk() {
     panel.appendChild(
       emptyState(
         "No cases waiting",
-        "Escalations from the console land here. Press an out-of-window return in the console until the agent hands it to a human."
+        "Escalations from the console land here. Ask the agent for a manager, or press an out-of-window return until it hands the conversation over."
       )
     );
     return;
   }
+
+  /* A case is addressable: #case-xxxx opens that escalation directly, so
+     "here is what the manager receives" is a link you can send someone. */
+  const wanted = location.hash.replace(/^#/, "");
+  const open = payload.cases.find((c) => c.case_id === wanted);
+  if (open) {
+    panel.appendChild(caseTicket(open, payload.actions));
+    return;
+  }
+
   panel.appendChild(
     el("p", {
       class: "policy-source",
-      text: `${payload.counts.open} open · ${payload.counts.resolved} resolved. A resolution is appended below the verdict it reviews; the verdict itself is never edited.`,
+      text: `${payload.counts.open} open · ${payload.counts.resolved} resolved. Open one to see who it is about, what is being escalated, and the conversation up to the handoff.`,
     })
   );
   for (const kase of payload.cases) {
-    panel.appendChild(caseCard(kase, payload.actions));
+    panel.appendChild(caseRow(kase));
   }
 }
 
-function caseCard(kase, actions) {
-  const card = el("div", {
-    class: "case",
+/* --- the queue list ------------------------------------------------------ */
+
+function caseRow(kase) {
+  const context = kase.context || {};
+  const customer = context.customer || {};
+  const order = context.order;
+  const pushes = kase.events.filter(
+    (e) => e.kind === "escalation_repeated"
+  ).length;
+
+  return el(
+    "button",
+    {
+      class: "case-row",
+      attrs: { type: "button", "data-status": kase.status },
+      on: {
+        click: () => {
+          location.hash = kase.case_id;
+          renderDesk();
+        },
+      },
+    },
+    [
+      el("span", { class: "case-status", text: kase.status }),
+      el("span", { class: "case-row-main" }, [
+        el("span", { class: "envelope-reason", text: kase.reason_code }),
+        el("span", {
+          class: "case-row-who",
+          text: [
+            customer.name || "unknown customer",
+            order ? order.title : kase.order_id || "no order named yet",
+          ].join(" · "),
+        }),
+        el("span", {
+          class: "order-id",
+          text: `${kase.case_id} · opened ${kase.opened_at}${
+            pushes ? ` · pushed ${pushes} more time${pushes === 1 ? "" : "s"}` : ""
+          }`,
+        }),
+      ]),
+    ]
+  );
+}
+
+/* --- one escalation, as the manager receives it --------------------------
+   Three questions answered without anyone going looking: who it is about,
+   what is being escalated, and what was said. All of it is snapshot and
+   record — the page derives nothing and decides nothing. */
+
+function caseTicket(kase, actions) {
+  const context = kase.context || {};
+  const customer = context.customer || {};
+  const order = context.order;
+  const policyNote = context.policy;
+  const pushes = kase.events.filter(
+    (e) => e.kind === "escalation_repeated"
+  ).length;
+
+  const ticket = el("article", {
+    class: "ticket",
     attrs: { "data-status": kase.status },
   });
-  card.appendChild(
-    el("div", { class: "case-head" }, [
+
+  ticket.appendChild(
+    el("div", { class: "ticket-bar" }, [
+      el("button", {
+        text: "← All cases",
+        attrs: { type: "button" },
+        on: {
+          click: () => {
+            location.hash = "";
+            renderDesk();
+          },
+        },
+      }),
       el("span", { class: "case-id", text: kase.case_id }),
       el("span", { class: "case-status", text: kase.status }),
     ])
   );
-  card.appendChild(
+
+  /* What is being escalated, in the policy engine's own words. */
+  ticket.appendChild(
+    el("header", { class: "ticket-head" }, [
+      el("p", { class: "ticket-kicker", text: "Escalated to a human" }),
+      el("h2", { class: "ticket-reason", text: kase.reason_code }),
+      policyNote
+        ? el("p", { class: "ticket-gloss", text: policyNote.gloss })
+        : null,
+      el("p", {
+        class: "order-id",
+        text: `opened ${kase.opened_at} · conversation ${
+          kase.conversation_id || "—"
+        } · key ${shortKey(kase.envelope.idempotency_key)}`,
+      }),
+      pushes
+        ? el("p", {
+            class: "ticket-flag",
+            text: `The customer pressed this ${pushes} more time${
+              pushes === 1 ? "" : "s"
+            } after the handoff. One case, not ${pushes + 1}: the escalation carries a single idempotency key.`,
+          })
+        : null,
+    ])
+  );
+
+  const grid = el("div", { class: "ticket-grid" });
+
+  /* From whom. */
+  const who = el("section", { class: "ticket-panel" }, [
+    el("h3", { class: "col-head", text: "From" }),
+    el("p", { class: "ticket-name", text: customer.name || "Unknown" }),
+    el("p", {
+      class: "identity-sub",
+      text: [customer.customer_id, customer.tier].filter(Boolean).join(" · "),
+    }),
+  ]);
+  const facts = el("dl", { class: "facts" });
+  if (customer.member_since) {
+    facts.appendChild(factOf("Member since", day(customer.member_since)));
+  }
+  if (customer.orders_placed !== undefined) {
+    facts.appendChild(factOf("Orders", String(customer.orders_placed)));
+  }
+  if (customer.lifetime_value !== undefined) {
+    facts.appendChild(factOf("Lifetime value", money(customer.lifetime_value)));
+  }
+  if (customer.csat !== undefined) {
+    facts.appendChild(
+      factOf("CSAT", `${customer.csat} / 5 (${customer.csat_responses})`)
+    );
+  }
+  if (customer.email) factOf("Email", customer.email, true);
+  who.appendChild(facts);
+  if (customer.email) {
+    who.appendChild(el("p", { class: "order-id", text: customer.email }));
+  }
+  if ((customer.contact_history || []).length) {
+    who.appendChild(el("h4", { class: "ticket-sub", text: "Prior contacts" }));
+    for (const contact of customer.contact_history) {
+      who.appendChild(
+        el("div", { class: "contact" }, [
+          el("span", {
+            class: "order-id",
+            text: `${contact.on} · ${contact.channel}`,
+          }),
+          el("span", { text: contact.subject }),
+          el("span", { class: "identity-sub", text: contact.outcome }),
+        ])
+      );
+    }
+  }
+  grid.appendChild(who);
+
+  /* What about. */
+  const about = el("section", { class: "ticket-panel" }, [
+    el("h3", { class: "col-head", text: "About" }),
+  ]);
+  if (order) {
+    about.appendChild(
+      el("div", { class: "ticket-order" }, [
+        el("img", {
+          attrs: {
+            src: order.cover.href,
+            alt: `${order.title} by ${order.author}`,
+            width: "60",
+            height: "90",
+          },
+        }),
+        el("div", {}, [
+          el("div", { class: "order-title", text: order.title }),
+          el("div", { class: "order-meta", text: order.author }),
+          el("div", {}, [
+            el("span", {
+              class: "status",
+              text: order.status,
+              attrs: { "data-status": order.status },
+            }),
+          ]),
+          el("div", {
+            class: "order-id",
+            text: `${order.order_id} · ${money(order.price_paid)}`,
+          }),
+          el("div", {
+            class: "order-id",
+            text: order.delivered_on
+              ? `delivered ${day(order.delivered_on)}`
+              : order.eta
+              ? `expected ${day(order.eta)}`
+              : `ordered ${day(order.ordered_on)}`,
+          }),
+        ]),
+      ])
+    );
+  } else {
+    about.appendChild(
+      el("p", {
+        class: "identity-sub",
+        text: "No order was resolved before the handoff — which is itself why a human is needed.",
+      })
+    );
+  }
+
+  /* The decision under review, and the named constants behind it. */
+  about.appendChild(
+    el("h4", { class: "ticket-sub", text: "The decision under review" })
+  );
+  about.appendChild(
     el("div", { class: "envelope" }, [
       el("div", { class: "envelope-action" }, [
-        el("span", { text: "ESCALATED" }),
-        el("span", { class: "envelope-amount", text: kase.order_id || "—" }),
+        el("span", { text: "ESCALATE TO HUMAN" }),
+        el("span", {
+          class: "envelope-amount",
+          text: order ? money(order.price_paid) : kase.order_id || "",
+        }),
       ]),
       el("div", { class: "envelope-row envelope-reason", text: kase.reason_code }),
       el("div", {
         class: "envelope-row",
-        text: `key ${shortKey(kase.envelope.idempotency_key)} · ${kase.opened_at}`,
+        text: `computed by ${policyNote ? policyNote.where : "policy.py"}`,
       }),
     ])
   );
+  for (const constant of (policyNote && policyNote.constants) || []) {
+    about.appendChild(
+      el("div", { class: "reason" }, [
+        el("div", {
+          class: "reason-code",
+          text: `${constant.name} = ${constant.value}`,
+        }),
+        el("div", { text: constant.why }),
+      ])
+    );
+  }
+  about.appendChild(
+    el("p", {
+      class: "policy-source",
+      text: "Resolving appends. The verdict above stays exactly as policy.py computed it, whatever you decide.",
+    })
+  );
+  grid.appendChild(about);
+  ticket.appendChild(grid);
 
+  /* The background. */
+  ticket.appendChild(
+    el("h3", { class: "col-head", text: "The conversation up to the handoff" })
+  );
   const transcript = el("div", { class: "case-transcript" });
   for (const message of kase.conversation) {
     transcript.appendChild(
@@ -213,8 +444,16 @@ function caseCard(kase, actions) {
       ])
     );
   }
-  card.appendChild(transcript);
+  ticket.appendChild(transcript);
 
+  ticket.appendChild(el("h3", { class: "col-head", text: "Case history" }));
+  ticket.appendChild(caseHistory(kase));
+
+  if (kase.status === "open") ticket.appendChild(resolveForm(kase, actions));
+  return ticket;
+}
+
+function caseHistory(kase) {
   const history = el("ol", { class: "case-events" });
   for (const event of kase.events) {
     const item = el("li", { attrs: { "data-kind": event.kind } }, [
@@ -235,10 +474,17 @@ function caseCard(kase, actions) {
     }
     history.appendChild(item);
   }
-  card.appendChild(history);
+  return history;
+}
 
-  if (kase.status === "open") card.appendChild(resolveForm(kase, actions));
-  return card;
+function day(iso) {
+  if (!iso) return "—";
+  const [y, m, d] = iso.split("-").map(Number);
+  const months = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+  ];
+  return `${months[m - 1]} ${d}, ${y}`;
 }
 
 function resolveForm(kase, actions) {
@@ -366,6 +612,12 @@ function render() {
 }
 
 function boot() {
+  /* Browser back and forward move between the queue and a case, because a
+     case is a place. */
+  window.addEventListener("hashchange", () => {
+    if (surface === "desk") renderDesk();
+  });
+
   panels.ledger = document.getElementById("panel-ledger");
   panels.desk = document.getElementById("panel-desk");
   panels.policy = document.getElementById("panel-policy");
@@ -376,7 +628,7 @@ function boot() {
       if (button) setSurface(button.dataset.surface);
     });
   document.getElementById("refresh").addEventListener("click", render);
-  setSurface("ledger");
+  setSurface(location.hash.startsWith("#case-") ? "desk" : "ledger");
 }
 
 boot();

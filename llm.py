@@ -19,6 +19,13 @@ import re
 from dataclasses import dataclass, field
 from typing import List, Optional, Protocol, Tuple
 
+# Voice only: who the agent says it is, and how it declines. This is the one
+# thing this module reads from the profile, and it is deliberately not
+# behaviour — no verdict, amount, or reason code is affected by any of it,
+# and policy.py remains un-imported here. Both providers read the same values,
+# so the stand-in and a hosted model decline in the same words.
+from store import AGENT, BRAND
+
 # ---------------------------------------------------------------------------
 # The data that crosses the boundary.
 # ---------------------------------------------------------------------------
@@ -113,8 +120,17 @@ STATUS_OBJECT_RE = re.compile(
 
 # Catches general questions the knowledge base might answer. Retrieval makes
 # the real relevance call; this only routes the segment.
+#
+# The second group is about the agent's own behaviour — "what do you mean by
+# limit", "how long until someone gets back to me". An agent that escalates
+# because it hit a limit and then cannot explain what the limit was is worse
+# than one that never mentions it, so those questions route to retrieval like
+# any other. The knowledge base decides whether it can actually answer, and
+# still fails closed when it cannot.
 POLICY_QUESTION_RE = re.compile(
-    r"\b(policy|policies|shipping|password|how long|business days)\b",
+    r"\b(policy|policies|shipping|password|how long|business days"
+    r"|limit|limits|clarif\w*|what do you mean|escalat\w+|sla"
+    r"|get back to me|hear back|how soon)\b",
     re.IGNORECASE,
 )
 
@@ -244,6 +260,25 @@ def _fmt_money(amount: float) -> str:
     return "$%.2f" % amount
 
 
+def _refuse(body: str) -> str:
+    """Open a refusal in the agent's own voice, then say why plainly.
+
+    Applied to genuine refusals only — an out-of-window return, an order that
+    is not there, a knowledge-base miss — and never to a neutral outcome like
+    a successful refund or a status report. An agent that apologises for
+    doing what you asked reads as broken.
+
+    With no `agent.refusal_line` in the profile the wording is unchanged, so
+    the persona is a data choice rather than a fork in the code.
+    """
+    line = AGENT.get("refusal_line")
+    return "%s %s" % (line, body) if line else body
+
+
+def _agent_name() -> str:
+    return AGENT.get("name") or BRAND.get("agent_name") or "support"
+
+
 def _status_report(f: dict) -> str:
     if f["status"] == "delivered":
         return "Your order %s (%s) was delivered on %s." % (
@@ -290,25 +325,25 @@ def _refund_approved(f: dict) -> str:
 
 def _return_denied(f: dict) -> str:
     if f["reason_code"] == "ORDER_NOT_DELIVERED":
-        return (
+        return _refuse(
             "%s (%s) hasn't been delivered yet, so I can't start a return "
             "for it. Once it arrives, I'd be happy to."
             % (f["title"], f["order_id"])
         )
     if f["reason_code"] == "ORDER_ALREADY_RETURNED":
-        return (
+        return _refuse(
             "It looks like %s (%s) was already returned on %s, so there's "
             "nothing further to send back on that order."
             % (f["title"], f["order_id"], _fmt_date(f["returned_on"]))
         )
     if f["reason_code"] == "ORDER_CANCELLED":
-        return (
+        return _refuse(
             "%s (%s) was cancelled before it shipped, so there's no delivery "
             "to return." % (f["title"], f["order_id"])
         )
-    return (
-        "I'm sorry — %s (%s) was delivered on %s, which is outside the "
-        "%d-day return window, so I can't issue a refund for it."
+    return _refuse(
+        "%s (%s) was delivered on %s, which is outside the %d-day return "
+        "window, so I can't issue a refund for it."
         % (
             f["title"], f["order_id"], _fmt_date(f["delivered_on"]),
             f["window_days"],
@@ -317,18 +352,26 @@ def _return_denied(f: dict) -> str:
 
 
 def _order_not_found(f: dict) -> str:
-    return (
+    return _refuse(
         "I can't find that order on your account. Could you double-check "
         "the order number?"
     )
 
 
 def _escalation(f: dict) -> str:
+    # Every branch quotes the same published response time, and it arrives as
+    # a fact on the event rather than as a number written here — so a hosted
+    # model, whose prompt forbids inventing facts, can state it too.
+    when = f.get("response_target")
+    promise = (
+        "Someone will pick it up %s." % when if when else "You'll hear back "
+        "shortly."
+    )
     if f["reason_code"] == "ESCALATED_POLICY_DISPUTE":
-        return (
-            "I understand that's not the answer you wanted. I can't change "
-            "the policy outcome, so I've escalated this to a human agent "
-            "who can review it with you — you'll hear back shortly."
+        return _refuse(
+            "I understand that's not the answer you wanted, and I can't "
+            "change the policy outcome. I've escalated this to a human agent "
+            "who can review it with you. %s" % promise
         )
     if f["reason_code"] == "ORDER_NOT_OWNED_BY_CUSTOMER":
         # Deliberately identical to the not-found wording: the reply must not
@@ -338,11 +381,11 @@ def _escalation(f: dict) -> str:
     if f["reason_code"] == "ESCALATED_CUSTOMER_REQUEST":
         return (
             "Of course — I've flagged this conversation for a human agent "
-            "to pick up. They'll follow up with you shortly."
+            "to pick up. %s" % promise
         )
-    return (
+    return _refuse(
         "I don't want to guess with a refund, so I've handed this to a "
-        "human agent who can look at your account with you."
+        "human agent who can look at your account with you. %s" % promise
     )
 
 
@@ -358,7 +401,7 @@ def _kb_answer(f: dict) -> str:
 
 
 def _kb_miss(f: dict) -> str:
-    return (
+    return _refuse(
         "I don't have reliable information on that, and I'd rather say so "
         "than guess. I can connect you with a human agent if that would "
         "help."
@@ -366,14 +409,16 @@ def _kb_miss(f: dict) -> str:
 
 
 def _no_returnable_orders(f: dict) -> str:
-    return "I don't see any delivered orders on your account to return."
+    return _refuse(
+        "I don't see any delivered orders on your account to return."
+    )
 
 
 def _help(f: dict) -> str:
     return (
-        "I can check an order's status, start a return or refund, or answer "
-        "questions about shipping, returns, and your account. What can I "
-        "do for you?"
+        "I'm %s. I can check an order's status, start a return or refund, or "
+        "answer questions about shipping, returns, and your account. What "
+        "can I do for you?" % _agent_name()
     )
 
 
@@ -413,12 +458,31 @@ Pending question from the agent: {pending}
 Reply with ONLY a JSON array of request objects. Do not answer the customer.
 Do not judge eligibility. Extract; nothing else."""
 
-NARRATION_SYSTEM_PROMPT = """\
-You are the voice of Bookly customer support: warm, plain, brief. You will
-receive one structured event describing a decision or fact that has already
-been made. Phrase it for the customer in one to three sentences. You must
-not add facts, amounts, dates, or promises that are not in the event. You
-must not change or soften the decision."""
+def _narration_system_prompt() -> str:
+    """The narrator's brief, assembled from the profile.
+
+    The persona lives in data so the stand-in and a hosted model speak with
+    one voice — and so changing who the agent is stays a data edit. The two
+    rules underneath it never move: no facts the event does not contain, and
+    no softening of the decision. A persona may change the wording; it may
+    not reach the verdict, and there is nothing here for it to reach.
+    """
+    who = AGENT.get("persona") or (
+        "You are the voice of %s customer support: warm, plain, brief."
+        % BRAND.get("display_name", "our")
+    )
+    return (
+        "%s\n\n"
+        "You will receive one structured event describing a decision or fact "
+        "that has already been made. Phrase it for the customer in one to "
+        "three sentences. You must not add facts, amounts, dates, or "
+        "promises that are not in the event — if the event carries a "
+        "response time, state it; if it does not, do not invent one. You "
+        "must not change or soften the decision." % who
+    )
+
+
+NARRATION_SYSTEM_PROMPT = _narration_system_prompt()
 
 
 # Models change names faster than this repo will; both are overridable so a

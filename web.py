@@ -119,7 +119,9 @@ class Console:
             # up, which is the same shape as the webhook.
             for emitted, _delivery in result.envelopes:
                 if emitted.get("action") == "escalate_to_human":
-                    self.queue.open_case(emitted, list(transcript))
+                    self.queue.open_case(
+                        emitted, list(transcript), escalation_context(emitted)
+                    )
 
             return {
                 "conversation_id": conversation_id,
@@ -404,6 +406,10 @@ def policy_json() -> dict:
 def customer_json() -> dict:
     return {
         "brand": store.BRAND,
+        # Who the agent says it is, so the interface labels it the same way
+        # the agent introduces itself rather than keeping its own copy.
+        "agent": store.AGENT,
+        "service_levels": store.SERVICE_LEVELS,
         "today": store.TODAY.isoformat(),
         "customer": _customer_json(),
         "orders": [
@@ -416,6 +422,42 @@ def customer_json() -> dict:
         # logic: each one goes through the same handle_turn as anything typed
         # by hand, and none of them carries a hint about the answer.
         "suggestions": store.PROFILE.get("suggestions", {}),
+    }
+
+
+def escalation_context(escalation: dict) -> dict:
+    """Everything a human needs to judge a case, snapshotted as it opens.
+
+    Three questions, answered before anyone has to go looking: who is this
+    about, what is being escalated, and what does the reason code mean. All
+    of it is record and description — nothing here decides anything, and
+    `policy.describe` is the same read-only registry the policy viewer uses,
+    so the reviewer and the engine cannot disagree about what a code means.
+    """
+    order = tools.get_order(escalation.get("order_id") or "")
+    visible = policy.can_view(order, store.CURRENT_CUSTOMER_ID)
+    order_json = _order_json(order) if visible else None
+    if order_json:
+        # The cover is served by both processes at the same path, so the
+        # snapshot keeps the reference and drops the ~2KB of inline SVG. A
+        # queue file a human can read in a terminal is worth more than one
+        # that carries its own pictures.
+        order_json["cover"] = {"href": order_json["cover"]["href"]}
+    return {
+        "captured_at": datetime.now(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat(),
+        "today": store.TODAY.isoformat(),
+        # From whom.
+        "customer": _customer_json(),
+        # What is being escalated. An escalation can precede order
+        # resolution — an exhausted clarifying question has no order yet —
+        # so this is legitimately absent sometimes.
+        "order": order_json,
+        # What the reason code means, and the named constants behind it.
+        "policy": policy.describe(escalation.get("reason_code") or ""),
+        "brand": store.BRAND,
+        "agent": store.AGENT,
     }
 
 

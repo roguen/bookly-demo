@@ -1333,6 +1333,177 @@ body.backoffice #console {
   margin-bottom: 6px;
 }
 
+/* --- the escalation ticket ----------------------------------------------
+   One case per screen, answering three questions before anyone has to go
+   looking: who it is about, what is being escalated, and what was said. The
+   provenance rule holds throughout — the verdict block is purple because
+   policy computed it, the agent's turns are grey, the customer's are
+   neither. */
+
+.case-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: var(--step-0);
+  color: inherit;
+  background: var(--raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  cursor: pointer;
+}
+
+.case-row:hover {
+  border-color: var(--lilac);
+  color: inherit;
+}
+
+.case-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.case-row .envelope-reason {
+  font-family: var(--mono);
+  font-size: var(--step--1);
+}
+
+.case-row-who {
+  color: #fff;
+  font-weight: 600;
+}
+
+.ticket {
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--raised);
+  padding: 14px 16px 16px;
+}
+
+.ticket-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 12px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.ticket-bar .case-id {
+  margin-left: auto;
+}
+
+.ticket-head {
+  margin-bottom: 16px;
+}
+
+.ticket-kicker {
+  margin: 0;
+  font-size: var(--step--2);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.ticket-reason {
+  margin: 2px 0 6px;
+  font-family: var(--mono);
+  font-size: var(--step-2);
+  font-weight: 700;
+  color: var(--lilac);
+  overflow-wrap: anywhere;
+}
+
+.ticket-gloss {
+  margin: 0 0 6px;
+  font-size: var(--step-1);
+  color: #fff;
+  max-width: 60ch;
+}
+
+/* A fact about the customer's behaviour, not a decision about it — so it
+   takes the warm neutral rather than either side's colour. */
+.ticket-flag {
+  margin: 10px 0 0;
+  border: 1px solid #c9873b;
+  border-radius: var(--radius);
+  background: #241a12;
+  color: #f0c07a;
+  padding: 8px 10px;
+  font-size: var(--step--1);
+}
+
+.ticket-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.ticket-panel {
+  border: 1px solid var(--rule-soft);
+  border-radius: var(--radius);
+  background: var(--deep);
+  padding: 12px;
+  min-width: 0;
+}
+
+.ticket-panel .col-head {
+  margin-top: 0;
+}
+
+.ticket-name {
+  margin: 0;
+  font-size: var(--step-2);
+  font-weight: 600;
+  color: #fff;
+}
+
+.ticket-sub {
+  margin: 14px 0 6px;
+  font-size: var(--step--2);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.ticket-order {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 6px;
+}
+
+.ticket-order img {
+  width: 60px;
+  height: 90px;
+  border-radius: 2px;
+  flex: 0 0 auto;
+}
+
+.contact {
+  display: flex;
+  flex-direction: column;
+  border-left: 2px solid var(--rule);
+  padding: 4px 0 4px 8px;
+  margin-bottom: 6px;
+  font-size: var(--step--1);
+}
+
+.ticket .case-transcript {
+  border: 1px solid var(--rule-soft);
+  border-radius: var(--radius);
+  background: var(--deep);
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+
 .reason-code {
   font-family: var(--mono);
   font-weight: 700;

@@ -24,7 +24,7 @@ from llm import (
     Request,
 )
 from recorder import NULL_RECORDER, Recorder
-from store import CURRENT_CUSTOMER_ID, TODAY, Order
+from store import CURRENT_CUSTOMER_ID, SERVICE_LEVELS, TODAY, Order
 
 # What one emitted action looks like to a caller: the envelope, and how
 # delivery went.
@@ -439,7 +439,20 @@ class Agent:
         )
         turn.envelopes.append(emitted)
         self._note_envelope(emitted)
-        self._narrate("escalation", {"reason_code": reason_code}, turn)
+        # The published response time travels as a fact on the event, not as
+        # a string in a template, so a hosted narrator — whose prompt forbids
+        # inventing promises — is able to state it too. It is a commitment
+        # from the profile, not a threshold any decision reads.
+        self._narrate(
+            "escalation",
+            {
+                "reason_code": reason_code,
+                "response_target": SERVICE_LEVELS.get(
+                    "escalation_first_response"
+                ),
+            },
+            turn,
+        )
 
     def _note_envelope(self, emitted: Emission) -> None:
         """The action record and how delivery went. The audit line was

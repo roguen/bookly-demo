@@ -46,8 +46,10 @@ REPO = Path(__file__).resolve().parent
 os.environ.setdefault("BOOKLY_AUDIT_PATH", str(REPO / "audit.log"))
 os.environ.setdefault("BOOKLY_QUEUE_PATH", str(REPO / "queue.json"))
 
+import covers  # noqa: E402
 import policy  # noqa: E402
 import queue as review  # noqa: E402  (this repo's queue.py, not the stdlib)
+import store  # noqa: E402
 import tools  # noqa: E402
 import web  # noqa: E402  (for the shared JSON shapes and header discipline)
 
@@ -279,6 +281,12 @@ class BackOfficeHandler(BaseHTTPRequestHandler):
                 return lambda: self._json(
                     dict(web.policy_json(), stand_in=STAND_IN_NOTICE)
                 )
+            cover = re.fullmatch(r"/api/cover/(BK-\d{4})\.svg", path)
+            if cover:
+                # Served at the same path the console serves it, so a case
+                # snapshot can carry one reference that works in either
+                # process rather than a copy of the picture.
+                return lambda: self._cover(cover.group(1))
             if path.startswith("/static/"):
                 return lambda: self._static(path[len("/static/"):])
         if method == "POST":
@@ -317,6 +325,19 @@ class BackOfficeHandler(BaseHTTPRequestHandler):
             justification=payload.get("justification") or "",
         )
         self._json(result)
+
+    def _cover(self, order_id: str) -> None:
+        order = tools.get_order(order_id)
+        if order is None or not policy.can_view(order, store.CURRENT_CUSTOMER_ID):
+            self._error(404, "No such order on this account.")
+            return
+        self._send(
+            200,
+            "image/svg+xml; charset=utf-8",
+            covers.for_order(
+                order, store.CATALOG.get("cover_palette", covers.DEFAULT_PALETTE)
+            ).encode("utf-8"),
+        )
 
     def _static(self, relative: str) -> None:
         target = (STATIC_DIR / relative).resolve()

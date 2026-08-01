@@ -1,3 +1,14 @@
+NOTE (2026-07-31). Captured before the agent was given a name and a
+refusal line (profiles/bookly.json -> agent.*). The stand-in's wording on the
+refusal turns below is therefore the earlier, plainer phrasing; run it again
+today and those lines open with "I'm sorry Dave, I can't do that."
+
+Nothing this file evidences has moved. It is a record of DECISION parity —
+every reason code, amount and idempotency key — and the persona is voice
+only: it reaches the narration prompt and the templates and never the
+decision layer. That the two columns are worded differently is the point of
+the document, and it remains true in both directions.
+
 Provider parity: two vendors, one decision layer.
 
 The deck claims that swapping the model changes the wording and never

@@ -121,15 +121,40 @@ deduplication is in memory and dies with the process, the same contract the
 stub has, and the screen says so rather than implying durability it does not
 have.
 
+### The agent's voice
+
+The agent introduces itself as **Hal**, and declines with a line the profile
+supplies rather than one written into the code:
+
+> I'm sorry Dave, I can't do that. The Pragmatic Programmer (BK-0987) was
+> delivered on May 2, which is outside the 30-day return window, so I can't
+> issue a refund for it.
+
+That line is applied to genuine refusals only — never to a successful refund
+or a status report, because an agent that apologises for doing what you asked
+reads as broken. `agent.persona` reaches a hosted model through the narration
+system prompt and the stand-in through its templates, so both providers
+decline in the same words. Delete the `agent` block and the agent is anonymous
+and plainly worded again; nothing in the decision layer changes either way.
+
+The agent can also explain itself. "What do you mean by limit?" after a
+clarify-limit handoff, and "how long until someone gets back to me?" after any
+escalation, are answered from the knowledge base like any other question — and
+the published response time travels as a *fact on the escalation event*, not a
+string in a template, so a hosted narrator forbidden from inventing promises
+can state it too.
+
 ### Re-skinning
 
-The demo dataset — customer, orders, catalog, knowledge base, frozen clock and
-scenarios — lives in `profiles/bookly.json`. `BOOKLY_PROFILE=<name>` selects
-another. Standing this up for a different company is a data edit.
+The demo dataset — customer, orders, catalog, knowledge base, frozen clock,
+scenarios, suggested prompts, the agent's voice and the service levels — lives
+in `profiles/bookly.json`. `BOOKLY_PROFILE=<name>` selects another. Standing
+this up for a different company is a data edit.
 
 Thresholds and reason codes deliberately did **not** move into the profile.
 Those are policy, they live in `policy.py`, and a data file must not be able to
-reach them.
+reach them. The line between the two is the test: a profile may change what
+the agent *says* and never what it *decides*.
 
 ## How a turn flows
 

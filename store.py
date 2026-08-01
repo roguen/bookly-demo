@@ -191,6 +191,15 @@ PROFILE = load_profile()
 BRAND = PROFILE["brand"]
 CATALOG = PROFILE["catalog"]
 
+# Who the agent says it is and how it declines. Voice, not behaviour: it
+# reaches the narration prompt and the templates and never the decision
+# layer. An empty dict here leaves the agent anonymous and plainly worded.
+AGENT = PROFILE.get("agent", {})
+
+# What the agent may promise a customer about timing. A published commitment,
+# like the knowledge-base copy — not a threshold any decision reads.
+SERVICE_LEVELS = PROFILE.get("service_levels", {})
+
 # The demo clock. Policy functions take `today` as a parameter so they stay
 # pure; this constant is the single place the demo's "now" is defined.
 TODAY = _date(PROFILE["clock"]["today"])
