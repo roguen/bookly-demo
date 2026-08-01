@@ -2202,6 +2202,61 @@ class _BackOffice:
             urllib.request.urlopen(self.base + path, timeout=20).read().decode()
         )
 
+    def post(self, path, payload):
+        request = urllib.request.Request(
+            self.base + path,
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        return json.loads(
+            urllib.request.urlopen(request, timeout=20).read().decode()
+        )
+
+
+@check
+def policy_is_authored_in_the_back_office_and_the_console_reads_it():
+    """The editor lives only on the operator surface. A change POSTed to the
+    back office is validated there, persisted, and read live by the console —
+    which itself has no route to author policy. This is the read-only viewer's
+    deliberate refusal, now built for real rather than mocked."""
+    with _authored_policy():
+        with _BackOffice() as office:
+            result = office.post("/api/policy/change", {
+                "field": "return_window_days", "value": 14,
+                "actor": "jchen (CX lead)", "justification": "Peak season.",
+            })
+            by_key = {p["key"]: p for p in result["parameters"]}
+            assert by_key["return_window_days"]["value"] == 14
+            assert by_key["return_window_days"]["history"][-1]["actor"] == (
+                "jchen (CX lead)"
+            )
+            # An edit past the bounds is refused at the surface, not only in code.
+            try:
+                office.post("/api/policy/change", {
+                    "field": "return_window_days", "value": 999,
+                    "actor": "jchen", "justification": "too big",
+                })
+                assert False, "out-of-bounds change was not refused"
+            except urllib.error.HTTPError as error:
+                assert error.code == 400
+        # The console reads the same document — the authored value, live — and
+        # has no route of its own to change it.
+        with _Console() as console:
+            served = {
+                c["name"]: c["value"]
+                for c in console.get("/api/policy")["constants"]
+            }
+            assert served["RETURN_WINDOW_DAYS"] == 14
+            try:
+                console.post("/api/policy/change", {
+                    "field": "return_window_days", "value": 30,
+                    "actor": "x", "justification": "y",
+                })
+                assert False, "the console must not author policy"
+            except urllib.error.HTTPError as error:
+                assert error.code == 404
+
 
 @check
 def ledger_records_one_line_for_a_repeated_key():
@@ -2308,7 +2363,8 @@ def decision_survives_an_unreachable_receiver():
 @check
 def the_back_office_surfaces_say_what_they_are():
     """Every surface carries a persistent stand-in chip, names systems by
-    function, and the policy viewer is read only."""
+    function, and the policy viewer authors validated, append-only changes —
+    never through a destructive verb that would overwrite the record."""
     with _BackOffice() as office:
         surfaces = {
             "ledger": office.get("/api/ledger"),
@@ -2318,14 +2374,15 @@ def the_back_office_surfaces_say_what_they_are():
     for name, payload in surfaces.items():
         assert payload.get("stand_in"), name
         assert "not a product" in payload["stand_in"], name
-    # The policy viewer serves policy.py's own values and says who may change
-    # them. There is no write route for it at all.
+    # The policy viewer serves policy.py's own values, names who authors them,
+    # and exposes the authorable parameters. The one write path is the
+    # validated, append-only /api/policy/change — never a REST update or a
+    # destructive verb that would overwrite rather than append.
     assert surfaces["policy"]["constants"]
+    assert surfaces["policy"]["parameters"]
     assert "policy.py" in surfaces["policy"]["who_can_change_these"]
-    assert "does not ship an editing surface" in (
-        surfaces["policy"]["who_can_change_these"]
-    )
     office_source = pathlib.Path("backoffice.py").read_text(encoding="utf-8")
+    assert "/api/policy/change" in office_source
     for route in ("/api/policy/edit", "/api/policy/update", "do_PUT",
                   "do_DELETE", "do_PATCH"):
         assert route not in office_source, route

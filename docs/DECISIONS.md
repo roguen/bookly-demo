@@ -1148,7 +1148,7 @@ already makes about thresholds — a document holding its own copy is the same
 failure with a slower fuse — and generation was unavailable because the no-
 build-step constraint does not move, so the registry *is* the centralisation.
 Failing on a removed citation stops the check being made vacuous by deletion.
-The check earned its keep unprompted as the count moved 51 → 52 → 56 → 68 → 69 → 74,
+The check earned its keep unprompted as the count moved 51 → 52 → 56 → 68 → 69 → 74 → 75,
 naming the files to update each time. CI matters because every claim about the
 suite being green was a claim about somebody's laptop, and slide 5 argues that
 agents die from silent regressions when somebody tweaks a prompt on a Thursday

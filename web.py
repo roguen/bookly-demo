@@ -380,10 +380,26 @@ def policy_json() -> dict:
     interface allowed to hold its own copy of a threshold is an interface
     that will eventually disagree with the engine.
     """
+    active = policy.active_policy()
     return {
         "constants": [
             {"name": c.name, "value": c.value, "why": c.why}
             for c in policy.CONSTANTS
+        ],
+        # The authorable parameters, with the bounds an edit is validated
+        # against and the append-only history behind each value. The back
+        # office renders an editor from this; the console renders it read-only.
+        "parameters": [
+            {
+                "name": parameter.name,
+                "key": parameter.key,
+                "value": active[parameter.name],
+                "why": parameter.why,
+                "min": parameter.minimum,
+                "max": parameter.maximum,
+                "history": policy.policy_changes(parameter.key),
+            }
+            for parameter in policy.PARAMETERS
         ],
         "reason_codes": [
             {
@@ -396,10 +412,13 @@ def policy_json() -> dict:
         ],
         "retrieval_floor": tools.MIN_KEYWORD_MATCHES,
         "who_can_change_these": (
-            "An engineer, in policy.py, in a reviewed commit. This build does "
-            "not ship an editing surface — making procedures authorable by "
-            "non-engineers is the next order of problem, and mocking it here "
-            "would be the one dishonest thing on screen."
+            "The three CX thresholds are authored in the back office: each "
+            "change is validated against its bounds, carries who changed it and "
+            "why, and is appended to a log that is never overwritten. The "
+            "decision structure and the two floors that stop a confidently "
+            "wrong answer — the title-word strength and the retrieval floor — "
+            "stay in policy.py and still take an engineer, by design: the whole "
+            "point of a floor is that it does not get lowered."
         ),
     }
 

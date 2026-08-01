@@ -527,7 +527,11 @@ function resolveForm(kase, actions) {
   return form;
 }
 
-/* --- surface 3: the policy viewer, read only ----------------------------- */
+/* --- surface 3: the policy editor ----------------------------------------
+   The three CX thresholds are authored here — each change validated,
+   attributed, and appended to a log the console reads live. The two floors
+   that stop a confidently wrong answer are shown but not editable. This is the
+   surface earlier builds refused to mock; it is real now. */
 
 async function renderPolicy() {
   const panel = panels.policy;
@@ -541,30 +545,38 @@ async function renderPolicy() {
   }
   standInNotice(payload.stand_in);
 
-  /* Read only, deliberately. There is no edit control anywhere on this
-     screen, and the line below says who can change these and where. */
   panel.appendChild(
     el("p", { class: "policy-source", text: payload.who_can_change_these })
   );
 
-  panel.appendChild(el("h3", { class: "col-head", text: "Thresholds" }));
-  const block = el("div", { class: "policy-block" });
-  for (const constant of payload.constants) {
-    block.appendChild(
-      el("div", { class: "policy-row" }, [
-        el("span", { class: "policy-name", text: constant.name }),
-        el("span", { class: "policy-value", text: String(constant.value) }),
-      ])
-    );
-    block.appendChild(el("p", { class: "policy-source", text: constant.why }));
+  panel.appendChild(
+    el("h3", { class: "col-head", text: "Authorable thresholds" })
+  );
+  for (const parameter of payload.parameters || []) {
+    panel.appendChild(policyEditor(parameter));
   }
-  block.appendChild(
+
+  /* The floors, shown but not editable, and the reason they are not. */
+  panel.appendChild(
+    el("h3", { class: "col-head", text: "Floors · not authorable" })
+  );
+  const floor = el("div", { class: "policy-block" });
+  floor.appendChild(
     el("div", { class: "policy-row" }, [
       el("span", { class: "policy-name", text: "MIN_KEYWORD_MATCHES" }),
-      el("span", { class: "policy-value", text: String(payload.retrieval_floor) }),
+      el("span", {
+        class: "policy-value",
+        text: String(payload.retrieval_floor),
+      }),
     ])
   );
-  panel.appendChild(block);
+  floor.appendChild(
+    el("p", {
+      class: "policy-source",
+      text: "This floor and the title-word strength stay in policy.py and take an engineer. The point of a floor is that it does not get lowered — lowering it would re-open a confidently wrong answer reaching a customer.",
+    })
+  );
+  panel.appendChild(floor);
 
   panel.appendChild(el("h3", { class: "col-head", text: "Reason codes" }));
   for (const code of payload.reason_codes) {
@@ -581,6 +593,100 @@ async function renderPolicy() {
       ])
     );
   }
+}
+
+/* One authorable threshold: its current value (the deterministic side, so
+   purple), why it exists, an editor that writes a validated + attributed +
+   append-only change, and the history behind it. The value is purple; a
+   person changing it is neither side, so the history rows take the neutral
+   outline a queue resolution takes. */
+function policyEditor(parameter) {
+  const card = el("div", { class: "policy-block param" });
+  card.appendChild(
+    el("div", { class: "policy-row" }, [
+      el("span", { class: "policy-name", text: parameter.name }),
+      el("span", { class: "policy-value", text: String(parameter.value) }),
+    ])
+  );
+  card.appendChild(el("p", { class: "policy-source", text: parameter.why }));
+
+  const value = el("input", {
+    attrs: {
+      type: "number",
+      value: String(parameter.value),
+      min: String(parameter.min),
+      max: String(parameter.max),
+      step: "1",
+      "aria-label": `New value for ${parameter.name}`,
+    },
+  });
+  const actor = el("input", {
+    attrs: { type: "text", placeholder: "Your name (required)", required: "" },
+  });
+  const justification = el("textarea", {
+    attrs: {
+      rows: "2",
+      placeholder: "Why (required) — this is the record an auditor reads",
+      required: "",
+    },
+  });
+  const error = el("p", { class: "form-error" });
+  const form = el("form", { class: "resolve" }, [
+    el("h4", { text: `Change · allowed ${parameter.min}–${parameter.max}` }),
+    value,
+    actor,
+    justification,
+    el("button", { text: "Record change", attrs: { type: "submit" } }),
+    error,
+  ]);
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    error.textContent = "";
+    try {
+      await api("/api/policy/change", {
+        field: parameter.key,
+        value: Number(value.value),
+        actor: actor.value,
+        justification: justification.value,
+      });
+      await renderPolicy();
+    } catch (problem) {
+      /* The rule is enforced once, in policy.change_parameter. The browser
+         shows what the server said rather than keeping its own copy. */
+      error.textContent = String(problem).replace(/^Error:\s*/, "");
+    }
+  });
+  card.appendChild(form);
+
+  const history = parameter.history || [];
+  if (history.length) {
+    const details = el("details", { class: "param-history" }, [
+      el("summary", {
+        text: `history · ${history.length} change${
+          history.length === 1 ? "" : "s"
+        }`,
+      }),
+    ]);
+    const list = el("ol", { class: "case-events" });
+    for (const change of history) {
+      list.appendChild(
+        el("li", { attrs: { "data-kind": "resolution" } }, [
+          el("span", {
+            class: "event-action",
+            text: `${change.from} → ${change.to}`,
+          }),
+          el("span", {
+            class: "event-actor",
+            text: `${change.actor} · ${change.at}`,
+          }),
+          el("div", { text: change.justification }),
+        ])
+      );
+    }
+    details.appendChild(list);
+    card.appendChild(details);
+  }
+  return card;
 }
 
 /* --- shell -------------------------------------------------------------- */
@@ -628,7 +734,13 @@ function boot() {
       if (button) setSurface(button.dataset.surface);
     });
   document.getElementById("refresh").addEventListener("click", render);
-  setSurface(location.hash.startsWith("#case-") ? "desk" : "ledger");
+  setSurface(
+    location.hash === "#policy"
+      ? "policy"
+      : location.hash.startsWith("#case-")
+      ? "desk"
+      : "ledger"
+  );
 }
 
 boot();

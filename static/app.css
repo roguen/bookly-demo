@@ -1354,6 +1354,33 @@ body.backoffice #console {
   margin-bottom: 6px;
 }
 
+/* --- the policy editor: an authorable threshold and its history ---------
+   The value stays purple (the deterministic side); the editor is a control on
+   the neutral raised surface, and the change history takes the neutral outline
+   a queue resolution takes, because a person changing a number is neither
+   side. */
+.param {
+  margin-bottom: 14px;
+}
+
+.param .resolve {
+  margin-top: 10px;
+}
+
+.param-history {
+  margin-top: 10px;
+}
+
+.param-history summary {
+  cursor: pointer;
+  font-size: var(--step--2);
+  color: var(--muted);
+}
+
+.param-history .case-events {
+  margin-top: 6px;
+}
+
 /* --- the escalation ticket ----------------------------------------------
    One case per screen, answering three questions before anyone has to go
    looking: who it is about, what is being escalated, and what was said. The
