@@ -76,6 +76,10 @@ VALID_INTENTS = frozenset(
         "return_request",
         "policy_question",
         "human_handoff",
+        # The door for "none of the above": a request this support does not
+        # cover. It exists so a hosted model can say "I can't help with that"
+        # instead of forcing an unmodeled question onto the nearest intent.
+        "out_of_scope",
     ]
 )
 
@@ -193,6 +197,24 @@ HUMAN_HANDOFF_RE = re.compile(
     re.IGNORECASE,
 )
 
+# The door for "none of the above". Checked last, only after every handled
+# intent has been tried, so the listed intents always win. A segment that
+# reaches here matched nothing this support does. If it still reads as a request
+# or a question — it ends with a question mark, or opens with an interrogative
+# or a request verb — the customer asked for something out of scope, and the
+# honest move is to say so and offer a person rather than force it onto the
+# nearest intent. Pure pleasantries ("hello", "thanks", "that sounds great")
+# carry no such signal and fall to the friendly opener instead. This detects
+# that a turn is an unhandled request; it does not enumerate the topics that are
+# out of scope, because the whole point is not to add intents one at a time.
+OUT_OF_SCOPE_RE = re.compile(
+    r"\?\s*$"
+    r"|^\s*(?:do|does|did|can|could|would|will|how|what|where|when|why|who"
+    r"|is|are|should|cancel|change|update|reset|subscribe|unsubscribe"
+    r"|buy|sell|recommend|suggest)\b",
+    re.IGNORECASE,
+)
+
 # Catches a digit that is the entire reply — anchored at both ends, because
 # a stray "2" inside a sentence is a quantity, not a choice.
 OPTION_DIGIT_RE = re.compile(r"^\s*(?:option\s+)?([1-9])\s*[.)]?\s*$")
@@ -272,6 +294,11 @@ class RulesProvider:
             return "order_status"
         if POLICY_QUESTION_RE.search(segment):
             return "policy_question"
+        # Last, and only after every handled intent has failed: a request the
+        # agent cannot cover reads as out of scope; a pleasantry reads as
+        # nothing, and gets the friendly opener.
+        if OUT_OF_SCOPE_RE.search(segment):
+            return "out_of_scope"
         return None
 
     def _title_words(
@@ -443,6 +470,11 @@ def _escalation(f: dict) -> str:
             "Of course — I've flagged this conversation for a human agent "
             "to pick up. %s" % promise
         )
+    if f["reason_code"] == "ESCALATED_UNHANDLED":
+        return (
+            "This is beyond what I can help with here, so I've passed you to "
+            "a human colleague who can take it from here. %s" % promise
+        )
     return (
         "I don't want to guess with a refund, so I've handed this to a "
         "human agent who can look at your account with you. %s" % promise
@@ -553,6 +585,16 @@ def _help(f: dict) -> str:
     )
 
 
+def _out_of_scope(f: dict) -> str:
+    # Names the limit and offers the way out. The agent does not pretend to
+    # handle the request, and does not silently answer the nearest thing it can.
+    return (
+        "I'm not able to help with that here. I can check an order's status, "
+        "start a return or refund, or answer questions about shipping, "
+        "returns, and your account — or I can connect you with a person."
+    )
+
+
 _TEMPLATES = {
     "status_report": _status_report,
     "clarify_which_order": _clarify_which_order,
@@ -569,6 +611,7 @@ _TEMPLATES = {
     "order_history": _order_history,
     "agent_identity": _agent_identity,
     "help": _help,
+    "out_of_scope": _out_of_scope,
 }
 
 
@@ -584,11 +627,20 @@ order, "order_history" for a question about the account as a whole — how many
 orders, what they have bought, their order history — "agent_identity" for who
 or what you are, "refund_status" for a question about a refund that already
 exists rather than a request for a new one, "return_request",
-"policy_question", "human_handoff", or null), order_id (format BK-0000, or
-null), title_words
+"policy_question", "human_handoff", "out_of_scope", or null), order_id (format
+BK-0000, or null), title_words
 (words from the customer's own order titles listed below that the request
 refers to), option_number (if the request answers a numbered choice, else
 null), and text (the request verbatim).
+
+Use "out_of_scope" for a genuine request this bookstore's support does not
+cover — anything that is not about an order, a return, a refund, shipping or
+returns policy, the customer's order history, or who you are. Use it only when
+the request fits none of the other intents. NEVER force a request onto the
+nearest intent to avoid "out_of_scope", and never use "out_of_scope" for a
+request one of the listed intents already covers — the listed intents always
+win. Use null only when the text carries no request at all — a greeting, a
+thanks, filler.
 
 Customer's order titles: {titles}
 Pending question from the agent: {pending}

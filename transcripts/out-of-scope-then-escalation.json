@@ -1,0 +1,47 @@
+{
+  "id": "out-of-scope-then-escalation",
+  "title": "A question the agent does not cover — recognized, declined, then escalated when pressed",
+  "why": "The agent has no intent for e-readers, and instead of mapping the question onto the nearest order-shaped one and answering confidently, it classifies the turn out_of_scope and says so, offering a person. A second out-of-scope request is a customer it cannot help, so it escalates rather than repeating the decline — the dispute pattern (DECISIONS #8) applied to scope. Both turns are extraction on the model side and a decision on the deterministic side; no verdict is invented and no order is touched.",
+  "conversation_id": "conv-out-of-scope",
+  "turns": [
+    {
+      "customer": "Do you sell e-readers or Kindles?",
+      "reply": "I'm not able to help with that here. I can check an order's status, start a return or refund, or answer questions about shipping, returns, and your account — or I can connect you with a person.",
+      "stages": [
+        "extract",
+        "route",
+        "route",
+        "narrate"
+      ],
+      "narrations": [
+        "out_of_scope"
+      ],
+      "envelopes": []
+    },
+    {
+      "customer": "Do you have any job openings I could apply for?",
+      "reply": "This is beyond what I can help with here, so I've passed you to a human colleague who can take it from here. Someone will pick it up within 4 business hours, and by the next business morning if it is raised overnight.",
+      "stages": [
+        "extract",
+        "route",
+        "route",
+        "envelope",
+        "narrate"
+      ],
+      "narrations": [
+        "escalation"
+      ],
+      "envelopes": [
+        {
+          "action": "escalate_to_human",
+          "order_id": null,
+          "amount": null,
+          "currency": null,
+          "reason_code": "ESCALATED_UNHANDLED",
+          "idempotency_key": "d40f3fa4f52438f0544583e890f4eeb16b6be478b4059b3848ec9e1c51eabbab",
+          "delivery": "skipped_no_url"
+        }
+      ]
+    }
+  ]
+}
