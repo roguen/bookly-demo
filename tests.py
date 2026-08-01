@@ -49,6 +49,15 @@ from llm import (
 )
 from store import CURRENT_CUSTOMER_ID, ORDERS, TODAY
 
+# Hermetic policy: the suite decides on the historical defaults regardless of any
+# policy.json a local demo may have authored — the same instinct that makes the
+# harness unset the webhook. The path is deliberately absent; policy-editing
+# checks point the env var at their own temp document and restore it.
+os.environ.setdefault(
+    "BOOKLY_POLICY_PATH",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "policy.checks.json"),
+)
+
 CHECKS = []
 
 
@@ -259,6 +268,164 @@ def override_covers_carry_no_forbidden_sink():
     for order in tools.orders_for_customer(CURRENT_CUSTOMER_ID):
         assert covers.override_for(order.order_id) is not None, order.order_id
         assert covers.for_order(order) == covers.override_for(order.order_id)
+
+
+# --- authorable policy parameters (v3.2.0) -------------------------------
+
+
+class _authored_policy:
+    """A temp policy document, so a check can author a change without touching
+    the demo's policy or another check's — the same isolation the console
+    contexts give the queue."""
+
+    def __enter__(self):
+        self._saved = os.environ.get(policy.POLICY_PATH_ENV_VAR)
+        self._dir = tempfile.mkdtemp(prefix="bookly-policy-")
+        os.environ[policy.POLICY_PATH_ENV_VAR] = os.path.join(
+            self._dir, "policy.json"
+        )
+        return self
+
+    def __exit__(self, *_exc):
+        os.environ.pop(policy.POLICY_PATH_ENV_VAR, None)
+        if self._saved is not None:
+            os.environ[policy.POLICY_PATH_ENV_VAR] = self._saved
+        shutil.rmtree(self._dir, ignore_errors=True)
+
+
+@check
+def policy_defaults_are_the_historical_policy():
+    """An un-edited build decides on exactly the v3.1.0 numbers, which is what
+    makes shipping authorable policy move no envelope. The two floors that stop
+    a confidently wrong answer are deliberately not authorable and stay code."""
+    with _authored_policy():  # an absent document
+        assert policy.active_policy() == {
+            "RETURN_WINDOW_DAYS": 30,
+            "MAX_CLARIFY_ATTEMPTS": 2,
+            "DENIALS_BEFORE_ESCALATION": 1,
+        }
+    keys = {p.key for p in policy.PARAMETERS}
+    names = {p.name for p in policy.PARAMETERS}
+    assert "min_title_words_for_write" not in keys and "MIN_TITLE_WORDS_FOR_WRITE" not in names
+    assert policy.MIN_TITLE_WORDS_FOR_WRITE == 2  # still a code literal
+    assert tools.MIN_KEYWORD_MATCHES == 2  # still a code literal
+
+
+@check
+def an_authored_change_moves_a_verdict_through_policy_only():
+    """Editing the return window changes a real verdict, and the value flows
+    through policy.py, not the model. The surface the console serves reads the
+    same document, so the engine and the interface cannot disagree about it."""
+    geb = ORDERS["BK-1042"]  # delivered 2026-07-18; TODAY is 2026-07-30, so 12 days
+    assert policy.decide_return(
+        geb, CURRENT_CUSTOMER_ID, TODAY
+    ).decision == "approve_refund"
+    with _authored_policy():
+        policy.change_parameter(
+            "return_window_days", 10, "jchen (CX lead)",
+            "Tightening the window for the peak-return season.",
+        )
+        verdict = policy.decide_return(geb, CURRENT_CUSTOMER_ID, TODAY)
+        assert verdict.decision == "deny"
+        assert verdict.reason_code == policy.RETURN_WINDOW_EXPIRED
+        assert policy.RETURN_WINDOW_DAYS == 10
+        served = {c["name"]: c["value"] for c in web.policy_json()["constants"]}
+        assert served["RETURN_WINDOW_DAYS"] == 10
+        # A revert is another append, and the verdict follows it back.
+        policy.change_parameter(
+            "return_window_days", 30, "jchen (CX lead)", "Peak season over."
+        )
+        assert policy.decide_return(
+            geb, CURRENT_CUSTOMER_ID, TODAY
+        ).decision == "approve_refund"
+
+
+@check
+def a_policy_change_is_validated_and_requires_an_actor():
+    """A non-engineer can tune the policy but cannot break it: every edit is
+    range- and type-checked and must carry an actor and a justification, refused
+    here once rather than in the browser. A floor is not an authorable field."""
+    with _authored_policy():
+        for field, value in [
+            ("return_window_days", 999), ("return_window_days", -1),
+            ("max_clarify_attempts", 0), ("denials_before_escalation", 0),
+        ]:
+            try:
+                policy.change_parameter(field, value, "a", "b")
+                assert False, (field, value)
+            except ValueError:
+                pass
+        for value in (True, 3.5, "5", None):  # bool is not an int here
+            try:
+                policy.change_parameter("return_window_days", value, "a", "b")
+                assert False, value
+            except ValueError:
+                pass
+        try:  # a floor is not authorable at all
+            policy.change_parameter("min_title_words_for_write", 3, "a", "b")
+            assert False
+        except ValueError:
+            pass
+        for actor, just in [("", "b"), ("a", ""), ("  ", "b"), ("a", "  ")]:
+            try:
+                policy.change_parameter("return_window_days", 20, actor, just)
+                assert False, (actor, just)
+            except ValueError:
+                pass
+        assert policy.policy_changes() == []  # nothing above was written
+        event = policy.change_parameter(
+            "return_window_days", 20, "jchen", "valid edit"
+        )
+        assert event["to"] == 20 and len(policy.policy_changes()) == 1
+
+
+@check
+def the_policy_log_is_append_only_and_reloads_live():
+    """Editing policy is the append-only shape the queue uses: a change is a new
+    event that supersedes, a revert is another event, and nothing is overwritten.
+    A second process sees the file, not a cached copy — the mechanism that lets a
+    back-office edit reach the console without a restart."""
+    with _authored_policy():
+        first = policy.change_parameter("return_window_days", 20, "amir", "trial")
+        second = policy.change_parameter(
+            "max_clarify_attempts", 3, "bri", "more patience"
+        )
+        policy.change_parameter("return_window_days", 30, "amir", "revert")
+        log = policy.policy_changes()
+        assert [e["to"] for e in log] == [20, 3, 30]  # three appends, in order
+        assert log[0] == first and log[1] == second  # earlier events untouched
+        assert policy.active_policy()["RETURN_WINDOW_DAYS"] == 30  # last wins
+        assert policy.active_policy()["MAX_CLARIFY_ATTEMPTS"] == 3
+        assert policy.policy_changes("return_window_days") == [log[0], log[2]]
+        # An external write (another process) is picked up on the mtime change.
+        path = policy.policy_path()
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        raw["changes"].append({
+            "field": "denials_before_escalation", "from": 1, "to": 2,
+            "actor": "another process", "justification": "x",
+            "at": "2026-08-01T00:00:00+00:00",
+        })
+        path.write_text(json.dumps(raw), encoding="utf-8")
+        assert policy.active_policy()["DENIALS_BEFORE_ESCALATION"] == 2
+
+
+@check
+def a_hand_edited_document_cannot_push_a_threshold_out_of_range():
+    """The bounds hold on read, not only on write: a policy.json edited past a
+    bound by hand is ignored for that field rather than trusted into a verdict."""
+    with _authored_policy():
+        path = policy.policy_path()
+        path.write_text(json.dumps({"changes": [
+            {"field": "return_window_days", "from": 30, "to": 100000,
+             "actor": "x", "justification": "y",
+             "at": "2026-08-01T00:00:00+00:00"},
+            {"field": "max_clarify_attempts", "from": 2, "to": 3,
+             "actor": "x", "justification": "y",
+             "at": "2026-08-01T00:00:01+00:00"},
+        ]}), encoding="utf-8")
+        active = policy.active_policy()
+        assert active["RETURN_WINDOW_DAYS"] == 30  # out-of-range ignored
+        assert active["MAX_CLARIFY_ATTEMPTS"] == 3  # the valid one still applies
 
 
 @check

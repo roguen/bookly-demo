@@ -6,6 +6,13 @@ audit.log
 audit.log.*
 # The human review queue's persisted state. Demo data, rebuilt by /api/reset.
 queue.json
+# The authored policy document (v3.2.0): an append-only change log a non-engineer
+# writes from the back office. Runtime state like the queue — a clean clone has
+# none, so it decides on the historical defaults. The temp is the atomic-write
+# staging file; policy.checks.json is the suite's deliberately-absent path.
+policy.json
+policy.json.tmp
+policy.checks.json
 .claude/
 .DS_Store
 

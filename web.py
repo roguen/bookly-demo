@@ -38,6 +38,7 @@ REPO = Path(__file__).resolve().parent
 # the modules that read them.
 os.environ.setdefault("BOOKLY_AUDIT_PATH", str(REPO / "audit.log"))
 os.environ.setdefault("BOOKLY_QUEUE_PATH", str(REPO / "queue.json"))
+os.environ.setdefault("BOOKLY_POLICY_PATH", str(REPO / "policy.json"))
 
 import covers  # noqa: E402  (after the paths are pinned)
 import envelope  # noqa: E402
@@ -563,6 +564,9 @@ def checks_command() -> Tuple[List[str], dict]:
     # The suite emits envelopes. They go to their own trail rather than the
     # one the demo is about to show.
     environment["BOOKLY_AUDIT_PATH"] = str(REPO / "audit.checks.log")
+    # And it decides on the historical defaults: a policy a demo authored must
+    # not change what the suite reports, so it is pointed at an absent document.
+    environment["BOOKLY_POLICY_PATH"] = str(REPO / "policy.checks.json")
     environment["PYTHONUNBUFFERED"] = "1"
     return [sys.executable, str(REPO / "tests.py")], environment
 

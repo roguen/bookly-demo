@@ -4,11 +4,21 @@ Every eligibility, escalation, and disambiguation rule the agent enforces is
 computed here, in pure functions over order records. This module never imports
 an LLM, never reads free text, and never sees a customer turn. If the language
 model disappeared entirely, every function here would return the same answers.
+
+The three CX thresholds are authorable (v3.2.0): their values are read from an
+append-only policy document a non-engineer edits, and the defaults are the
+historical policy. That is still not a place the model reaches, and the verdict
+is still computed only here — a decision reads a number from a validated
+document instead of a literal, which is a change of storage, not of authority.
 """
 from __future__ import annotations
 
+import json
+import os
+import threading
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import Literal, Optional
 
 from store import Order
@@ -71,14 +81,158 @@ _PARAMS_BY_NAME = {parameter.name: parameter for parameter in PARAMETERS}
 POLICY_DEFAULTS = {parameter.name: parameter.default for parameter in PARAMETERS}
 
 
+# ---------------------------------------------------------------------------
+# The authored policy document.
+#
+# policy.json is an append-only change log — the same shape and the same ethos
+# as the review queue: every edit carries who, what, why and when, and nothing
+# is ever overwritten (a revert is another append). The active policy is the
+# defaults with the log replayed in order, so an absent file is the historical
+# policy exactly, and a clean clone decides as it always did. The file is read
+# through an mtime cache, so an edit made in the back office is seen by the
+# console on its next decision without a restart — the two processes share this
+# file the way they already share the queue.
+# ---------------------------------------------------------------------------
+
+POLICY_PATH_ENV_VAR = "BOOKLY_POLICY_PATH"
+_DEFAULT_POLICY_PATH = str(Path(__file__).resolve().parent / "policy.json")
+_doc_lock = threading.RLock()
+_doc_cache = {"key": None, "changes": []}
+
+
+def policy_path() -> Path:
+    return Path(os.environ.get(POLICY_PATH_ENV_VAR) or _DEFAULT_POLICY_PATH)
+
+
+def _param_by_key(key) -> Optional[Parameter]:
+    for parameter in PARAMETERS:
+        if parameter.key == key:
+            return parameter
+    return None
+
+
+def _load_changes() -> list:
+    """The append-only change log, reloaded only when the file changes on disk.
+
+    Keyed on (path, mtime) so pointing the env var at a different document — as
+    the checks do — always reloads rather than trusting a stale cache.
+    """
+    path = policy_path()
+    with _doc_lock:
+        try:
+            key = (str(path), path.stat().st_mtime_ns)
+        except OSError:
+            # Absent file is the historical policy, not an error.
+            _doc_cache["key"] = None
+            _doc_cache["changes"] = []
+            return []
+        if key != _doc_cache["key"]:
+            try:
+                raw = json.loads(path.read_text(encoding="utf-8"))
+                changes = raw.get("changes", []) if isinstance(raw, dict) else []
+            except (OSError, ValueError):
+                changes = []
+            _doc_cache["key"] = key
+            _doc_cache["changes"] = changes if isinstance(changes, list) else []
+        return list(_doc_cache["changes"])
+
+
+def _valid_value(parameter: Parameter, value) -> bool:
+    return (
+        isinstance(value, int)
+        and not isinstance(value, bool)
+        and parameter.minimum <= value <= parameter.maximum
+    )
+
+
 def active_policy() -> dict:
     """The policy numbers in force right now, keyed by their constant name.
 
-    Step 1 returns the historical defaults; a later step resolves this from an
-    authored, append-only document on disk. Either way it is a plain dict of
-    numbers — nothing here reasons, and the language model is nowhere near it.
+    The historical defaults with the authored change log replayed over them. An
+    absent or empty document is exactly the historical policy — nothing here
+    reasons, and the language model is nowhere near it. A stored value is
+    re-checked against the parameter's bounds on the way out too, so a document
+    hand-edited past a bound cannot push a threshold out of range: the bounds
+    hold on read, not only on write.
     """
-    return dict(POLICY_DEFAULTS)
+    values = dict(POLICY_DEFAULTS)
+    for change in _load_changes():
+        parameter = _param_by_key(change.get("field")) if isinstance(
+            change, dict
+        ) else None
+        if parameter is not None and _valid_value(parameter, change.get("to")):
+            values[parameter.name] = change["to"]
+    return values
+
+
+def policy_changes(field: Optional[str] = None) -> list:
+    """The append-only change log, in the order it was written. Optionally for
+    one field, so the surface can show a value's history beside it."""
+    changes = [c for c in _load_changes() if isinstance(c, dict)]
+    if field is not None:
+        changes = [c for c in changes if c.get("field") == field]
+    return changes
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def change_parameter(
+    field: str, to_value, actor: str, justification: str,
+    at: Optional[str] = None,
+) -> dict:
+    """Author one parameter change: validated, then appended — never overwritten.
+
+    The same discipline the review queue applies to a human resolution — an
+    actor and a justification are required, enforced here once rather than in
+    the browser — and the same append-only shape, so a change is a new event
+    that supersedes, and a revert is another event rather than an erasure. A
+    change that fails validation never becomes active, and a value outside the
+    parameter's declared bounds is refused: this is where "a non-engineer can
+    tune the policy but cannot break it" actually lives.
+    """
+    parameter = _param_by_key(field)
+    if parameter is None:
+        raise ValueError("%r is not an authorable policy parameter" % (field,))
+    if isinstance(to_value, bool) or not isinstance(to_value, int):
+        raise ValueError("%s must be a whole number" % parameter.key)
+    if not (parameter.minimum <= to_value <= parameter.maximum):
+        raise ValueError(
+            "%s must be between %d and %d"
+            % (parameter.key, parameter.minimum, parameter.maximum)
+        )
+    actor = (actor or "").strip()
+    justification = (justification or "").strip()
+    if not actor:
+        raise ValueError("an actor is required to change policy")
+    if not justification:
+        raise ValueError("a justification is required to change policy")
+    with _doc_lock:
+        event = {
+            "field": parameter.key,
+            "from": active_policy()[parameter.name],
+            "to": to_value,
+            "actor": actor,
+            "justification": justification,
+            "at": at or _utc_now(),
+        }
+        changes = _load_changes()
+        changes.append(event)
+        _write_changes(changes)
+    return dict(event)
+
+
+def _write_changes(changes: list) -> None:
+    """Persist the log atomically, then refresh the cache to what was written."""
+    path = policy_path()
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(
+        json.dumps({"changes": changes}, indent=2), encoding="utf-8"
+    )
+    tmp.replace(path)  # atomic on the same filesystem
+    _doc_cache["key"] = (str(path), path.stat().st_mtime_ns)
+    _doc_cache["changes"] = list(changes)
 
 # Reason codes. Machine-readable, stable, and the only vocabulary in which
 # the policy engine explains itself.

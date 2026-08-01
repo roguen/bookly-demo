@@ -45,6 +45,7 @@ from typing import Callable, Dict, List, Optional
 REPO = Path(__file__).resolve().parent
 os.environ.setdefault("BOOKLY_AUDIT_PATH", str(REPO / "audit.log"))
 os.environ.setdefault("BOOKLY_QUEUE_PATH", str(REPO / "queue.json"))
+os.environ.setdefault("BOOKLY_POLICY_PATH", str(REPO / "policy.json"))
 
 import covers  # noqa: E402
 import policy  # noqa: E402
