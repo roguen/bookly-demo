@@ -227,6 +227,6 @@ delivery. `stub_receiver.py` stays the in-memory drop-in.
 | `tests.py` | the claims, executable |
 
 **Start here:** `READING_GUIDE.md` walks the repo in the order that makes the
-argument. `DEMO.md` is a twelve-minute run of show written for a VP of
+argument. `DEMO.md` is a fifteen-minute run of show written for a VP of
 Customer Experience and a VP of Engineering at the same time. `evidence/`
 holds transcripts and audit trails captured from real runs.
