@@ -33,15 +33,22 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
 REPO = Path(__file__).resolve().parent
-# The console must work regardless of where it was launched from, so the
-# audit trail and the queue are pinned to the repo before anything imports
-# the modules that read them.
-os.environ.setdefault("BOOKLY_AUDIT_PATH", str(REPO / "audit.log"))
-os.environ.setdefault("BOOKLY_QUEUE_PATH", str(REPO / "queue.json"))
-os.environ.setdefault("BOOKLY_POLICY_PATH", str(REPO / "policy.json"))
-os.environ.setdefault("BOOKLY_OUTBOX_PATH", str(REPO / "outbox.json"))
-os.environ.setdefault("BOOKLY_DEADLETTER_PATH", str(REPO / "dead_letter.json"))
-os.environ.setdefault("BOOKLY_LEDGER_PATH", str(REPO / "ledger.json"))
+# The runtime-state files. Each is pinned to the repo before anything imports
+# the modules that read them, so the console works wherever it was launched.
+# The third column is where the check subprocess redirects each, so the suite
+# never writes what a demo is about to show; None means it is not redirected —
+# a queue check spins up its own console with its own temp queue, so there is
+# nothing to point elsewhere here.
+DATA_PATHS = (
+    ("BOOKLY_AUDIT_PATH", "audit.log", "audit.checks.log"),
+    ("BOOKLY_QUEUE_PATH", "queue.json", None),
+    ("BOOKLY_POLICY_PATH", "policy.json", "policy.checks.json"),
+    ("BOOKLY_OUTBOX_PATH", "outbox.json", "outbox.checks.json"),
+    ("BOOKLY_DEADLETTER_PATH", "dead_letter.json", "dead_letter.checks.json"),
+    ("BOOKLY_LEDGER_PATH", "ledger.json", "ledger.checks.json"),
+)
+for _var, _default, _checks_name in DATA_PATHS:
+    os.environ.setdefault(_var, str(REPO / _default))
 
 import covers  # noqa: E402  (after the paths are pinned)
 import envelope  # noqa: E402
@@ -484,17 +491,18 @@ def escalation_context(escalation: dict) -> dict:
     }
 
 
-DELIVERY_STATES = {"delivered": "delivered", "failed": "failed",
-                   "skipped": "skipped"}
+DELIVERY_STATES = ("delivered", "failed", "skipped")
 
 
 def _delivery_state(delivery: str) -> str:
-    """Classify a delivery string so a failed hop is legible in the audit
-    surface rather than a field nobody reads. The audit line was written
-    before the hop, so "failed" here still means the decision survived."""
-    for prefix, state in DELIVERY_STATES.items():
+    """Classify a delivery string by its prefix so a failed hop is legible in
+    the audit surface rather than a field nobody reads. The audit line was
+    written before the hop, so "failed" here still means the decision survived.
+    Kept in sync with deliveryState() in app.js, which recomputes it client-side
+    because the turn response does not carry a server-computed state."""
+    for prefix in DELIVERY_STATES:
         if delivery.startswith(prefix):
-            return state
+            return prefix
     return "unknown"
 
 
@@ -603,16 +611,13 @@ def checks_command() -> Tuple[List[str], dict]:
         for key, value in os.environ.items()
         if key not in set(llm.VENDOR_KEY_VARS.values())
     }
-    # The suite emits envelopes. They go to their own trail rather than the
-    # one the demo is about to show.
-    environment["BOOKLY_AUDIT_PATH"] = str(REPO / "audit.checks.log")
-    # And it decides on the historical defaults: a policy a demo authored must
-    # not change what the suite reports, so it is pointed at an absent document.
-    environment["BOOKLY_POLICY_PATH"] = str(REPO / "policy.checks.json")
-    # Delivery state gets its own files too, for the same reason the audit does.
-    environment["BOOKLY_OUTBOX_PATH"] = str(REPO / "outbox.checks.json")
-    environment["BOOKLY_DEADLETTER_PATH"] = str(REPO / "dead_letter.checks.json")
-    environment["BOOKLY_LEDGER_PATH"] = str(REPO / "ledger.checks.json")
+    # The suite emits envelopes, authors policy, and posts to a ledger. Each of
+    # those writes to its own checks file rather than the one the demo is about
+    # to show — the audit trail, the outbox, the dead-letter, the policy
+    # document, and the ledger. The queue is redirected per-console instead.
+    for var, _default, checks_name in DATA_PATHS:
+        if checks_name:
+            environment[var] = str(REPO / checks_name)
     environment["PYTHONUNBUFFERED"] = "1"
     return [sys.executable, str(REPO / "tests.py")], environment
 

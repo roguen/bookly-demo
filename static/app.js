@@ -516,6 +516,9 @@ function envelopeCard(entry, landing) {
   );
 }
 
+/* Kept in sync with _delivery_state() in web.py, which classifies the same
+   prefixes server-side for the audit surface. The turn response carries the raw
+   delivery string, not a computed state, so the client recomputes it here. */
 function deliveryState(delivery) {
   if (!delivery) return "unknown";
   if (delivery.startsWith("delivered")) return "delivered";
