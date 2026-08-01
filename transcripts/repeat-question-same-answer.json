@@ -1,0 +1,43 @@
+{
+  "id": "repeat-question-same-answer",
+  "title": "The same question asked twice gets the same answer, on purpose",
+  "why": "A customer who scrolls up and re-asks should get the same answer, worded the same way. The rubric's repeated_sentence rule is a heuristic for an agent stuck on a loop, and this is the case where the heuristic is wrong — so the finding is accepted by design rather than acknowledged as debt. Kept as a fixture so that distinction is a thing the suite holds, not a thing a reviewer has to remember.",
+  "conversation_id": "conv-repeat",
+  "turns": [
+    {
+      "customer": "Where's my Dune order?",
+      "reply": "Your order BK-1041 (Dune) shipped with Bookly Express and is expected by August 1.",
+      "stages": [
+        "extract",
+        "route",
+        "lookup",
+        "narrate"
+      ],
+      "narrations": [
+        "status_report"
+      ],
+      "envelopes": []
+    },
+    {
+      "customer": "Where's my Dune order?",
+      "reply": "Your order BK-1041 (Dune) shipped with Bookly Express and is expected by August 1.",
+      "stages": [
+        "extract",
+        "route",
+        "lookup",
+        "narrate"
+      ],
+      "narrations": [
+        "status_report"
+      ],
+      "envelopes": []
+    }
+  ],
+  "accepted": [
+    {
+      "rule": "repeated_sentence",
+      "occurrences": 1,
+      "why": "Two identical questions have one identical answer. Varying the wording to avoid repeating myself would be a worse reply, not a better one — the facts did not change and neither should the sentence."
+    }
+  ]
+}

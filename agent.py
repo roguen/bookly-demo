@@ -207,14 +207,22 @@ class Agent:
     # -- reads: order status ----------------------------------------------
 
     def _answer_status(self, request: Request, turn: _Turn) -> None:
-        order = self._resolve_read_target(request)
+        order, rule = self._resolve_read_target(request)
         if order is None:
             self._narrate("order_not_found", {}, turn)
             return
         self.focus_order_id = order.order_id
-        self._narrate("status_report", _order_facts(order), turn)
+        facts = _order_facts(order)
+        # Whether the customer already knows which order this is. A follow-up
+        # about the order under discussion has the same answer as the question
+        # before it, and often should — but saying the identical sentence back
+        # reads as not having listened. Wording only; no verdict reads it.
+        facts["already_discussed"] = rule == "order_under_discussion"
+        self._narrate("status_report", facts, turn)
 
-    def _resolve_read_target(self, request: Request) -> Optional[Order]:
+    def _resolve_read_target(
+        self, request: Request
+    ) -> Tuple[Optional[Order], str]:
         """Reads are cheap and self-describing (the reply names the order),
         so a wrong guess costs little: prefer an explicit reference, then
         the order under discussion, then the one still in transit.
@@ -244,7 +252,9 @@ class Agent:
             "most_recently_ordered",
         )
 
-    def _note_read(self, order: Optional[Order], rule: str) -> Optional[Order]:
+    def _note_read(
+        self, order: Optional[Order], rule: str
+    ) -> Tuple[Optional[Order], str]:
         self.recorder.note(
             "lookup",
             {
@@ -255,7 +265,7 @@ class Agent:
                 "status": order.status if order else None,
             },
         )
-        return order
+        return order, rule
 
     # -- writes: the return procedure --------------------------------------
 
@@ -425,6 +435,11 @@ class Agent:
         facts = _order_facts(order)
         facts["amount"] = verdict.refund_amount
         facts["window_days"] = policy.RETURN_WINDOW_DAYS
+        # When the money lands is a published commitment, looked up from the
+        # profile's service levels — not a number a template asserts. That is
+        # what lets a hosted narrator, forbidden from inventing timeframes,
+        # state the same one: it is stating a fact it was handed.
+        facts["posting_target"] = SERVICE_LEVELS.get("refund_posting")
         self._narrate("refund_approved", facts, turn)
 
     def _emit_escalation(

@@ -45,13 +45,5 @@
         }
       ]
     }
-  ],
-  "known_gaps": [
-    {
-      "rule": "must_not_invent",
-      "occurrences": 1,
-      "issue": 24,
-      "why": "_refund_approved promises 'within 5 business days' from the template. No fact on the event carries the 5, and the narration prompt forbids a hosted narrator from inventing exactly that kind of promise, so the two providers cannot say the same thing. Fix is a refund_posting service level carried as a fact."
-    }
   ]
 }

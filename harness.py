@@ -99,6 +99,12 @@ class Transcript:
     # the issue that will remove it. See _compare_rubric for why an
     # acknowledgement is a different thing from a suppression.
     known_gaps: Tuple[dict, ...] = ()
+    # Findings that are correct behaviour here and will never be fixed,
+    # because the rubric's rule is a heuristic and this is a case where the
+    # heuristic is wrong. Kept separate from known_gaps on purpose: one is a
+    # debt with an issue number, the other is a design decision with a reason,
+    # and collapsing them would let a defect hide in the wrong list.
+    accepted: Tuple[dict, ...] = ()
 
     @property
     def blessed(self) -> bool:
@@ -167,6 +173,7 @@ def load(path: pathlib.Path) -> Transcript:
         turns=tuple(turns),
         path=path,
         known_gaps=tuple(raw.get("known_gaps", ())),
+        accepted=tuple(raw.get("accepted", ())),
     )
 
 
@@ -368,6 +375,16 @@ def _compare_rubric(
             )
             continue
         allowed[rule] = allowed.get(rule, 0) + int(gap.get("occurrences", 1))
+    for entry in transcript.accepted:
+        rule = entry.get("rule")
+        if not entry.get("why"):
+            failures.append(
+                "%s accepted %r has no reason. An accepted finding is a "
+                "design decision, and a design decision with no argument "
+                "behind it is a suppression" % (transcript.id, rule)
+            )
+            continue
+        allowed[rule] = allowed.get(rule, 0) + int(entry.get("occurrences", 1))
 
     for rule, seen in sorted(counted.items()):
         if seen > allowed.get(rule, 0):
@@ -377,8 +394,9 @@ def _compare_rubric(
     for rule, expected_count in sorted(allowed.items()):
         if counted.get(rule, 0) < expected_count:
             failures.append(
-                "%s known_gap %r is stale: the rubric no longer reports it, "
-                "so the acknowledgement should be deleted" % (transcript.id, rule)
+                "%s %r is stale: the rubric no longer reports it, so the "
+                "entry in known_gaps or accepted should be deleted"
+                % (transcript.id, rule)
             )
     return failures
 
@@ -442,6 +460,8 @@ def bless(transcript: Transcript, observed: Sequence[Observed]) -> None:
     # would let a re-bless quietly launder one.
     if transcript.known_gaps:
         payload["known_gaps"] = [dict(gap) for gap in transcript.known_gaps]
+    if transcript.accepted:
+        payload["accepted"] = [dict(entry) for entry in transcript.accepted]
     transcript.path.write_text(
         json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
@@ -614,15 +634,20 @@ def _report(results: Sequence["Result"], provider: str, hosted: bool) -> str:
         # Which findings this fixture already admits to, so the report
         # distinguishes a known open defect from a new one rather than
         # printing a wall of undifferentiated lines.
-        acknowledged = {
-            gap.get("rule"): gap.get("issue")
+        marks = {
+            gap.get("rule"): " (known, #%s)" % gap.get("issue")
             for gap in result.transcript.known_gaps
         }
+        marks.update({
+            entry.get("rule"): " (accepted)"
+            for entry in result.transcript.accepted
+        })
         for finding in result.findings:
             total += 1
-            issue = acknowledged.get(finding.rule)
-            mark = " (known, #%s)" % issue if issue else ""
-            lines.append("  %s%s %s" % (result.transcript.id, mark, finding))
+            lines.append(
+                "  %s%s %s"
+                % (result.transcript.id, marks.get(finding.rule, ""), finding)
+            )
     if not total:
         lines.append("  no findings.")
     return "\n".join(lines)

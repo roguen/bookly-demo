@@ -516,49 +516,127 @@ def the_agent_can_explain_its_own_behaviour():
 
 
 @check
-def the_agents_voice_is_data_and_never_reaches_a_decision():
-    """Who the agent is and how it declines come from the profile, so both
-    providers speak with one voice and re-skinning stays a data edit. None of
-    it may touch a verdict, an amount or a reason code."""
-    agent_profile = store_module.AGENT
-    assert agent_profile["name"] == "Hal"
-    assert agent_profile["full_name"] == "Hal-9000"
-    refusal = agent_profile["refusal_line"]
+def the_agent_speaks_without_announcing_itself():
+    """The agent is labelled, not self-introducing.
 
-    # A refusal opens with the line; a neutral outcome never does.
-    denied = _fresh_agent("conv-voice-a").handle_turn(
-        "I want to return my copy of The Pragmatic Programmer, order BK-0987."
-    )
-    assert denied.reply.startswith(refusal), denied.reply
-    approved = _fresh_agent("conv-voice-b").handle_turn(
+    The interface already shows who is speaking. An agent that re-announces
+    itself every few turns reads as one with no memory, and a catchphrase
+    prefixed to every refusal reads as a template firing rather than an agent
+    speaking — which is the opposite of what a persona is for. So the name
+    stays in the data, for the interface to label with, and stays out of the
+    prose.
+    """
+    agent_profile = store_module.AGENT
+    assert agent_profile["name"] == "Hal"          # the interface labels with it
+    assert agent_profile["full_name"] == "Hal-9000"
+    assert "refusal_line" not in agent_profile     # struck, not merely unused
+
+    # No reply announces the agent, on any path: a greeting, a refusal, a
+    # neutral outcome, or an escalation.
+    replies = [
+        _fresh_agent("conv-voice-a").handle_turn("hello").reply,
+        _fresh_agent("conv-voice-b").handle_turn(
+            "I want to return my copy of The Pragmatic Programmer, order "
+            "BK-0987."
+        ).reply,
+        _fresh_agent("conv-voice-c").handle_turn(
+            "I want to return the Escher book"
+        ).reply,
+        _fresh_agent("conv-voice-d").handle_turn("Where's my Dune order?").reply,
+        _fresh_agent("conv-voice-e").handle_turn(
+            "I want to speak to a manager"
+        ).reply,
+    ]
+    for reply in replies:
+        assert "I'm Hal" not in reply, reply
+        assert "sorry Dave" not in reply, reply
+        # The rubric's speaker-label rule, applied to the templates too: no
+        # reply opens by naming its own speaker.
+        assert not rubric.SPEAKER_LABEL_RE.match(reply), reply
+
+    # A refusal still says plainly why. Dropping the catchphrase dropped no
+    # reason.
+    denied = replies[1]
+    assert "outside the 30-day return window" in denied, denied
+
+    # The decision layer is untouched by any of it.
+    approved = _fresh_agent("conv-voice-f").handle_turn(
         "I want to return the Escher book"
     )
-    assert refusal not in approved.reply, approved.reply
-    status = _fresh_agent("conv-voice-c").handle_turn("Where's my Dune order?")
-    assert refusal not in status.reply, status.reply
-    assert "I'm Hal" in _fresh_agent("conv-voice-d").handle_turn("hello").reply
-
-    # The decision behind the refusal is untouched by any of it.
     (envelope_record, _delivery), = approved.envelopes
     assert envelope_record["amount"] == ORDERS["BK-1042"].price_paid
     assert envelope_record["reason_code"] == policy.REFUND_APPROVED_IN_WINDOW
 
-    # The persona reaches a hosted model the same way, through its prompt —
-    # and the two rules that are not negotiable survive alongside it.
+    # The persona reaches a hosted model through its prompt, and now carries
+    # the instruction that keeps it quiet there too — a hosted narrator told
+    # to "introduce yourself" did it on every turn.
     prompt = llm.NARRATION_SYSTEM_PROMPT
-    assert refusal in prompt
-    assert "Hal" in prompt
+    assert "Do not introduce yourself" in prompt
+    assert "speaker label" in prompt
+    assert "not \"2026-07-18\"" in prompt  # dates as a person says them
     assert "must not add facts" in prompt
     assert "must not change or soften the decision" in prompt
 
-    # Voice is the only thing llm.py takes from the profile, and policy is
-    # still not among its imports.
+    # Voice is still the only thing llm.py takes from the profile, and policy
+    # is still not among its imports.
     source = pathlib.Path("llm.py").read_text(encoding="utf-8")
     assert "from store import AGENT, BRAND" in source
     for forbidden in ("import policy", "from policy import"):
         assert forbidden not in source, forbidden
-    # Turning the persona off is deleting keys, not editing code.
-    assert 'AGENT.get("refusal_line")' in source
+    assert 'AGENT.get("persona")' in source
+
+
+@check
+def published_commitments_travel_as_facts_not_template_literals():
+    """What the agent promises a customer about timing is looked up, never
+    asserted by a template.
+
+    Both service levels reach the narrator as facts on the event. That is what
+    lets a hosted model — whose prompt forbids inventing timeframes — state
+    the same one: it is repeating a fact it was handed rather than producing
+    one. A number written into a template cannot make that trip, so the two
+    providers would tell a customer different things about when their money
+    arrives.
+    """
+    seen = {}
+
+    class Recording(RulesProvider):
+        def narrate(self, event):
+            seen[event.kind] = dict(event.facts)
+            return super().narrate(event)
+
+    refund = Agent(Recording(), "conv-sla-refund").handle_turn(
+        "I want to return the Escher book"
+    )
+    posting = store_module.SERVICE_LEVELS["refund_posting"]
+    assert seen["refund_approved"]["posting_target"] == posting
+    assert posting in refund.reply, refund.reply
+
+    Agent(Recording(), "conv-sla-escalate").handle_turn(
+        "I want to speak to a manager"
+    )
+    assert seen["escalation"]["response_target"] == (
+        store_module.SERVICE_LEVELS["escalation_first_response"]
+    )
+
+    # Neither number is written into the narration layer.
+    source = pathlib.Path("llm.py").read_text(encoding="utf-8")
+    assert "5 business days" not in source
+    assert "4 business hours" not in source
+
+    # And with no service level published, the reply stops rather than
+    # inventing a timeframe — the same failing-closed the knowledge base does.
+    saved = dict(store_module.SERVICE_LEVELS)
+    try:
+        store_module.SERVICE_LEVELS.pop("refund_posting")
+        quiet = Agent(RulesProvider(), "conv-sla-none").handle_turn(
+            "I want to return the Escher book"
+        )
+        assert "should post" not in quiet.reply, quiet.reply
+        assert "$22.50" in quiet.reply, quiet.reply
+    finally:
+        store_module.SERVICE_LEVELS.clear()
+        store_module.SERVICE_LEVELS.update(saved)
 
 
 @check
@@ -852,13 +930,67 @@ def the_rubric_cannot_reach_a_decision():
     # A finding is inert. Grading a real conversation produces findings and
     # changes nothing about it: the same conversation replayed with and
     # without a grading pass returns identical replies and envelopes.
-    transcript = [t for t in harness.load_all() if t.id == "hero-sequence"][0]
+    transcript = [
+        t for t in harness.load_all() if t.id == "repeat-question-same-answer"
+    ][0]
     first = harness.replay(transcript)
     findings = rubric.grade([(t.reply, t.narration_events) for t in first])
-    assert findings, "the hero sequence should still have open findings"
+    assert findings, "this fixture exists to produce one"
     second = harness.replay(transcript)
     assert [t.reply for t in first] == [t.reply for t in second]
     assert [t.envelopes for t in first] == [t.envelopes for t in second]
+
+
+@check
+def a_rubric_rule_can_be_wrong_and_saying_so_is_not_suppressing_it():
+    """Some repetition is correct, and the rubric cannot tell which.
+
+    Asking the same question twice has one right answer, said the same way
+    both times. `repeated_sentence` is a heuristic for an agent stuck on a
+    loop, and here the heuristic is simply wrong — so the fixture accepts the
+    finding with an argument instead of carrying an issue number that will
+    never be closed.
+
+    `accepted` and `known_gaps` are deliberately separate lists. One is a
+    debt, the other a decision, and a defect allowed to sit in the wrong one
+    would never be looked at again. Both are held to the same standard: an
+    entry with no reason is refused, and an entry the rubric stopped
+    reporting is stale and fails.
+    """
+    fixture = [
+        t for t in harness.load_all() if t.id == "repeat-question-same-answer"
+    ][0]
+    assert not fixture.known_gaps, "this is a decision, not a debt"
+    accepted = {entry["rule"] for entry in fixture.accepted}
+    assert accepted == {"repeated_sentence"}, accepted
+    assert all(entry.get("why") for entry in fixture.accepted)
+    assert all("issue" not in entry for entry in fixture.accepted)
+
+    observed = harness.replay(fixture)
+    assert observed[0].reply == observed[1].reply  # identical, and right
+    findings = harness.findings_for(observed)
+    assert [f.rule for f in findings] == ["repeated_sentence"], findings
+    # Accepted, so it does not fail the suite.
+    assert not harness.compare(fixture, observed)
+
+    # But an acceptance with no argument behind it is refused, and one the
+    # rubric no longer reports is stale — the same two guards known_gaps has.
+    import dataclasses
+
+    silent = dataclasses.replace(
+        fixture, accepted=({"rule": "repeated_sentence"},)
+    )
+    assert any(
+        "no reason" in failure
+        for failure in harness.compare(silent, observed)
+    ), harness.compare(silent, observed)
+    stale = dataclasses.replace(
+        fixture,
+        accepted=fixture.accepted + ({"rule": "must_offer", "why": "x"},),
+    )
+    assert any(
+        "is stale" in failure for failure in harness.compare(stale, observed)
+    ), harness.compare(stale, observed)
 
 
 def _register_transcript_checks() -> None:

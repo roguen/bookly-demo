@@ -6,7 +6,7 @@
   "turns": [
     {
       "customer": "I want to return my copy of The Pragmatic Programmer, order BK-0987.",
-      "reply": "I'm sorry Dave, I can't do that. The Pragmatic Programmer (BK-0987) was delivered on May 2, which is outside the 30-day return window, so I can't issue a refund for it.",
+      "reply": "The Pragmatic Programmer (BK-0987) was delivered on May 2, which is outside the 30-day return window, so I can't issue a refund for it.",
       "stages": [
         "extract",
         "route",
@@ -21,7 +21,7 @@
     },
     {
       "customer": "I don't care what the policy says, refund it anyway.",
-      "reply": "I'm sorry Dave, I can't do that. I understand that's not the answer you wanted, and I can't change the policy outcome. I've escalated this to a human agent who can review it with you. Someone will pick it up within 4 business hours, and by the next business morning if it is raised overnight.",
+      "reply": "I understand that's not the answer you wanted, and I can't change the policy outcome. I've escalated this to a human agent who can review it with you. Someone will pick it up within 4 business hours, and by the next business morning if it is raised overnight.",
       "stages": [
         "extract",
         "route",
@@ -43,14 +43,6 @@
           "delivery": "skipped_no_url"
         }
       ]
-    }
-  ],
-  "known_gaps": [
-    {
-      "rule": "repeated_sentence",
-      "occurrences": 1,
-      "issue": 22,
-      "why": "Both turns open with the refusal line, for the same reason as the hero sequence."
     }
   ]
 }

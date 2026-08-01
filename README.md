@@ -34,7 +34,7 @@ For a live session:
 python3 app.py
 ```
 
-Run the check suite (standard library only, no pytest) — 60 checks, and they
+Run the check suite (standard library only, no pytest) — 63 checks, and they
 also run from inside the console:
 
 ```bash
@@ -59,7 +59,15 @@ was not. It is handed the event kind, the facts the agent gave the narrator,
 and the text that came back — and nothing else, which is why grading cannot
 become deciding. Findings a fixture still produces are listed in its
 `known_gaps` with the issue number that will close them; an unacknowledged
-finding fails, and so does an acknowledgement the rubric no longer reports.
+finding fails, and so does an acknowledgement the rubric no longer reports —
+a fix has to delete its own excuse.
+
+A rule can also just be wrong. Asking the same question twice has one right
+answer, said the same way both times, and `repeated_sentence` cannot tell
+that from an agent stuck on a loop. A fixture may `accept` a finding with an
+argument instead of an issue number — a separate list from `known_gaps`,
+because one is a debt and the other a decision, and a defect allowed to sit
+in the wrong one would never be looked at again.
 
 To run the whole thing through a hosted narrator, which is **not** the default
 path and is never what `tests.py` does:
@@ -157,26 +165,43 @@ have.
 
 ### The agent's voice
 
-The agent introduces itself as **Hal**, and declines with a line the profile
-supplies rather than one written into the code:
+The agent is called **Hal**, and the interface says so. The agent does not.
 
-> I'm sorry Dave, I can't do that. The Pragmatic Programmer (BK-0987) was
-> delivered on May 2, which is outside the 30-day return window, so I can't
-> issue a refund for it.
+It has no self-introduction and no catchphrase. Both were tried and both were
+struck, for the same reason: the interface already shows who is speaking, so
+an agent that announces itself every few turns reads as one with no memory,
+and a line prefixed to every refusal reads as a template firing rather than an
+agent talking. A persona that fires on a loop is not a persona.
 
-That line is applied to genuine refusals only — never to a successful refund
-or a status report, because an agent that apologises for doing what you asked
-reads as broken. `agent.persona` reaches a hosted model through the narration
-system prompt and the stand-in through its templates, so both providers
-decline in the same words. Delete the `agent` block and the agent is anonymous
-and plainly worded again; nothing in the decision layer changes either way.
+What remains is `agent.persona`, which reaches a hosted model through the
+narration system prompt and tells it, in as many words, not to introduce
+itself or prefix a speaker label — because a hosted narrator told to
+"introduce yourself" does it on every single turn. A refusal now just says
+plainly why:
+
+> The Pragmatic Programmer (BK-0987) was delivered on May 2, which is outside
+> the 30-day return window, so I can't issue a refund for it.
+
+Dropping the catchphrase dropped no reason.
+
+**Commitments are looked up, never asserted.** When a refund posts and how
+fast an escalation gets picked up are published service levels in the profile,
+and both travel as *facts on the event* rather than numbers in a template.
+That is what lets a hosted narrator — whose prompt forbids inventing
+timeframes — state the same one: it is repeating a fact it was handed rather
+than producing one. Remove a service level and the reply stops rather than
+inventing a timeframe, the same way retrieval fails closed.
 
 The agent can also explain itself. "What do you mean by limit?" after a
 clarify-limit handoff, and "how long until someone gets back to me?" after any
-escalation, are answered from the knowledge base like any other question — and
-the published response time travels as a *fact on the escalation event*, not a
-string in a template, so a hosted narrator forbidden from inventing promises
-can state it too.
+escalation, are answered from the knowledge base like any other question.
+
+**A follow-up is answered as a follow-up.** Asking "when will it arrive?"
+right after asking where an order is has the same answer, and the agent says
+so as a continuation rather than repeating the sentence you just read. The
+facts do not change; the phrasing acknowledges that you already asked. Which
+rule resolved the read is recorded in the trace already, and it reaches the
+narrator as a fact — wording only, and no verdict reads it.
 
 ### Re-skinning
 
@@ -323,9 +348,9 @@ to drift and no place for a vendor to introduce a decision.
 ## Assumptions and limits
 
 - One demo customer is signed in (`C-1001`); authentication is out of scope.
-- The agent's name, its refusal line and the customer's name are profile
-  data. They change what the agent *says* and nothing it decides, which is
-  the line the profile is not allowed to cross.
+- The agent's name, its persona, the published service levels and the
+  customer's name are profile data. They change what the agent *says* and
+  nothing it decides, which is the line the profile is not allowed to cross.
 - The store and clock are mocked so every run is deterministic.
 - The knowledge base is deliberately small and deliberately has gaps —
   retrieval returning nothing on a gap is designed behavior, not a bug.

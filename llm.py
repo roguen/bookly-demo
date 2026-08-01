@@ -260,29 +260,23 @@ def _fmt_money(amount: float) -> str:
     return "$%.2f" % amount
 
 
-def _refuse(body: str) -> str:
-    """Open a refusal in the agent's own voice, then say why plainly.
-
-    Applied to genuine refusals only — an out-of-window return, an order that
-    is not there, a knowledge-base miss — and never to a neutral outcome like
-    a successful refund or a status report. An agent that apologises for
-    doing what you asked reads as broken.
-
-    With no `agent.refusal_line` in the profile the wording is unchanged, so
-    the persona is a data choice rather than a fork in the code.
-    """
-    line = AGENT.get("refusal_line")
-    return "%s %s" % (line, body) if line else body
-
-
-def _agent_name() -> str:
-    return AGENT.get("name") or BRAND.get("agent_name") or "support"
-
-
 def _status_report(f: dict) -> str:
+    again = f.get("already_discussed")
     if f["status"] == "delivered":
+        if again:
+            return "That one — %s (%s) — was delivered on %s." % (
+                f["title"], f["order_id"], _fmt_date(f["delivered_on"])
+            )
         return "Your order %s (%s) was delivered on %s." % (
             f["order_id"], f["title"], _fmt_date(f["delivered_on"])
+        )
+    if again:
+        # Same facts, said as a continuation. The customer already knows which
+        # book it is; repeating the whole sentence back reads as not having
+        # listened, even when the answer is genuinely unchanged.
+        return (
+            "Still on track — %s (%s) is with %s and is expected by %s."
+            % (f["title"], f["order_id"], f["carrier"], _fmt_date(f["eta"]))
         )
     return (
         "Your order %s (%s) shipped with %s and is expected by %s."
@@ -312,36 +306,41 @@ def _reask_which_order(f: dict) -> str:
 
 
 def _refund_approved(f: dict) -> str:
+    # The posting time is a published service level carried on the event, not
+    # a number written here. Without one the reply simply stops after the
+    # refund rather than inventing a timeframe.
+    posting = f.get("posting_target")
     return (
         "Done — %s (%s) was delivered on %s, inside the %d-day return "
         "window, so I've issued a refund of %s to your original payment "
-        "method. It should post within 5 business days."
+        "method.%s"
         % (
             f["title"], f["order_id"], _fmt_date(f["delivered_on"]),
             f["window_days"], _fmt_money(f["amount"]),
+            " It should post %s." % posting if posting else "",
         )
     )
 
 
 def _return_denied(f: dict) -> str:
     if f["reason_code"] == "ORDER_NOT_DELIVERED":
-        return _refuse(
+        return (
             "%s (%s) hasn't been delivered yet, so I can't start a return "
             "for it. Once it arrives, I'd be happy to."
             % (f["title"], f["order_id"])
         )
     if f["reason_code"] == "ORDER_ALREADY_RETURNED":
-        return _refuse(
+        return (
             "It looks like %s (%s) was already returned on %s, so there's "
             "nothing further to send back on that order."
             % (f["title"], f["order_id"], _fmt_date(f["returned_on"]))
         )
     if f["reason_code"] == "ORDER_CANCELLED":
-        return _refuse(
+        return (
             "%s (%s) was cancelled before it shipped, so there's no delivery "
             "to return." % (f["title"], f["order_id"])
         )
-    return _refuse(
+    return (
         "%s (%s) was delivered on %s, which is outside the %d-day return "
         "window, so I can't issue a refund for it."
         % (
@@ -352,7 +351,7 @@ def _return_denied(f: dict) -> str:
 
 
 def _order_not_found(f: dict) -> str:
-    return _refuse(
+    return (
         "I can't find that order on your account. Could you double-check "
         "the order number?"
     )
@@ -368,7 +367,7 @@ def _escalation(f: dict) -> str:
         "shortly."
     )
     if f["reason_code"] == "ESCALATED_POLICY_DISPUTE":
-        return _refuse(
+        return (
             "I understand that's not the answer you wanted, and I can't "
             "change the policy outcome. I've escalated this to a human agent "
             "who can review it with you. %s" % promise
@@ -383,7 +382,7 @@ def _escalation(f: dict) -> str:
             "Of course — I've flagged this conversation for a human agent "
             "to pick up. %s" % promise
         )
-    return _refuse(
+    return (
         "I don't want to guess with a refund, so I've handed this to a "
         "human agent who can look at your account with you. %s" % promise
     )
@@ -401,7 +400,7 @@ def _kb_answer(f: dict) -> str:
 
 
 def _kb_miss(f: dict) -> str:
-    return _refuse(
+    return (
         "I don't have reliable information on that, and I'd rather say so "
         "than guess. I can connect you with a human agent if that would "
         "help."
@@ -409,16 +408,16 @@ def _kb_miss(f: dict) -> str:
 
 
 def _no_returnable_orders(f: dict) -> str:
-    return _refuse(
+    return (
         "I don't see any delivered orders on your account to return."
     )
 
 
 def _help(f: dict) -> str:
     return (
-        "I'm %s. I can check an order's status, start a return or refund, or "
-        "answer questions about shipping, returns, and your account. What "
-        "can I do for you?" % _agent_name()
+        "Happy to help. I can check an order's status, start a return or "
+        "refund, or answer questions about shipping, returns, and your "
+        "account. What would you like to do?"
     )
 
 
@@ -477,8 +476,9 @@ def _narration_system_prompt() -> str:
         "that has already been made. Phrase it for the customer in one to "
         "three sentences. You must not add facts, amounts, dates, or "
         "promises that are not in the event — if the event carries a "
-        "response time, state it; if it does not, do not invent one. You "
-        "must not change or soften the decision." % who
+        "response time, state it; if it does not, do not invent one. Write "
+        "dates the way a person says them — \"July 18\", not "
+        "\"2026-07-18\". You must not change or soften the decision." % who
     )
 
 

@@ -50,7 +50,7 @@ mock data). `app.py` is presentation only. `stub_receiver.py` is the
 orchestration layer's end of the webhook, demonstrating duplicate suppression.
 
 **7. `tests.py` — the claims, executable.**
-60 dependency-free checks, runnable from a terminal or from inside the
+63 dependency-free checks, runnable from a terminal or from inside the
 console. The ones to point at under questioning: `injection_changes_nothing`
 (the thesis, tested), `web_layer_emits_identical_envelopes` (the same
 scenarios through HTTP and through `Agent`, every decision field compared —
@@ -84,7 +84,10 @@ Findings a fixture still produces are listed in its `known_gaps` with the
 issue that will close them. An unacknowledged finding fails, and so does an
 acknowledgement the rubric no longer reports — the fix has to delete its own
 excuse, which is what keeps that list from becoming where failures go to be
-forgotten.
+forgotten. A rule that is simply wrong for a case is `accept`ed instead, with
+an argument rather than an issue number: `repeated-question-same-answer` is
+the one that exists, because two identical questions have one identical
+answer and varying it would be the worse reply.
 
 **8. The console layer — the claim, made visible.**
 Phase 2 adds no decision logic; it makes the existing boundary legible in a

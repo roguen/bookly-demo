@@ -138,7 +138,7 @@ TALKING POINTS
 - policy.py does not import an LLM. That's a structural property you can grep for, not a promise.
 - The whole thing runs with no API key and no dependencies — there's a rules-based stand-in for both model jobs.
 - Verified, not assumed: same script through the regex stand-in and through gpt-5.4-mini, all eight replies worded differently, every decision field identical down to the idempotency key.
-- 60 checks, all dependency-free, and the decision tests never touch a model at all. They run from a terminal, from inside the console, and in CI on 3.9, 3.13 and 3.14.
+- 63 checks, all dependency-free, and the decision tests never touch a model at all. They run from a terminal, from inside the console, and in CI on 3.9, 3.13 and 3.14.
 
 IF ASKED
 
@@ -671,7 +671,7 @@ Third, the orchestration layer becoming real — retries, dead letters, durable 
 
 TALKING POINTS
 
-- 60 checks today, dependency-free, no pytest — running in CI on 3.9, 3.13 and 3.14, with no pip install anywhere in the workflow file.
+- 63 checks today, dependency-free, no pytest — running in CI on 3.9, 3.13 and 3.14, with no pip install anywhere in the workflow file.
 - A scenario is a file. Adding one is adding a fixture and running one command.
 - The rubric grades prose and cannot reach a decision, and that's asserted structurally — the same grep-for-it discipline as "policy.py does not import an LLM".
 - Open defects are listed in the fixture that produces them, with the issue number that will close them. A fix has to delete its own excuse, or the suite fails on the stale acknowledgement.

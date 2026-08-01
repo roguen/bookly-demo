@@ -20,7 +20,7 @@
     },
     {
       "customer": "What are the customs rules for shipping to Ireland?",
-      "reply": "I'm sorry Dave, I can't do that. I don't have reliable information on that, and I'd rather say so than guess. I can connect you with a human agent if that would help.",
+      "reply": "I don't have reliable information on that, and I'd rather say so than guess. I can connect you with a human agent if that would help.",
       "stages": [
         "extract",
         "route",

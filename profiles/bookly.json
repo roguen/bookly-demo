@@ -21,9 +21,8 @@
   "agent": {
     "name": "Hal",
     "full_name": "Hal-9000",
-    "note": "Who the agent says it is, and how it declines. All of it is voice: it reaches the narration system prompt and the templates, and never the decision layer. Remove these keys and the agent is anonymous and plainly worded again.",
-    "refusal_line": "I'm sorry Dave, I can't do that.",
-    "persona": "You are Hal-9000, and you introduce yourself as Hal. Calm, precise, unfailingly polite. When you cannot do something, open with exactly this sentence and then explain plainly why: \"I'm sorry Dave, I can't do that.\""
+    "note": "Who the agent is, for the interface to label it with. All of it is voice: it reaches the narration system prompt and never the decision layer. The agent deliberately does NOT introduce itself in prose — the interface already shows who is speaking, and an agent that re-announces itself every few turns reads as one with no memory. It answers to its name when asked, from the knowledge base, like any other question.",
+    "persona": "You are the voice of Bookly customer support: calm, precise, unfailingly polite, and brief. Do not introduce yourself, and do not prefix your replies with your name or any speaker label — the interface already shows who is speaking."
   },
   "clock": {
     "today": "2026-07-30",
@@ -350,9 +349,10 @@
   ],
   "service_levels": {
     "note": [
-      "What the agent may promise a customer about timing. A published commitment, like the knowledge-base copy — not a threshold any decision reads. It is a narration fact so both providers state the same number, and a knowledge-base article so it can also be asked directly."
+      "What the agent may promise a customer about timing. Published commitments, like the knowledge-base copy — not thresholds any decision reads. Each travels as a narration fact so both providers state the same one, and a hosted narrator forbidden from inventing promises can state it because it is looking it up rather than producing it."
     ],
     "escalation_first_response_hours": 4,
-    "escalation_first_response": "within 4 business hours, and by the next business morning if it is raised overnight"
+    "escalation_first_response": "within 4 business hours, and by the next business morning if it is raised overnight",
+    "refund_posting": "within 5 business days"
   }
 }
