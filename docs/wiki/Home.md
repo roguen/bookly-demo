@@ -189,7 +189,7 @@ job.
 | `queue.py` | a human resolves; the verdict is never edited |
 | `web.py` | the console's API — it decides nothing |
 | `backoffice.py` | receiving is a different process from deciding |
-| `covers.py` | cover art with no files, downloads or licences |
+| `covers.py` + `covers/` | drawn cover art — hand-drawn per book, a generated fallback, no downloads or licences |
 | `store.py` + `profiles/` | records as data, so a re-skin is a data edit |
 | `tests.py` | the claims, executable |
 

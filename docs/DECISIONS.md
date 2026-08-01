@@ -1585,3 +1585,37 @@ an image?
 **Lives in.** `static/index.html, static/backoffice.html, static/app.css (.brand, .brand-mark, .brand-text), issue #34`
 
 ---
+
+## 45. The polish pass was kept surgical, on purpose
+
+*v3.1.0*
+
+**Decision.** The "visual polish" item shipped as one change: the record-column jacket grew
+from 44×66 to 48×72 with a small radius and a soft drop shadow, so the drawn
+art reads as a cover rather than a favicon. Spacing, type and the empty states
+were left as they were. No transition was added.
+
+**Why.** The console was already a deliberately designed surface — its layout *is* the
+boundary diagram (entry 39), its colours carry provenance, its motion is spent
+in exactly one place. The cosmetics that made this read as a finished product
+were the logo and the 39 covers; against that, restyling a mature interface is
+mostly downside, because every spacing or colour move is a chance to weaken a
+claim the design is making on purpose. The one change worth making was the one
+the new art demanded: art shown at favicon size is art wasted, so the jacket
+earned room and a lift. A hover transition on the order card was written and
+then removed — motion is spent on the trace stream and nowhere else, and a
+120ms fade on a record row would spend it a second time for decoration. The
+restraint is the decision: a sub-version that changed less than it could have,
+because the brief was to make it read finished without weakening a claim, and
+the surest way to weaken one was to redesign around it.
+
+**Rejected.** A broader restyle of spacing, type and density; a hover transition on the
+order cards (spends the motion budget a second time); enlarging the jacket
+without the shadow (reads flat against the card).
+
+**Answers the question.** A whole sub-version for polish, and you moved one number? Why didn't you
+touch the rest?
+
+**Lives in.** `static/app.css (.order img, button.order), issue #35`
+
+---
