@@ -52,6 +52,13 @@ def find_orders_by_title_word(customer_id: str, word: str) -> List[Order]:
     return matches
 
 
+def title_tokens(title: str) -> Set[str]:
+    """The whole words of a title, for judging how much of one a customer
+    actually named. Same tokenizer the title matcher uses, so "which words
+    matched" cannot drift from "which words match"."""
+    return _tokenize(title)
+
+
 def search_policy(query: str) -> Optional[Article]:
     """Whole-word keyword retrieval with a hard floor.
 

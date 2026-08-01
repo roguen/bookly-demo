@@ -793,6 +793,77 @@ def transcripts_are_present_and_blessed():
 
 
 @check
+def a_coincidental_title_word_never_moves_money():
+    """The customer has to have named the book.
+
+    A word that merely appears inside a title is not a reference. Before this
+    guard, "I want to return the left one" resolved to The Left Hand of
+    Darkness and "the things I got" to The Design of Everyday Things — two
+    books nobody named — on the shipped five-order dataset. Both happened to
+    be un-refundable, so no money moved. That was luck: the same coincidence
+    against a delivered, in-window order issues a refund, which is exactly
+    what it did the moment a catalog containing "The Book of the New Sun" was
+    loaded.
+
+    The two halves of the guard are deliberately in different places. Which
+    words are generic is a property of a catalog and lives in the profile.
+    How much of a title has to match before a refund may act is
+    disambiguation, and lives in policy.py beside should_clarify.
+    """
+    # The half that is data.
+    for word in ("book", "copy", "cover", "left", "things", "light"):
+        assert word in store_module.GENERIC_TITLE_WORDS, word
+    assert "escher" not in store_module.GENERIC_TITLE_WORDS
+
+    # The half that is policy.
+    assert policy.title_reference_is_strong(matched=1, distinctive=1)
+    assert not policy.title_reference_is_strong(matched=1, distinctive=0)
+    assert policy.title_reference_is_strong(
+        matched=policy.MIN_TITLE_WORDS_FOR_WRITE, distinctive=0
+    )
+
+    # And the behaviour, end to end, on the real profile. A coincidence asks
+    # the question it would have asked if the customer had said nothing.
+    for coincidence in ("I want to return the left one",
+                        "I want to return the things I got"):
+        result = _fresh_agent("conv-coincidence").handle_turn(coincidence)
+        assert result.envelopes == [], (coincidence, result.envelopes)
+        assert "which book would you like to return" in result.reply, (
+            coincidence, result.reply
+        )
+        assert "Left Hand" not in result.reply, result.reply
+        assert "Everyday Things" not in result.reply, result.reply
+
+    # Naming a book still works, and still costs exactly one turn.
+    named = _fresh_agent("conv-named").handle_turn(
+        "I want to return the Escher book"
+    )
+    emitted = _envelopes(named)
+    assert len(emitted) == 1 and emitted[0]["order_id"] == "BK-1042"
+    # ...including when a generic word rides along in the same sentence, which
+    # must not drag another title in as a candidate.
+    assert "which book" not in named.reply, named.reply
+
+    # The trace shows the judgement rather than hiding it, and shows it on the
+    # deterministic side, next to the constant it rests on.
+    watched = ListRecorder()
+    Agent(RulesProvider(), "conv-strength", recorder=watched).handle_turn(
+        "I want to return the left one"
+    )
+    judged = [
+        n for n in watched.notes
+        if n.stage == "candidates" and n.payload.get("source") == "title_reference"
+    ]
+    assert judged, [n.stage for n in watched.notes]
+    payload = judged[0].payload
+    assert payload["strong_enough_to_act"] is False
+    assert payload["matched_words"] == ["left"]
+    assert payload["distinctive_words"] == []
+    assert payload["limit"] == policy.MIN_TITLE_WORDS_FOR_WRITE
+    assert judged[0].side == recorder.DETERMINISTIC
+
+
+@check
 def the_rubric_catches_the_recorded_hosted_drift():
     """The rubric has to catch the drift that actually happened.
 

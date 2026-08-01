@@ -106,6 +106,37 @@ def should_clarify(candidate_count: int) -> bool:
     return candidate_count > 1
 
 
+# A write may resolve on a title the customer typed, but only when the words
+# they used actually identify a book. One ordinary word that happens to sit in
+# a title is a coincidence, and acting on a coincidence refunds a book nobody
+# named — "I'd like to return a book" once resolved to The Book of the New Sun
+# and issued $31.50 against it, with no clarifying question asked.
+#
+# Two words is the fallback bound. It is the weaker of the two branches below,
+# and a catalog whose titles are built out of ordinary words should say so in
+# its generic word list rather than lean on it.
+MIN_TITLE_WORDS_FOR_WRITE = 2
+
+
+def title_reference_is_strong(matched: int, distinctive: int) -> bool:
+    """Is a title match a reference a write may act on?
+
+    Distinctive words identify a book. Generic ones do not, however many
+    titles they happen to appear in — which is why this takes two counts
+    rather than a list of words. Deciding *which* words are generic is a
+    property of a catalog and lives in the profile; deciding *how much* is
+    enough to move money is disambiguation, and disambiguation lives here
+    beside `should_clarify`.
+
+    A weak reference is not an error and not an ambiguity. The caller asks the
+    clarifying question it would have asked if the customer had said nothing
+    at all, because that is exactly how much they have said.
+    """
+    if distinctive >= 1:
+        return True
+    return matched >= MIN_TITLE_WORDS_FOR_WRITE
+
+
 def clarify_limit_reached(attempts: int) -> bool:
     """The clarification budget is spent: the next step is a human, not a
     guess."""

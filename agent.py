@@ -24,7 +24,13 @@ from llm import (
     Request,
 )
 from recorder import NULL_RECORDER, Recorder
-from store import CURRENT_CUSTOMER_ID, SERVICE_LEVELS, TODAY, Order
+from store import (
+    CURRENT_CUSTOMER_ID,
+    GENERIC_TITLE_WORDS,
+    SERVICE_LEVELS,
+    TODAY,
+    Order,
+)
 
 # What one emitted action looks like to a caller: the envelope, and how
 # delivery went.
@@ -301,11 +307,20 @@ class Agent:
                             "more than one asks",
                 },
             )
-        if len(by_title) == 1:
-            self._finish_return(by_title[0], turn)
-        elif len(by_title) > 1:
-            self._defer_which_order(by_title, turn)
+        # A title only counts as a reference if the customer actually named
+        # the book. Ordinary words that happen to sit inside a title —
+        # "book", "cover", "light" — neither identify one nor nominate it as
+        # a candidate: "the Escher book" names Godel, Escher, Bach, and must
+        # not drag in every title containing the word "book".
+        named = [o for o in by_title if self._names_the_order(o, request)]
+        if len(named) == 1:
+            self._finish_return(named[0], turn)
+        elif len(named) > 1:
+            self._defer_which_order(named, turn)
         else:
+            # Nothing matched, or everything that matched was coincidence.
+            # Both end in the same place: ask the question we would have asked
+            # if they had said nothing, because that is how much they said.
             self._start_return(turn)
 
     def _start_return(self, turn: _Turn) -> None:
@@ -536,9 +551,48 @@ class Agent:
                     return tools.get_order(order_id), request
             if request.title_words:
                 matches = self._orders_by_title_words(request.title_words)
-                if len(matches) == 1:
-                    return matches[0], request
+                # The same bar as an unprompted return. Answering "which
+                # book?" with a word that only coincidentally sits in a title
+                # has not answered it, and counts as a failed attempt rather
+                # than a resolution.
+                named = [
+                    o for o in matches if self._names_the_order(o, request)
+                ]
+                if len(named) == 1:
+                    return named[0], request
         return None, None
+
+    def _names_the_order(self, order: Order, request: Request) -> bool:
+        """Did the customer name this book, or merely use words that are in
+        its title?
+
+        Which words are generic is catalog data; how many are enough is
+        policy. Neither judgement is made here — this counts, and records the
+        count, so a weak reference is visible in the trace rather than being a
+        thing that silently did not happen.
+        """
+        words = {word.lower() for word in request.title_words}
+        in_title = words & tools.title_tokens(order.title)
+        distinctive = in_title - GENERIC_TITLE_WORDS
+        strong = policy.title_reference_is_strong(
+            len(in_title), len(distinctive)
+        )
+        self.recorder.note(
+            "candidates",
+            {
+                "source": "title_reference",
+                "order_id": order.order_id,
+                "title": order.title,
+                "matched_words": sorted(in_title),
+                "distinctive_words": sorted(distinctive),
+                "strong_enough_to_act": strong,
+                "constant": "MIN_TITLE_WORDS_FOR_WRITE",
+                "limit": policy.MIN_TITLE_WORDS_FOR_WRITE,
+                "rule": "a write acts on a title only when the customer named "
+                        "it; generic words never identify one",
+            },
+        )
+        return strong
 
     def _narrate(self, kind: str, facts: dict, turn: _Turn) -> None:
         text = self.provider.narrate(NarrationEvent(kind=kind, facts=facts))

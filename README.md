@@ -34,7 +34,7 @@ For a live session:
 python3 app.py
 ```
 
-Run the check suite (standard library only, no pytest) — 63 checks, and they
+Run the check suite (standard library only, no pytest) — 64 checks, and they
 also run from inside the console:
 
 ```bash
@@ -364,6 +364,14 @@ to drift and no place for a vendor to introduce a decision.
   unknown title ("my Snow Crash order") reads as title-less and falls back
   to the likeliest order. Replies always name the order they describe, so a
   wrong read is visible and cheap; writes never fall back.
+- A write additionally requires that the customer *named* the book. A word
+  that merely appears inside a title is a coincidence — "I want to return the
+  left one" is not a reference to The Left Hand of Darkness — and a
+  coincidence asks the clarifying question instead of acting. Which words are
+  generic is catalog data (`catalog.generic_words`); how much of a title has
+  to match is disambiguation and lives in `policy.py`. The cost is that a
+  title whose every long word is generic cannot be named directly and needs
+  the clarifying question: one extra turn, in the safe direction.
 - The rules-based stand-in has a fixed phrase vocabulary. Turns it cannot
   classify ("pick up where we left off", keyword-free demands) fall to a
   safe help reply rather than a guess; the hosted model narrows this gap.

@@ -26,6 +26,7 @@
       "stages": [
         "extract",
         "route",
+        "candidates",
         "verdict",
         "envelope",
         "narrate"

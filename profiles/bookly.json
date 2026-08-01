@@ -61,7 +61,37 @@
         "published": 1988,
         "pages": 368
       }
-    }
+    },
+    "generic_words_note": "Words that can appear inside a book title and still be ordinary support English. A customer saying 'I'd like to return a book' is not naming The Book of the New Sun. Listing a word here means it can never identify a title on its own; policy.title_reference_is_strong decides how much is enough. Curate this per catalog — it is the readable half of the guard, and the rule in policy.py is the half that holds when this list is wrong.",
+    "generic_words": [
+      "back",
+      "book",
+      "books",
+      "case",
+      "copies",
+      "copy",
+      "cover",
+      "covers",
+      "first",
+      "item",
+      "items",
+      "last",
+      "left",
+      "light",
+      "next",
+      "order",
+      "orders",
+      "page",
+      "pages",
+      "right",
+      "season",
+      "stories",
+      "story",
+      "thing",
+      "things",
+      "time",
+      "times"
+    ]
   },
   "customer": {
     "customer_id": "C-1001",
