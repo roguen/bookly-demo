@@ -137,12 +137,30 @@ body {
 
 .brand {
   display: flex;
-  align-items: baseline;
-  gap: 10px;
+  align-items: center;
+  gap: 11px;
   font-weight: 700;
   font-size: var(--step-1);
   color: #fff;
   letter-spacing: -0.01em;
+}
+
+/* The drawn mark. Neutral ink by inheriting the wordmark's white through
+   currentColor — never purple, because purple carries provenance and a logo
+   is not a side of the boundary. */
+.brand-mark {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: #fff;
+}
+
+/* Name and descriptor keep their baseline relationship to each other while
+   the mark centres against the pair. */
+.brand-text {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
 }
 
 .brand .descriptor {
@@ -337,7 +355,7 @@ button:disabled {
 button.order {
   position: relative;
   display: flex;
-  gap: 10px;
+  gap: 11px;
   align-items: flex-start;
   width: 100%;
   text-align: left;
@@ -347,7 +365,7 @@ button.order {
   background: var(--raised);
   border: 1px solid var(--rule-soft);
   border-radius: var(--radius);
-  padding: 8px;
+  padding: 9px;
   cursor: pointer;
 }
 
@@ -376,12 +394,15 @@ button.order:focus-visible::after {
   opacity: 1;
 }
 
+/* The jacket now carries drawn art, so it earns a little more room and a soft
+   lift off the card — enough to read as a cover rather than a favicon. */
 .order img {
-  width: 44px;
-  height: 66px;
+  width: 48px;
+  height: 72px;
   flex: 0 0 auto;
-  border-radius: 2px;
+  border-radius: 3px;
   display: block;
+  box-shadow: 0 2px 7px rgba(0, 0, 0, 0.45);
 }
 
 .order-title {

@@ -1148,7 +1148,7 @@ already makes about thresholds — a document holding its own copy is the same
 failure with a slower fuse — and generation was unavailable because the no-
 build-step constraint does not move, so the registry *is* the centralisation.
 Failing on a removed citation stops the check being made vacuous by deletion.
-The check earned its keep unprompted as the count moved 51 → 52 → 56 → 68,
+The check earned its keep unprompted as the count moved 51 → 52 → 56 → 68 → 69,
 naming the files to update each time. CI matters because every claim about the
 suite being green was a claim about somebody's laptop, and slide 5 argues that
 agents die from silent regressions when somebody tweaks a prompt on a Thursday
@@ -1449,5 +1449,173 @@ return window? This looks a lot like Decagon's Agent Operating Procedures — di
 you know that?
 
 **Lives in.** `README.md 'Assumptions and limits', docs/wiki/Home.md 'Deliberately out of scope' and 'Known future phases', queue.py, backoffice.py, deck/build.js slide 5, PR #12 body`
+
+---
+
+## 42. The catalog grew to 38 for a book the demo wanted, and the count moved with it
+
+*v3.1.0*
+
+**Decision.** *2001: A Space Odyssey* (Arthur C. Clarke) was added as a 38th order
+(BK-2132) for the demo customer, dated a 2025 purchase — **delivered, but well
+outside the return window**. `customer.orders_placed` moved 37 → 38 in the same
+edit, the title joined `catalog.titles`, and the one count-bearing golden
+transcript (`order-history-and-identity`) was re-blessed 37 → 38 / 34 → 35. The
+earlier entries in this file that cite 37 orders, 34 delivered, or "1 of 37
+titles" are left exactly as written: they record the state at the time those
+decisions were made, the same way the dated provenance notes in entry 40 do.
+
+**Why.** The status and date were the load-bearing choice, not the title. Dated
+inside the return window, 2001 would have become a third option in the
+"I'd like to return a book" clarifying menu, changing Scenario 2's reply and
+re-blessing three more golden transcripts; dated as a recent order it would
+have displaced a title in the order-history preview. Delivered-out-of-window
+keeps it name-addressable — "2001", "Space" and "Odyssey" are all non-generic,
+so it clears the write-path title guard without a `generic_words` collision —
+and gives an honest out-of-window denial with the same reason code any other
+old order gets, while touching **no demo envelope**: every idempotency key and
+amount is byte-identical to v3.0.0, and only the two history counts moved. This
+is the same move entry 37 made when it dated Exhalation *inside* the window on
+purpose, run in reverse. Leaving `orders_placed` at 37 was not an option — it
+would have reintroduced the exact record/store mismatch entry 37 exists to
+close, one order larger. And because the count is pinned in code and prose, the
+edit was deliberately a coordinated one: the profile, three assertions in
+tests.py, the re-blessed transcript, README and DEMO.md all moved together, the
+way entry 33 requires.
+
+**Rejected.** Dating 2001 inside the return window or as a recent order (more of the demo
+re-blesses for no gain); leaving `orders_placed` at 37; rewriting the historical
+count citations in this file rather than adding this entry.
+
+**Answers the question.** You added a book — did that change any decision the demo makes? Why is *that*
+one not in the returnable menu?
+
+**Lives in.** `profiles/bookly.json (orders BK-2132, catalog.titles, customer.orders_placed), transcripts/order-history-and-identity.json, tests.py (profile_load_preserves_the_fixtures, an_aggregate_question_is_not_answered_with_one_order), README.md, DEMO.md, issue #32`
+
+---
+
+## 43. The catalog ships hand-drawn cover art, through the seam the generator already left for it
+
+*v3.1.0*
+
+**Decision.** Every catalog book gets a bespoke, hand-drawn cover — a scene, a
+concept, or an item distinctly associated with the book (Dune's sandworm, the
+impossible teapot, the rubber duck, a Penrose triangle, the Ubik spray can) —
+committed as a static `covers/<order_id>.svg` and served through
+`covers.override_for`, which already won over the generated jacket by design.
+The procedurally-generated jacket stays untouched as the fallback for anything
+without drawn art. A new check, `override_covers_carry_no_forbidden_sink`,
+holds every file in `covers/` to the *same* escaping guarantee the generator
+has — no `<image>`/`href`/`<script>`/`url(`/`@import`, exactly one `http` (the
+xmlns) — and asserts the signed-in customer's orders each resolve to their
+override rather than the stand-in.
+
+**Why.** The seam was built for exactly this a phase ago — "real art should always be
+able to beat generated art" — so the honest way to add art was to use it, not
+to teach the generator about specific books. The generator *can't* draw a scene
+from a book: its whole input is a hash of title and author, which cannot know
+Dune has a sandworm, so anything book-specific has to be authored. The
+definition was deliberately loosened from "a scene" to "a scene, concept, or
+item" because a third of the catalog has no single iconic scene — *The
+Pragmatic Programmer* has no image, but rubber-duck debugging is unmistakably
+its emblem — and a crude literal scene would read as generated, the one thing
+this art exists not to do. Flat fills only, no gradients: an SVG gradient is
+referenced as `fill="url(#id)"`, and `url(` is on the forbidden list the
+injection claim rests on, so the whole catalog is shaded with layered flat
+shapes instead. The new check exists because authored art is a second place a
+markup sink could enter the build, and "the sink cannot exist" has to stay a
+claim about structure rather than about who drew carefully — the same argument
+entry 38 makes about the client. Adding overrides also forced a correction to
+`covers_are_deterministic_and_need_no_network`: it compared `for_order` against
+`render`, which was only ever equal because no order had an override; now that
+every catalog order does, the check exercises `render` directly, which is what
+it was always really testing. Adding the check moved the count 68 → 69, so
+seven citations moved with it, the way entry 33 requires.
+
+**Rejected.** SVG gradients (the `url(` ban); teaching the generator about specific books
+(it has no book-specific input, by design); requiring a literal scene for every
+title (some have no iconic one, and a forced one reads as generated); leaving
+the determinism check comparing `for_order` to `render` once overrides made
+that false; committing the scratchpad authoring tool into the repo — the static
+SVGs are the source of truth, the way deck/ output is.
+
+**Answers the question.** Aren't these just the plain generated jackets with nicer colours? How do you
+know a hand-drawn cover can't smuggle in the markup sink you spent a phase
+proving doesn't exist?
+
+**Lives in.** `covers/ (39 files), covers.py (override_for, for_order, OVERRIDE_DIR), tests.py (override_covers_carry_no_forbidden_sink, covers_are_deterministic_and_need_no_network), issue #33`
+
+---
+
+## 44. The wordmark is drawn in neutral ink, because the brand colour is already spoken for
+
+*v3.1.0*
+
+**Decision.** Both surfaces get a hand-drawn open-book mark beside the wordmark — static
+inline SVG in the topbar, the same mark on the console and the back office so
+they read as one product. It is drawn in `currentColor`, inheriting the
+wordmark's white, and is **never** purple. It is a sibling of the JS-filled
+`#brand` span, not inside it, so `clear(dom.brand)` on boot leaves the mark
+standing.
+
+**Why.** The obvious thing to do with a logo is paint it the brand colour, and the
+profile's `brand.accent` is `#5754FF` — which is exactly `--purple`. In this
+build purple is not a brand colour, it is the deterministic side of the
+provenance boundary, and entry 39 spends it on nothing decorative. A purple
+mark would be the first decorative purple in the interface, quietly telling the
+eye that the logo is "the deterministic side", which is meaningless and erodes
+the one association the whole console teaches. So the rule wins over the
+convention, exactly as the branch was briefed to resolve it: neutral ink, and
+the mark carries no side. It is a sibling of `#brand` rather than a child
+because the console fills the wordmark text from the profile at boot with
+`clear(dom.brand)`, and a mark inside that node would be wiped on the first
+render — the same "the interface names the speaker" plumbing entry 18 leaned
+on. Drawn rather than fetched keeps the no-network, no-image-file, CSP-clean
+constraints the rest of the build already holds: inline `<svg>` is neither
+script nor style nor an external image, so it passes `script-src 'self';
+style-src 'self'; img-src 'self' data:` untouched.
+
+**Rejected.** Painting the mark the profile's brand accent (it is the provenance purple);
+an image file or an icon-font glyph (a network fetch and a dependency); putting
+the mark inside `#brand` (boot would clear it).
+
+**Answers the question.** Why isn't your logo your brand colour? Where does the mark come from — is it
+an image?
+
+**Lives in.** `static/index.html, static/backoffice.html, static/app.css (.brand, .brand-mark, .brand-text), issue #34`
+
+---
+
+## 45. The polish pass was kept surgical, on purpose
+
+*v3.1.0*
+
+**Decision.** The "visual polish" item shipped as one change: the record-column jacket grew
+from 44×66 to 48×72 with a small radius and a soft drop shadow, so the drawn
+art reads as a cover rather than a favicon. Spacing, type and the empty states
+were left as they were. No transition was added.
+
+**Why.** The console was already a deliberately designed surface — its layout *is* the
+boundary diagram (entry 39), its colours carry provenance, its motion is spent
+in exactly one place. The cosmetics that made this read as a finished product
+were the logo and the 39 covers; against that, restyling a mature interface is
+mostly downside, because every spacing or colour move is a chance to weaken a
+claim the design is making on purpose. The one change worth making was the one
+the new art demanded: art shown at favicon size is art wasted, so the jacket
+earned room and a lift. A hover transition on the order card was written and
+then removed — motion is spent on the trace stream and nowhere else, and a
+120ms fade on a record row would spend it a second time for decoration. The
+restraint is the decision: a sub-version that changed less than it could have,
+because the brief was to make it read finished without weakening a claim, and
+the surest way to weaken one was to redesign around it.
+
+**Rejected.** A broader restyle of spacing, type and density; a hover transition on the
+order cards (spends the motion budget a second time); enlarging the jacket
+without the shadow (reads flat against the card).
+
+**Answers the question.** A whole sub-version for polish, and you moved one number? Why didn't you
+touch the rest?
+
+**Lives in.** `static/app.css (.order img, button.order), issue #35`
 
 ---

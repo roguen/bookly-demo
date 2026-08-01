@@ -159,12 +159,12 @@ def profile_load_preserves_the_fixtures():
     # can only discuss five of the thirty-seven it claims is the same
     # confidently-wrong sentence one level up.
     orders = tools.orders_for_customer(CURRENT_CUSTOMER_ID)
-    assert len(orders) == store_module.CUSTOMER.orders_placed == 37
+    assert len(orders) == store_module.CUSTOMER.orders_placed == 38
     # A history that size is the point: it is what makes offering every
     # delivered order as a choice absurd, and what the returnable_now filter
     # exists to answer.
     delivered = tools.delivered_orders(CURRENT_CUSTOMER_ID)
-    assert len(delivered) == 34
+    assert len(delivered) == 35
     # The clarifying question numbers its options in store order, so the
     # order the profile lists them in is load bearing, not incidental — and
     # what it offers is what policy would actually approve, not everything
@@ -214,9 +214,15 @@ def enriched_record_stays_off_the_write_path():
 
 @check
 def covers_are_deterministic_and_need_no_network():
-    """Same book, same jacket, every process — and no file or request."""
+    """Same book, same jacket, every process — and no file or request.
+
+    Every catalog order now ships hand-drawn art, so `for_order` returns an
+    override rather than the generated jacket; this exercises `render` directly,
+    which remains the fallback for anything without drawn art. The overrides
+    have their own guarantee in `override_covers_carry_no_forbidden_sink`.
+    """
     order = ORDERS["BK-1042"]
-    first = covers.for_order(order)
+    first = covers.render(order.title, order.author)
     again = covers.render(order.title, order.author)
     assert first == again
     assert first.startswith("<svg") and first.endswith("</svg>")
@@ -232,6 +238,27 @@ def covers_are_deterministic_and_need_no_network():
     # cannot open a tag.
     hostile = covers.render("<script>x</script>", '" onload="x')
     assert "<script>" not in hostile and 'onload="x' not in hostile
+
+
+@check
+def override_covers_carry_no_forbidden_sink():
+    """Hand-drawn art beats the generated jacket, and rides the same escaping
+    guarantee it does. Every file in covers/ is a lone SVG with no sink an
+    <img> could be talked into fetching — the same list the generator is held
+    to — and the signed-in customer's orders each resolve to their override
+    rather than the fallback, so the demo shows drawn art, not the stand-in."""
+    files = sorted(covers.OVERRIDE_DIR.glob("*.svg"))
+    assert files, "covers/ is empty"
+    for path in files:
+        svg = path.read_text(encoding="utf-8")
+        assert svg.startswith("<svg") and svg.rstrip().endswith("</svg>"), path.name
+        for forbidden in ("<image", "href", "<script", "url(", "@import"):
+            assert forbidden not in svg, (path.name, forbidden)
+        # The one http is the namespace, exactly as for the generated cover.
+        assert svg.count("http") == 1, (path.name, svg.count("http"))
+    for order in tools.orders_for_customer(CURRENT_CUSTOMER_ID):
+        assert covers.override_for(order.order_id) is not None, order.order_id
+        assert covers.for_order(order) == covers.override_for(order.order_id)
 
 
 @check
@@ -919,7 +946,7 @@ def an_aggregate_question_is_not_answered_with_one_order():
     assert str(len(tools.orders_for_customer(CURRENT_CUSTOMER_ID))) in (
         result.reply
     ), result.reply
-    assert "37 orders" in result.reply, result.reply
+    assert "38 orders" in result.reply, result.reply
     assert result.envelopes == []
     # And it does not read as a report on one order.
     assert "is expected by" not in result.reply, result.reply
@@ -929,7 +956,7 @@ def an_aggregate_question_is_not_answered_with_one_order():
     # arriving as an order_read that fell back.
     lookups = [n for n in watched.notes if n.stage == "lookup"]
     assert [n.payload["kind"] for n in lookups] == ["order_history"], lookups
-    assert lookups[0].payload["total"] == 37
+    assert lookups[0].payload["total"] == 38
 
     # Scoped like every other read: another customer's order is not in it.
     assert "BK-2077" not in result.reply
@@ -943,11 +970,11 @@ def an_aggregate_question_is_not_answered_with_one_order():
         "everything I've bought",
     ):
         reply = _fresh_agent("conv-agg").handle_turn(question).reply
-        assert "37 orders" in reply, (question, reply)
+        assert "38 orders" in reply, (question, reply)
 
     # Asking one order's status still resolves to one order.
     single = _fresh_agent("conv-single").handle_turn("Where's my Dune order?")
-    assert "BK-1041" in single.reply and "37 orders" not in single.reply
+    assert "BK-1041" in single.reply and "38 orders" not in single.reply
 
     # And the agent answers to its name, which needed an intent for the same
     # reason: routing it through retrieval would have meant matching on "you"

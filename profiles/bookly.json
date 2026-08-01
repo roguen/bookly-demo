@@ -220,6 +220,11 @@
         "format": "hardcover",
         "published": 2019,
         "pages": 350
+      },
+      "2001: A Space Odyssey": {
+        "format": "Paperback",
+        "published": 1968,
+        "pages": 296
       }
     },
     "generic_words_note": "Words that can appear inside a book title and still be ordinary support English. A customer saying 'I'd like to return a book' is not naming The Book of the New Sun. Listing a word here means it can never identify a title on its own; policy.title_reference_is_strong decides how much is enough. Curate this per catalog — it is the readable half of the guard, and the rule in policy.py is the half that holds when this list is wrong.",
@@ -260,7 +265,7 @@
     "member_since": "2021-03-14",
     "tier": "Reader's Circle",
     "lifetime_value": 1284.6,
-    "orders_placed": 37,
+    "orders_placed": 38,
     "payment_kind": "card",
     "payment_last_four": "4417",
     "csat": 4.6,
@@ -668,6 +673,16 @@
       "status": "delivered",
       "ordered_on": "2026-07-18",
       "delivered_on": "2026-07-22"
+    },
+    {
+      "order_id": "BK-2132",
+      "customer_id": "C-1001",
+      "title": "2001: A Space Odyssey",
+      "author": "Arthur C. Clarke",
+      "price_paid": 19.0,
+      "status": "delivered",
+      "ordered_on": "2025-03-08",
+      "delivered_on": "2025-03-14"
     }
   ],
   "articles": [

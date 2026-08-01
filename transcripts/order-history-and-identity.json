@@ -33,7 +33,7 @@
     },
     {
       "customer": "That sounds great to me. Hey, what books have I ordered in the past?",
-      "reply": "You've placed 37 orders with us. The most recent are: Dune (BK-1041), Exhalation (BK-2131), Godel, Escher, Bach (BK-1042). There are 34 more — ask me about any of them by title.",
+      "reply": "You've placed 38 orders with us. The most recent are: Dune (BK-1041), Exhalation (BK-2131), Godel, Escher, Bach (BK-1042). There are 35 more — ask me about any of them by title.",
       "stages": [
         "extract",
         "route",
@@ -47,7 +47,7 @@
     },
     {
       "customer": "Yeah, but what is the total number of books that I have ordered?",
-      "reply": "You've placed 37 orders with us. The most recent are: Dune (BK-1041), Exhalation (BK-2131), Godel, Escher, Bach (BK-1042). There are 34 more — ask me about any of them by title.",
+      "reply": "You've placed 38 orders with us. The most recent are: Dune (BK-1041), Exhalation (BK-2131), Godel, Escher, Bach (BK-1042). There are 35 more — ask me about any of them by title.",
       "stages": [
         "extract",
         "route",
