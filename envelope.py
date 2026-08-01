@@ -128,21 +128,7 @@ def emit(
         "conversation_id": conversation_id,
         "customer_note": customer_note,
     }
-    _audit({"event": "emitted", "envelope": envelope})
-    delivery = _deliver(envelope)
-    _audit(
-        {
-            "event": "delivery",
-            "envelope_id": envelope["envelope_id"],
-            "delivery": delivery,
-        }
-    )
-    # A failed hop is not lost. The decision is already audited; the envelope
-    # now waits in the outbox for reconcile() to retry it. The delivery string
-    # is still returned and still never branched on by the agent.
-    if delivery.startswith("failed"):
-        _enqueue_outbox(envelope, delivery)
-    return envelope, delivery
+    return envelope, _dispatch(envelope)
 
 
 def emit_resolution(
@@ -186,6 +172,16 @@ def emit_resolution(
         "justification": justification,
         "supersedes": supersedes,
     }
+    return envelope, _dispatch(envelope)
+
+
+def _dispatch(envelope: dict) -> str:
+    """Audit the emission, attempt delivery, audit the result, and keep a failed
+    hop in the outbox for reconcile() to retry — the shared tail of emit() and
+    emit_resolution(). The audit line precedes the network hop, so the decision
+    survives a lost delivery; the returned string is recorded and never branched
+    on by the agent.
+    """
     _audit({"event": "emitted", "envelope": envelope})
     delivery = _deliver(envelope)
     _audit(
@@ -195,12 +191,9 @@ def emit_resolution(
             "delivery": delivery,
         }
     )
-    # A failed hop is not lost. The decision is already audited; the envelope
-    # now waits in the outbox for reconcile() to retry it. The delivery string
-    # is still returned and still never branched on by the agent.
     if delivery.startswith("failed"):
         _enqueue_outbox(envelope, delivery)
-    return envelope, delivery
+    return delivery
 
 
 def _deliver(envelope: dict) -> str:
@@ -302,10 +295,11 @@ def reconcile(
                 entry["not_before"] = now + _backoff(entry["attempts"])
                 remaining.append(entry)
         _write_json(outbox_path(), remaining)
+        pending = len(remaining)
     return {
         "delivered": delivered,
         "dead_lettered": dead_lettered,
-        "pending": len(_read_json(outbox_path(), [])),
+        "pending": pending,
     }
 
 

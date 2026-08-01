@@ -39,7 +39,7 @@ import json
 import os
 import pathlib
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import rubric
 from agent import Agent

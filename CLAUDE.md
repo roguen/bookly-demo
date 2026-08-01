@@ -1,6 +1,7 @@
 # Bookly — standing context
 
-A support agent for a fictional bookstore. `main` is at **v3.0.0**.
+A support agent for a fictional bookstore. `main` is at **v3.5.0** — every
+sub-version below has landed, so v4.0.0 can be cut.
 
 ## The claim, which does not change
 

@@ -4,48 +4,29 @@
  * an HTML parser, and no threshold is written here. The policy viewer renders
  * whatever policy.py serves and holds no copy of any number.
  *
- * It imports `el` and `clear` from the console's client rather than
+ * It imports its DOM and fetch helpers — `el`, `clear`, `api`, `money`, `day`,
+ * `fact`, `emptyState`, `resolveForm` — from the console's client rather than
  * reimplementing them, so there is exactly one function in this build that
- * puts text on a page and exactly one place a markup sink could appear.
+ * puts text on a page and exactly one place a markup sink could appear, and
+ * the two clients cannot drift on how they format money, dates, or a resolve.
  */
-import { el, clear } from "/static/app.js";
+import {
+  el,
+  clear,
+  api,
+  money,
+  day,
+  fact,
+  emptyState,
+  resolveForm,
+} from "/static/app.js";
 
-async function api(path, body) {
-  const options = { headers: { "Content-Type": "application/json" } };
-  if (body !== undefined) {
-    options.method = "POST";
-    options.body = JSON.stringify(body);
-  }
-  const response = await fetch(path, options);
-  const text = await response.text();
-  let payload = null;
-  try {
-    payload = text ? JSON.parse(text) : null;
-  } catch (error) {
-    throw new Error(`${path} returned something that was not JSON`);
-  }
-  if (!response.ok) {
-    throw new Error((payload && payload.error) || `${path} failed`);
-  }
-  return payload;
-}
-
-const money = (amount) =>
-  amount === null || amount === undefined
-    ? "—"
-    : `$${Number(amount).toFixed(2)}`;
-
+// The back office is not space-constrained the way the console's cards are, so
+// it shows a longer key tail. That difference is why shortKey is not shared.
 const shortKey = (key) => (key ? `${key.slice(0, 12)}…` : "—");
 
 const panels = {};
 let surface = "ledger";
-
-function emptyState(title, hint) {
-  return el("div", { class: "empty" }, [
-    el("strong", { text: title }),
-    el("span", { text: hint }),
-  ]);
-}
 
 /* --- surface 1: the refund ledger --------------------------------------- */
 
@@ -64,10 +45,10 @@ async function renderLedger() {
   const summary = payload.summary;
   panel.appendChild(
     el("dl", { class: "facts" }, [
-      factOf("Lines", String(summary.lines)),
-      factOf("Suppressed duplicates", String(summary.suppressed_duplicates)),
-      factOf("Refunds posted", money(summary.amount_posted)),
-      factOf("Deduplication", summary.durability, true),
+      fact("Lines", String(summary.lines)),
+      fact("Suppressed duplicates", String(summary.suppressed_duplicates)),
+      fact("Refunds posted", money(summary.amount_posted)),
+      fact("Deduplication", summary.durability, true),
     ])
   );
 
@@ -136,13 +117,6 @@ async function renderLedger() {
     }
     panel.appendChild(card);
   }
-}
-
-function factOf(label, value, wide) {
-  return el("div", { class: wide ? "fact wide" : "fact" }, [
-    el("dt", { text: label }),
-    el("dd", { text: value }),
-  ]);
 }
 
 /* --- surface 2: the agent desk ------------------------------------------ */
@@ -307,20 +281,19 @@ function caseTicket(kase, actions) {
   ]);
   const facts = el("dl", { class: "facts" });
   if (customer.member_since) {
-    facts.appendChild(factOf("Member since", day(customer.member_since)));
+    facts.appendChild(fact("Member since", day(customer.member_since)));
   }
   if (customer.orders_placed !== undefined) {
-    facts.appendChild(factOf("Orders", String(customer.orders_placed)));
+    facts.appendChild(fact("Orders", String(customer.orders_placed)));
   }
   if (customer.lifetime_value !== undefined) {
-    facts.appendChild(factOf("Lifetime value", money(customer.lifetime_value)));
+    facts.appendChild(fact("Lifetime value", money(customer.lifetime_value)));
   }
   if (customer.csat !== undefined) {
     facts.appendChild(
-      factOf("CSAT", `${customer.csat} / 5 (${customer.csat_responses})`)
+      fact("CSAT", `${customer.csat} / 5 (${customer.csat_responses})`)
     );
   }
-  if (customer.email) factOf("Email", customer.email, true);
   who.appendChild(facts);
   if (customer.email) {
     who.appendChild(el("p", { class: "order-id", text: customer.email }));
@@ -449,7 +422,14 @@ function caseTicket(kase, actions) {
   ticket.appendChild(el("h3", { class: "col-head", text: "Case history" }));
   ticket.appendChild(caseHistory(kase));
 
-  if (kase.status === "open") ticket.appendChild(resolveForm(kase, actions));
+  if (kase.status === "open") {
+    ticket.appendChild(
+      resolveForm(kase, actions, async (caseId, payload) => {
+        await api(`/api/queue/${caseId}/resolve`, payload);
+        await renderDesk();
+      })
+    );
+  }
   return ticket;
 }
 
@@ -475,56 +455,6 @@ function caseHistory(kase) {
     history.appendChild(item);
   }
   return history;
-}
-
-function day(iso) {
-  if (!iso) return "—";
-  const [y, m, d] = iso.split("-").map(Number);
-  const months = [
-    "January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December",
-  ];
-  return `${months[m - 1]} ${d}, ${y}`;
-}
-
-function resolveForm(kase, actions) {
-  const actor = el("input", {
-    attrs: { type: "text", placeholder: "Your name (required)", required: "" },
-  });
-  const justification = el("textarea", {
-    attrs: {
-      rows: "2",
-      placeholder: "Why (required) — this is the record an auditor reads",
-      required: "",
-    },
-  });
-  const choice = el("select", {}, actions.map((action) =>
-    el("option", { text: action, attrs: { value: action } })
-  ));
-  const error = el("p", { class: "form-error" });
-  const form = el("form", { class: "resolve" }, [
-    el("h4", { text: "Resolve" }),
-    choice,
-    actor,
-    justification,
-    el("button", { text: "Record decision", attrs: { type: "submit" } }),
-    error,
-  ]);
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    error.textContent = "";
-    try {
-      await api(`/api/queue/${kase.case_id}/resolve`, {
-        action: choice.value,
-        actor: actor.value,
-        justification: justification.value,
-      });
-      await renderDesk();
-    } catch (problem) {
-      error.textContent = String(problem).replace(/^Error:\s*/, "");
-    }
-  });
-  return form;
 }
 
 /* --- surface 3: the policy editor ----------------------------------------

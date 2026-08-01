@@ -72,8 +72,9 @@ def _esc(value: str) -> str:
     """Escape record text for anywhere in the document.
 
     `escape()` alone leaves quotes intact, which is harmless in element
-    content and an attribute break-out inside an attribute. Rather than track
-    which is which, quotes are escaped everywhere: `&quot;` renders as a
+    content but an attribute break-out when the text sits inside an attribute.
+    Rather than track which is which, quotes are escaped everywhere: `&quot;`
+    renders as a
     quote, and the invariant becomes one sentence — no raw quote or angle
     bracket from the record ever reaches the SVG.
     """

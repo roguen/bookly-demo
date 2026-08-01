@@ -1800,3 +1800,59 @@ double-posted when it comes back? Is the deduplication durable now? Didn't you
 say nothing in the repo retries?
 
 **Lives in.** `envelope.py (outbox, reconcile, _enqueue_outbox, _append_deadletter, MAX_DELIVERY_ATTEMPTS, dead_letters), reconcile.py, backoffice.py (Ledger persistence, ledger_path), web.py (outbox_json, reconcile_json, /api/reconcile, /api/outbox), static/app.js (refreshOutbox), tests.py (a_failed_delivery_waits_in_the_outbox_rather_than_vanishing, reconcile_backs_off_and_dead_letters_after_its_attempts, the_ledger_dedups_durably_across_a_restart, a_reconciled_delivery_posts_exactly_once_across_a_failure), issue #41, supersedes the durability limits in entries 29 and 41`
+
+## 49. The full code review — what was consolidated, and what duplication is kept on purpose
+
+*v3.5.0*
+
+**Decision.** A review pass over the whole build, four readers in parallel — decision core,
+execution boundary, web and UI, test harness. The verdict was that the build is
+clean and the real debt was duplication introduced across v3.2–3.4, so that is
+what the pass removed. The console's UI helpers (`api`, `money`, `day`, `fact`,
+`emptyState`, and the parameterised `resolveForm`) are now exported from the
+console client and imported by the back office, extending the pattern entry 38
+already blessed for `el`/`clear` — one place a value is formatted, one place a
+markup sink could appear. The suite's isolation folded into three helpers
+(`_temp_env_paths`, `_webhook`, `_recording_provider`). `emit`/`emit_resolution`
+share one `_dispatch` tail; the six runtime-path env vars became one `DATA_PATHS`
+table; and a handful of clear no-downside fixes landed (a stale intent comment,
+a dead `factOf` line, an unused import, a garbled docstring, a redundant outbox
+read). **One duplication was deliberately kept and documented rather than
+removed:** the atomic JSON-store primitive (`tmp.write → tmp.replace`) and
+`_utc_now` appear in `envelope.py`, `queue.py`, `backoffice.py` and `policy.py`.
+
+**Why.** Consolidating that last one would mean a shared `utils`/`jsonstore` module, and
+this repo has avoided a shared grab-bag on purpose: each module stands alone and
+imports only what it genuinely depends on, so "what does this file touch" is
+answerable by reading the file. A four-line atomic write repeated in four places
+is the price of that independence, and it is a price worth paying here — the
+primitive is stable, stdlib-only, and unlikely to change, so the copies will not
+drift into disagreement the way the UI helpers or the test isolation were
+starting to. That is the distinction the pass drew throughout: duplication that
+was *accumulating and diverging* (five hand-rolled webhook save/restores, two
+copies of a date formatter about to drift, a decision-path tuple one check could
+update and another miss) is real debt and was removed; duplication that is
+*small, stable, and the cost of a deliberate structure* is not debt and was left,
+with this entry as the record so a future reader does not "helpfully" unify it.
+A few other things were checked and left for stated reasons: the back office's
+longer key tail (its cards are not space-constrained, so `shortKey` genuinely
+differs), `stub_receiver.py`'s repeated `server_bind` (entry 48 keeps it
+simple), the six overlapping decision-field tuples (each pins a different subset
+on purpose), and the hosted-provider `api_key` ternary (explicit on the
+never-exported-key path, entry 24). No behaviour changed and no check was
+weakened: every consolidation kept the suite green at 82 and the envelopes
+byte-identical, verified for the JS by rendering both surfaces since the Python
+suite does not exercise them.
+
+**Rejected.** A shared utils module for the JSON/time primitives (the module-independence
+stance is deliberate and worth more than four saved lines); unifying `shortKey`
+(the length difference is real); sharing `caseHistory` (it closes over
+`shortKey`, so sharing it would change the back office's key length as a side
+effect); and collapsing the decision-field tuples (each asserts a different
+subset, so one constant would over- or under-assert somewhere).
+
+**Answers the question.** Isn't the same atomic-write helper copied in four files — is that not exactly
+the technical debt this pass was for? Why keep some duplication and remove other
+duplication?
+
+**Lives in.** `static/app.js (exported helpers, resolveForm), static/backoffice.js (imports), envelope.py (_dispatch), web.py (DATA_PATHS, DELIVERY_STATES), tests.py (_temp_env_paths, _webhook, _recording_provider, DECISION_PATH_MODULES), issue #43`

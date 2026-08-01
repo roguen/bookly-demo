@@ -9,6 +9,7 @@ harness lives.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import pathlib
@@ -75,6 +76,67 @@ CHECKS = []
 def check(fn):
     CHECKS.append(fn)
     return fn
+
+
+# The modules a verdict is allowed to reach through. Two structural checks
+# assert nothing on this path imports the rubric or the queue; naming it once
+# means a module joining the path cannot update one check and silently miss the
+# other.
+DECISION_PATH_MODULES = (
+    "agent.py", "policy.py", "tools.py", "llm.py",
+    "envelope.py", "store.py", "recorder.py", "covers.py",
+)
+
+
+# --- shared isolation, so a check touches no file a demo is about to show ---
+
+
+@contextlib.contextmanager
+def _temp_env_paths(**names):
+    """Point each env var at a file in a fresh temp dir for the duration, then
+    restore whatever was there and remove the dir. The one skeleton the named
+    isolation contexts below are all built from."""
+    directory = tempfile.mkdtemp(prefix="bookly-temp-")
+    saved = {var: os.environ.get(var) for var in names}
+    for var, filename in names.items():
+        os.environ[var] = os.path.join(directory, filename)
+    try:
+        yield directory
+    finally:
+        for var, value in saved.items():
+            if value is None:
+                os.environ.pop(var, None)
+            else:
+                os.environ[var] = value
+        shutil.rmtree(directory, ignore_errors=True)
+
+
+@contextlib.contextmanager
+def _webhook(url):
+    """Point the delivery webhook at `url` for the duration, restoring whatever
+    was set before. A check may reassign it mid-block; the original is restored
+    on exit either way."""
+    saved = os.environ.get(envelope_module.WEBHOOK_ENV_VAR)
+    os.environ[envelope_module.WEBHOOK_ENV_VAR] = url
+    try:
+        yield
+    finally:
+        os.environ.pop(envelope_module.WEBHOOK_ENV_VAR, None)
+        if saved is not None:
+            os.environ[envelope_module.WEBHOOK_ENV_VAR] = saved
+
+
+def _recording_provider():
+    """A RulesProvider that captures the facts it was handed to narrate, so a
+    check can assert what reached the narrator without changing the reply."""
+    seen = {}
+
+    class Recording(RulesProvider):
+        def narrate(self, event):
+            seen[event.kind] = dict(event.facts)
+            return super().narrate(event)
+
+    return seen, Recording()
 
 
 def _extraction_context() -> ExtractionContext:
@@ -284,24 +346,10 @@ def override_covers_carry_no_forbidden_sink():
 # --- authorable policy parameters (v3.2.0) -------------------------------
 
 
-class _authored_policy:
+def _authored_policy():
     """A temp policy document, so a check can author a change without touching
-    the demo's policy or another check's — the same isolation the console
-    contexts give the queue."""
-
-    def __enter__(self):
-        self._saved = os.environ.get(policy.POLICY_PATH_ENV_VAR)
-        self._dir = tempfile.mkdtemp(prefix="bookly-policy-")
-        os.environ[policy.POLICY_PATH_ENV_VAR] = os.path.join(
-            self._dir, "policy.json"
-        )
-        return self
-
-    def __exit__(self, *_exc):
-        os.environ.pop(policy.POLICY_PATH_ENV_VAR, None)
-        if self._saved is not None:
-            os.environ[policy.POLICY_PATH_ENV_VAR] = self._saved
-        shutil.rmtree(self._dir, ignore_errors=True)
+    the demo's policy or another check's."""
+    return _temp_env_paths(**{policy.POLICY_PATH_ENV_VAR: "policy.json"})
 
 
 @check
@@ -723,14 +771,9 @@ def the_agent_can_explain_its_own_behaviour():
     # The published response time reaches the narrator as a fact on the
     # event, not as a string in a template — otherwise a hosted model, whose
     # prompt forbids inventing promises, could not state it.
-    seen = {}
+    seen, provider = _recording_provider()
 
-    class Recording(RulesProvider):
-        def narrate(self, event):
-            seen[event.kind] = dict(event.facts)
-            return super().narrate(event)
-
-    Agent(Recording(), "conv-facts").handle_turn(
+    Agent(provider, "conv-facts").handle_turn(
         "I want to speak to a manager"
     )
     assert seen["escalation"]["response_target"] == (
@@ -826,21 +869,16 @@ def published_commitments_travel_as_facts_not_template_literals():
     providers would tell a customer different things about when their money
     arrives.
     """
-    seen = {}
+    seen, provider = _recording_provider()
 
-    class Recording(RulesProvider):
-        def narrate(self, event):
-            seen[event.kind] = dict(event.facts)
-            return super().narrate(event)
-
-    refund = Agent(Recording(), "conv-sla-refund").handle_turn(
+    refund = Agent(provider, "conv-sla-refund").handle_turn(
         "I want to return the Escher book"
     )
     posting = store_module.SERVICE_LEVELS["refund_posting"]
     assert seen["refund_approved"]["posting_target"] == posting
     assert posting in refund.reply, refund.reply
 
-    Agent(Recording(), "conv-sla-escalate").handle_turn(
+    Agent(provider, "conv-sla-escalate").handle_turn(
         "I want to speak to a manager"
     )
     assert seen["escalation"]["response_target"] == (
@@ -1165,14 +1203,9 @@ def an_aggregate_question_is_not_answered_with_one_order():
     assert tools.search_policy("How long do you keep your records?") is None
     # The name reaches the narrator as a fact, so a hosted model — no longer
     # told to introduce itself — can still answer when it is actually asked.
-    seen = {}
+    seen, provider = _recording_provider()
 
-    class Recording(RulesProvider):
-        def narrate(self, event):
-            seen[event.kind] = dict(event.facts)
-            return super().narrate(event)
-
-    Agent(Recording(), "conv-who-facts").handle_turn("who are you?")
+    Agent(provider, "conv-who-facts").handle_turn("who are you?")
     assert seen["agent_identity"]["name"] == store_module.AGENT["name"]
     # It is still not volunteered: a greeting does not trigger it.
     assert "My name is" not in _fresh_agent("conv-hi").handle_turn("hello").reply
@@ -1428,8 +1461,7 @@ def the_rubric_cannot_reach_a_decision():
     tools, no order record. It cannot tell you whether a refund was correct,
     because it is never told what the refund was.
     """
-    decision_path = ("agent.py", "policy.py", "tools.py", "llm.py",
-                     "envelope.py", "store.py", "recorder.py", "covers.py")
+    decision_path = DECISION_PATH_MODULES
     for name in decision_path:
         source = pathlib.Path(name).read_text(encoding="utf-8")
         for form in ("import rubric", "from rubric import"):
@@ -2210,8 +2242,7 @@ def back_office_returns_nothing_that_reaches_a_verdict():
     the decision path does not import these modules, so there is no code path
     through which a human's override could become an input to a later one.
     """
-    decision_path = ("agent.py", "policy.py", "tools.py", "llm.py",
-                     "envelope.py", "store.py", "recorder.py", "covers.py")
+    decision_path = DECISION_PATH_MODULES
     forbidden = ("queue", "backoffice", "web")
     for name in decision_path:
         source = pathlib.Path(name).read_text(encoding="utf-8")
@@ -2350,31 +2381,24 @@ def ledger_records_one_line_for_a_repeated_key():
     A second line would mean a second refund, which is the exact failure the
     key exists to prevent.
     """
-    saved = os.environ.get(envelope_module.WEBHOOK_ENV_VAR)
-    try:
-        with _BackOffice() as office:
-            os.environ[envelope_module.WEBHOOK_ENV_VAR] = office.url
-            # Two fresh processes' worth of the same decision: different
-            # envelope ids, same conversation, same action, same order — and
-            # therefore the same key.
-            first = _fresh_agent("conv-ledger").handle_turn(
-                "I want to return the Escher book"
-            )
-            again = _fresh_agent("conv-ledger").handle_turn(
-                "I want to return the Escher book"
-            )
-            sent = _envelopes(first) + _envelopes(again)
-            assert len(sent) == 2
-            assert sent[0]["envelope_id"] != sent[1]["envelope_id"]
-            assert sent[0]["idempotency_key"] == sent[1]["idempotency_key"]
-            assert [d for _e, d in first.envelopes] == ["delivered_200"]
-            assert [d for _e, d in again.envelopes] == ["delivered_200"]
+    with _BackOffice() as office, _webhook(office.url):
+        # Two fresh processes' worth of the same decision: different
+        # envelope ids, same conversation, same action, same order — and
+        # therefore the same key.
+        first = _fresh_agent("conv-ledger").handle_turn(
+            "I want to return the Escher book"
+        )
+        again = _fresh_agent("conv-ledger").handle_turn(
+            "I want to return the Escher book"
+        )
+        sent = _envelopes(first) + _envelopes(again)
+        assert len(sent) == 2
+        assert sent[0]["envelope_id"] != sent[1]["envelope_id"]
+        assert sent[0]["idempotency_key"] == sent[1]["idempotency_key"]
+        assert [d for _e, d in first.envelopes] == ["delivered_200"]
+        assert [d for _e, d in again.envelopes] == ["delivered_200"]
 
-            ledger = office.get("/api/ledger")
-    finally:
-        os.environ.pop(envelope_module.WEBHOOK_ENV_VAR, None)
-        if saved is not None:
-            os.environ[envelope_module.WEBHOOK_ENV_VAR] = saved
+        ledger = office.get("/api/ledger")
 
     assert len(ledger["lines"]) == 1, ledger["lines"]
     line = ledger["lines"][0]
@@ -2482,29 +2506,14 @@ def decision_survives_an_unreachable_receiver():
 # --- the orchestration layer: outbox, retries, dead-letter (v3.4.0) -------
 
 
-class _delivery_state:
+def _delivery_state():
     """Temp outbox, dead-letter, and audit files, so a check can exercise
     retries without touching the runtime files a demo is about to show."""
-
-    def __enter__(self):
-        self._dir = tempfile.mkdtemp(prefix="bookly-outbox-")
-        self._saved = {}
-        for var, name in (
-            (envelope_module.OUTBOX_PATH_ENV_VAR, "outbox.json"),
-            (envelope_module.DEADLETTER_PATH_ENV_VAR, "dead_letter.json"),
-            (envelope_module.AUDIT_PATH_ENV_VAR, "audit.log"),
-        ):
-            self._saved[var] = os.environ.get(var)
-            os.environ[var] = os.path.join(self._dir, name)
-        return self
-
-    def __exit__(self, *_exc):
-        for var, saved in self._saved.items():
-            if saved is None:
-                os.environ.pop(var, None)
-            else:
-                os.environ[var] = saved
-        shutil.rmtree(self._dir, ignore_errors=True)
+    return _temp_env_paths(**{
+        envelope_module.OUTBOX_PATH_ENV_VAR: "outbox.json",
+        envelope_module.DEADLETTER_PATH_ENV_VAR: "dead_letter.json",
+        envelope_module.AUDIT_PATH_ENV_VAR: "audit.log",
+    })
 
 
 @check
@@ -2512,18 +2521,11 @@ def a_failed_delivery_waits_in_the_outbox_rather_than_vanishing():
     """The decision is audited and the envelope survives a lost hop — but now
     it is not merely recorded as failed, it is kept in a durable outbox to be
     retried. A delivery that succeeds leaves nothing behind."""
-    saved = os.environ.get(envelope_module.WEBHOOK_ENV_VAR)
-    with _delivery_state():
-        try:
-            os.environ[envelope_module.WEBHOOK_ENV_VAR] = "http://127.0.0.1:9/x"
-            env, delivery = envelope_module.emit(
-                "refund", "conv-orch", "BK-1042",
-                policy.REFUND_APPROVED_IN_WINDOW, amount=22.5,
-            )
-        finally:
-            os.environ.pop(envelope_module.WEBHOOK_ENV_VAR, None)
-            if saved is not None:
-                os.environ[envelope_module.WEBHOOK_ENV_VAR] = saved
+    with _delivery_state(), _webhook("http://127.0.0.1:9/x"):
+        env, delivery = envelope_module.emit(
+            "refund", "conv-orch", "BK-1042",
+            policy.REFUND_APPROVED_IN_WINDOW, amount=22.5,
+        )
         assert delivery == "failed_unreachable"
         pending = envelope_module.outbox()
         assert len(pending) == 1
@@ -2542,18 +2544,11 @@ def reconcile_backs_off_and_dead_letters_after_its_attempts():
     re-hammered — a not-before timestamp holds it off until the backoff passes —
     and once it has used every attempt it moves to the dead-letter store for a
     human rather than being retried forever."""
-    with _delivery_state():
-        saved = os.environ.get(envelope_module.WEBHOOK_ENV_VAR)
-        try:
-            os.environ[envelope_module.WEBHOOK_ENV_VAR] = "http://127.0.0.1:9/x"
-            envelope_module.emit(
-                "refund", "conv-dead", "BK-1041",
-                policy.REFUND_APPROVED_IN_WINDOW, amount=18.99,
-            )
-        finally:
-            os.environ.pop(envelope_module.WEBHOOK_ENV_VAR, None)
-            if saved is not None:
-                os.environ[envelope_module.WEBHOOK_ENV_VAR] = saved
+    with _delivery_state(), _webhook("http://127.0.0.1:9/x"):
+        envelope_module.emit(
+            "refund", "conv-dead", "BK-1041",
+            policy.REFUND_APPROVED_IN_WINDOW, amount=18.99,
+        )
         fail = lambda envelope: "failed_unreachable"
         # A second reconcile at the same instant does not re-attempt an entry
         # that is backing off.
@@ -2585,42 +2580,34 @@ def a_reconciled_delivery_posts_exactly_once_across_a_failure():
     the refund posts — once. A re-delivery of the same decision, the sender
     unsure it landed, is suppressed on the idempotency key rather than posted a
     second time. Exactly once, across a failure."""
-    saved = os.environ.get(envelope_module.WEBHOOK_ENV_VAR)
-    with _delivery_state():
-        with _BackOffice() as office:
-            try:
-                # Receiver unreachable at emit: the decision is made and
-                # audited, and the envelope waits in the outbox — not lost.
-                os.environ[envelope_module.WEBHOOK_ENV_VAR] = (
-                    "http://127.0.0.1:9/webhook"
-                )
-                env, delivery = envelope_module.emit(
-                    "refund", "conv-e2e", "BK-1042",
-                    policy.REFUND_APPROVED_IN_WINDOW, amount=22.5,
-                )
-                assert delivery == "failed_unreachable"
-                assert len(envelope_module.outbox()) == 1
-                # The receiver is reachable now; reconcile drains the outbox and
-                # the refund posts, once.
-                os.environ[envelope_module.WEBHOOK_ENV_VAR] = office.url
-                result = envelope_module.reconcile(now=0.0)
-                assert result["delivered"] == [env["envelope_id"]]
-                assert envelope_module.outbox() == []
-                assert office.get("/api/ledger")["summary"]["lines"] == 1
-                # The same decision delivered again — a retry the sender was
-                # unsure about — is suppressed durably, not posted twice.
-                envelope_module.emit(
-                    "refund", "conv-e2e", "BK-1042",
-                    policy.REFUND_APPROVED_IN_WINDOW, amount=22.5,
-                )
-                summary = office.get("/api/ledger")["summary"]
-                assert summary["lines"] == 1  # still one line
-                assert summary["suppressed_duplicates"] == 1
-                assert summary["amount_posted"] == 22.5  # posted once
-            finally:
-                os.environ.pop(envelope_module.WEBHOOK_ENV_VAR, None)
-                if saved is not None:
-                    os.environ[envelope_module.WEBHOOK_ENV_VAR] = saved
+    with _delivery_state(), _BackOffice() as office, _webhook(
+        "http://127.0.0.1:9/webhook"
+    ):
+        # Receiver unreachable at emit: the decision is made and audited, and
+        # the envelope waits in the outbox — not lost.
+        env, delivery = envelope_module.emit(
+            "refund", "conv-e2e", "BK-1042",
+            policy.REFUND_APPROVED_IN_WINDOW, amount=22.5,
+        )
+        assert delivery == "failed_unreachable"
+        assert len(envelope_module.outbox()) == 1
+        # The receiver is reachable now; reconcile drains the outbox and the
+        # refund posts, once.
+        os.environ[envelope_module.WEBHOOK_ENV_VAR] = office.url
+        result = envelope_module.reconcile(now=0.0)
+        assert result["delivered"] == [env["envelope_id"]]
+        assert envelope_module.outbox() == []
+        assert office.get("/api/ledger")["summary"]["lines"] == 1
+        # The same decision delivered again — a retry the sender was unsure
+        # about — is suppressed durably, not posted twice.
+        envelope_module.emit(
+            "refund", "conv-e2e", "BK-1042",
+            policy.REFUND_APPROVED_IN_WINDOW, amount=22.5,
+        )
+        summary = office.get("/api/ledger")["summary"]
+        assert summary["lines"] == 1  # still one line
+        assert summary["suppressed_duplicates"] == 1
+        assert summary["amount_posted"] == 22.5  # posted once
 
 
 @check
