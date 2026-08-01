@@ -31,14 +31,14 @@ imports an LLM. Every file either enforces that boundary or demonstrates it.
 
 ## Where the reasoning lives
 
-**`docs/DECISIONS.md` first** — 41 entries: the decision, the reasoning, the
+**`docs/DECISIONS.md` first** — 51 entries: the decision, the reasoning, the
 alternative rejected, where it is enforced, and the sceptic's question it
 answers. Several record a diagnosis that was **wrong** and later corrected;
 those are the valuable ones. Do not re-litigate anything in that file without
 reading its "Rejected" line.
 
 Then, in descending fidelity: the commit messages (long, deliberately), the
-30 closed GitHub issues (`gh issue view <n>` — they carry diagnosis and
+38 closed GitHub issues (`gh issue view <n>` — they carry diagnosis and
 corrections), the code docstrings, and `deck/build.js` speaker notes under
 IF ASKED.
 
@@ -47,7 +47,7 @@ IF ASKED.
 ```bash
 python3 tests.py          # expect 82 passed, 0 failed
 /usr/bin/python3 tests.py # 3.9.6 — must also be green
-python3 harness.py        # expect 8 transcripts passed
+python3 harness.py        # expect 9 transcripts passed
 ```
 
 `python3 tests.py --count` prints the check count. Adding a check changes a
