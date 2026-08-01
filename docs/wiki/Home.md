@@ -26,7 +26,7 @@ No dependencies. No API key. Python 3.9 or later.
 
 ```bash
 python3 app.py --script demo.txt   # four scripted scenarios, in a terminal
-python3 tests.py                   # 75 checks, no pytest
+python3 tests.py                   # 78 checks, no pytest
 python3 harness.py                 # the golden transcripts, and the rubric
 python3 web.py                     # the console, 127.0.0.1:8000
 python3 backoffice.py              # the executing side, 127.0.0.1:8787
@@ -79,7 +79,7 @@ browser to someone who will never read `policy.py`.
 Verified for the phase-2 release: the CLI byte-identical to `v1.0.0`; a clean
 clone makes zero external requests; `stub_receiver.py` untouched and its
 evidence procedure reproduced key for key. Since phase 3 the check count is
-enforced rather than repeated — 75 checks green on 3.9, 3.13 and 3.14, in CI
+enforced rather than repeated — 78 checks green on 3.9, 3.13 and 3.14, in CI
 on every push, and any document that cites a different number fails the
 suite.
 
@@ -134,21 +134,23 @@ Swapping the matcher is a contained change. Removing the floor would
 reintroduce the confident-wrong-article failure at higher fidelity, which is
 strictly worse than the current honest miss.
 
-### 2. Questions the intent surface does not model
+### 2. Questions the intent surface does not model — closed in v3.3.0
 
 "How many books have I ordered?" had no intent to land in, so a hosted model
-mapped it to the nearest one — `order_status` — and the agent answered about a
-single order, fluently and confidently.
+mapped it to the nearest one — `order_status` — and answered about a single
+order, confidently. `order_history` and `agent_identity` gave two questions
+doors, but that was two instances, not the class: the agent still could not
+*tell* it was out of scope, and adding intents one at a time does not fix that.
 
-The failure mode this build advertises is that anything the policy engine does
-not cover escalates instead of resolving. It never fired, and not because the
-guard is broken: the state machine received an intent it recognised and
-handled it correctly.
-
-`order_history` and `agent_identity` now exist, so those two questions have
-doors. That is two instances, not the class. The gap was never that the agent
-was wrong — it is that it could not tell it was out of scope, and adding
-intents one at a time does not fix that.
+v3.3.0 closes the class. `out_of_scope` is a door for "none of the above": the
+model classifies a request that fits no known intent as out of scope instead of
+force-fitting it onto the nearest one, and the agent names the limit and offers
+a person rather than answering the nearest thing it can. A second out-of-scope
+turn in a row escalates — the dispute pattern applied to scope — so the failure
+mode this build has always advertised, that anything uncovered reaches a human,
+finally fires, and stays bounded so a stray question is not a case. The door
+provably swallows nothing answerable: a check asserts every handled question
+still routes to its own intent, never to `out_of_scope`.
 
 ### 3. The orchestration layer becoming real
 

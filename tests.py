@@ -1168,6 +1168,66 @@ def an_aggregate_question_is_not_answered_with_one_order():
 
 
 @check
+def an_out_of_scope_request_is_recognized_not_force_fit():
+    """A question the agent does not cover is classified out_of_scope and
+    declined honestly — not mapped onto the nearest order-shaped intent and
+    answered confidently, the failure DECISIONS #14 left open. And the door
+    swallows nothing answerable: everything the agent handles still routes to
+    its own intent, so out_of_scope names the absence of a home, it is not a
+    catch-all that hides what the agent can do."""
+    provider = RulesProvider()
+    context = _extraction_context()
+    for text in ("Do you sell e-readers or Kindles?",
+                 "Do you have any job openings?",
+                 "What is the weather like today?"):
+        requests = provider.extract(text, context)
+        assert any(r.intent == "out_of_scope" for r in requests), text
+        result = _fresh_agent().handle_turn(text)
+        assert "connect you with a person" in result.reply, (text, result.reply)
+        assert result.envelopes == [], text  # a decline moves no money
+    # Answerable questions keep their own intent; the door swallows none.
+    covered = {
+        "Where is my Dune order?": "order_status",
+        "How many books have I ordered?": "order_history",
+        "What is your name?": "agent_identity",
+        "How long does standard shipping take?": "policy_question",
+        "I'd like to return a book.": "return_request",
+        "When will my refund show up?": "refund_status",
+        "I want to speak to a manager.": "human_handoff",
+    }
+    for text, intent in covered.items():
+        intents = [r.intent for r in provider.extract(text, context)]
+        assert intent in intents, (text, intents)
+        assert "out_of_scope" not in intents, (text, intents)
+    # A pleasantry carries no request, so it is not out_of_scope either.
+    for greeting in ("Hello", "Thanks so much!", "That sounds great to me"):
+        intents = [r.intent for r in provider.extract(greeting, context)]
+        assert "out_of_scope" not in intents, (greeting, intents)
+
+
+@check
+def persistent_out_of_scope_escalates_and_a_handled_turn_resets():
+    """One out-of-scope turn is answered honestly; a second in a row escalates
+    to a human — the dispute pattern applied to scope, bounded so an off-topic
+    aside never opens a case. Any handled turn resets the run."""
+    agent = _fresh_agent("conv-oos")
+    assert _envelopes(agent.handle_turn("Do you sell e-readers?")) == []
+    escalation = _envelopes(agent.handle_turn("Do you have a physical store?"))
+    assert len(escalation) == 1
+    assert escalation[0]["action"] == "escalate_to_human"
+    assert escalation[0]["reason_code"] == policy.ESCALATED_UNHANDLED
+    assert escalation[0]["order_id"] is None
+    # A handled turn between out-of-scope requests breaks the streak.
+    other = _fresh_agent("conv-oos2")
+    other.handle_turn("What's the weather?")            # 1st out-of-scope
+    other.handle_turn("Where is my Dune order?")        # handled -> reset
+    assert _envelopes(other.handle_turn("Do you sell gift cards?")) == []
+    # The bound is one honest decline, then a person.
+    assert policy.unhandled_limit_reached(1)
+    assert not policy.unhandled_limit_reached(0)
+
+
+@check
 def a_coincidental_title_word_never_moves_money():
     """The customer has to have named the book.
 

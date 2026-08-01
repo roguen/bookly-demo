@@ -1148,7 +1148,7 @@ already makes about thresholds — a document holding its own copy is the same
 failure with a slower fuse — and generation was unavailable because the no-
 build-step constraint does not move, so the registry *is* the centralisation.
 Failing on a removed citation stops the check being made vacuous by deletion.
-The check earned its keep unprompted as the count moved 51 → 52 → 56 → 68 → 69 → 74 → 75,
+The check earned its keep unprompted as the count moved 51 → 52 → 56 → 68 → 69 → 74 → 75 → 78,
 naming the files to update each time. CI matters because every claim about the
 suite being green was a claim about somebody's laptop, and slide 5 argues that
 agents die from silent regressions when somebody tweaks a prompt on a Thursday
@@ -1682,3 +1682,65 @@ agent doing it? This looks like Decagon's AOPs — is it?
 **Lives in.** `policy.py (PARAMETERS, active_policy, change_parameter, policy_changes, __getattr__), policy.json, web.py (policy_json, checks_command), backoffice.py (_policy_change), static/backoffice.js (policyEditor), tests.py (policy_defaults_are_the_historical_policy, an_authored_change_moves_a_verdict_through_policy_only, a_policy_change_is_validated_and_requires_an_actor, the_policy_log_is_append_only_and_reloads_live, a_hand_edited_document_cannot_push_a_threshold_out_of_range, policy_is_authored_in_the_back_office_and_the_console_reads_it), issue #37, supersedes entries 29 and 41`
 
 ---
+
+## 47. The agent knows when it does not know — a door for "none of the above"
+
+*v3.3.0*
+
+**Decision.** `out_of_scope` is a real intent. The extraction prompt tells a hosted model to
+use it for a request that fits none of the known intents — never forcing it
+onto the nearest one, and never using it for a request the listed intents
+already cover, so the known intents always win. The stand-in gets the same
+door: a segment that matched no handled intent and still reads as a request or
+a question (a trailing `?`, or a leading interrogative or request verb) is
+`out_of_scope`; a pleasantry carries no such signal and still gets the friendly
+opener. The agent handles `out_of_scope` by naming the limit and offering a
+person, recorded on the deterministic side. One such turn is answered honestly;
+a second in a row escalates to a human — the dispute pattern from entry 8
+applied to scope — governed by a code constant, `UNHANDLED_BEFORE_ESCALATION`,
+that is deliberately not authorable.
+
+**Why.** This closes the class entry 14 left open. The failure there was not that the
+agent was wrong — it was that it could not tell it was out of scope, and a
+hosted model with no "none of the above" to report mapped an unmodeled question
+onto the nearest order-shaped intent and answered it confidently. A door is
+what the class needs, and entry 14 said so: "a door only helps if the model
+knows it is there." The subtlety is that entry 14 also *rejected* "a catch-all
+fallback intent" — and this must be reconciled rather than waved past, because a
+sceptic will notice. What entry 14 rejected was using a catch-all to *avoid
+modelling answerable questions*: "how many books have I ordered" is answerable,
+so it earned a real intent (`order_history`), not a shrug. That still holds, and
+the answerable intents are all still there. `out_of_scope` is the opposite
+move — the door for genuinely *unmodelled* topics — and it carries the inverse
+risk of force-fitting: a model that dumps answerable questions into the door to
+avoid thinking. That risk is bounded structurally rather than hoped away. The
+prompt scopes the door to requests no listed intent covers and states the listed
+intents win; the stand-in checks it last, only after every handled intent has
+failed; and a check asserts that every answerable question — status, history,
+identity, refund status, policy, return, handoff — still routes to its own
+intent and never to `out_of_scope`, so the door provably swallows nothing the
+agent can do. The escalate-on-persistence is what finally makes real the failure
+mode this build has advertised since phase 1 and never fired: anything uncovered
+reaches a human. Auto-escalating every stray question would flood the queue and
+be wrong — "do you sell e-readers?" is not a case — so a single out-of-scope
+turn is a decline and an offer, and only a *repeat* is a customer the agent
+cannot help, exactly as a *repeated* denial becomes a dispute. The boundary the
+whole repo rests on is unmoved: `out_of_scope` is extraction — the model or the
+stand-in reporting that it recognised nothing — and the decline and the
+escalation are computed by ordinary code. The model saying "I don't know" is
+still the model conversing, not deciding.
+
+**Rejected.** A lower confidence threshold, or a catch-all that fires on uncertainty rather
+than on genuine absence of a home — a fallback triggered by low confidence
+cannot tell "I can't answer this" from "I should answer this with intent X but
+I'm unsure", which is the distinction that matters; enumerating out-of-scope
+topics one at a time, the very thing entry 14 said does not fix the class;
+auto-escalating every out-of-scope turn (a case per stray question); and making
+`UNHANDLED_BEFORE_ESCALATION` authorable in this branch — it governs when a
+conversation reaches a human, and that stayed in code on purpose.
+
+**Answers the question.** What does it do when a customer asks something you didn't model? Didn't you
+reject a catch-all fallback in entry 14 — isn't this that? You've said uncovered
+questions escalate since phase 1 — does that actually fire now?
+
+**Lives in.** `llm.py (VALID_INTENTS, OUT_OF_SCOPE_RE, _intent_of, _out_of_scope, EXTRACTION_SYSTEM_PROMPT, _escalation), agent.py (_is_actionable, _answer_out_of_scope, unhandled_streak, handle_turn), policy.py (UNHANDLED_BEFORE_ESCALATION, unhandled_limit_reached, ESCALATED_UNHANDLED, REASON_CODES), transcripts/out-of-scope-then-escalation.json, tests.py (an_out_of_scope_request_is_recognized_not_force_fit, persistent_out_of_scope_escalates_and_a_handled_turn_resets), issue #39, extends entries 8 and 14`

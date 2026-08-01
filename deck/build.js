@@ -138,7 +138,7 @@ TALKING POINTS
 - policy.py does not import an LLM. That's a structural property you can grep for, not a promise.
 - The whole thing runs with no API key and no dependencies — there's a rules-based stand-in for both model jobs.
 - Verified, not assumed: same script through the regex stand-in and through gpt-5.4-mini, all eight replies worded differently, every decision field identical down to the idempotency key.
-- 75 checks, all dependency-free, and the decision tests never touch a model at all. They run from a terminal, from inside the console, and in CI on 3.9, 3.13 and 3.14.
+- 78 checks, all dependency-free, and the decision tests never touch a model at all. They run from a terminal, from inside the console, and in CI on 3.9, 3.13 and 3.14.
 
 IF ASKED
 
@@ -591,10 +591,10 @@ const nexts = [
   },
   {
     n: "2",
-    t: "Questions the intent surface doesn't model",
+    t: "Questions the intent surface doesn't model — closed",
     flines: 2,
-    b: "\"How many books have I ordered?\" had no intent to land in — so a model mapped it to the nearest one, and answered confidently.",
-    f: "I added that door. But this build's failure mode — escalate rather than guess — never fired: the state machine got an intent it recognised. The gap is not that the agent was wrong; it is that it could not tell it was out of scope.",
+    b: "\"How many books have I ordered?\" had no intent to land in — so a model mapped it to the nearest one, and answered confidently. The gap was that it could not tell it was out of scope.",
+    f: "v3.3.0 gave it a door for \"none of the above\": it classifies an unmodelled request out_of_scope instead of force-fitting it, declines honestly, and a second in a row escalates — so uncovered finally reaches a human, bounded. A check proves the door swallows nothing answerable.",
     lines: 1,
   },
   {
@@ -669,13 +669,13 @@ Second, and this is the one I find most interesting: questions the intent surfac
 
 Now, the failure mode I've been selling you all deck is that anything the policy engine doesn't cover escalates instead of resolving. Here it didn't fire. Not because the guard is broken — because nothing looked wrong. The state machine got an intent it recognised and handled it correctly.
 
-I added the door. That specific question works now. But I want to be careful about what I've actually fixed, because it's two instances and not the class. The gap was never that the agent was wrong. It's that it couldn't tell it was out of scope, and you don't solve that by adding intents one at a time until you run out of customers.
+Adding order_history and agent_identity gave two questions doors, but that was two instances and not the class — you don't close it by adding intents one at a time until you run out of customers. So v3.3.0 closed the class. There's a door for "none of the above": the model classifies a request that fits no known intent as out_of_scope instead of force-fitting it, and the agent names the limit and offers a person rather than answering the nearest thing. A second out-of-scope turn in a row escalates — the dispute pattern applied to scope — so the failure mode I've been selling you finally fires: uncovered reaches a human, bounded, so a stray question isn't a case. And the door swallows nothing answerable — a check asserts every question it does handle still routes to its own intent. The one thing I was careful not to do is let it become a catch-all the model hides behind; that risk is the mirror of force-fitting, and it's bounded structurally, not hoped away.
 
 Third, the orchestration layer becoming real — retries, dead letters, durable idempotency. None of that is in the repo. But the envelope contract already accommodates it, which is why the agent emits instead of executing.
 
 TALKING POINTS
 
-- 75 checks today, dependency-free, no pytest — running in CI on 3.9, 3.13 and 3.14, with no pip install anywhere in the workflow file.
+- 78 checks today, dependency-free, no pytest — running in CI on 3.9, 3.13 and 3.14, with no pip install anywhere in the workflow file.
 - A scenario is a file. Adding one is adding a fixture and running one command.
 - The rubric grades prose and cannot reach a decision, and that's asserted structurally — the same grep-for-it discipline as "policy.py does not import an LLM".
 - Open defects are listed in the fixture that produces them, with the issue number that will close them. A fix has to delete its own excuse, or the suite fails on the stale acknowledgement.
