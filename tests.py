@@ -760,6 +760,39 @@ def the_rubric_catches_the_recorded_hosted_drift():
 
 
 @check
+def the_regression_run_installs_nothing():
+    """CI is where "no dependencies" stops being a claim.
+
+    A workflow that quietly grew a `pip install` would make the repo's central
+    practical promise — clone it, run it, no packages — false everywhere
+    except a README. So the absence is asserted rather than trusted, and the
+    interpreters the docs promise are asserted to actually be in the matrix:
+    dropping 3.9 from CI while README still says 3.9 is the same class of
+    drift as DEMO.md saying forty-five.
+    """
+    workflow = pathlib.Path(".github/workflows/checks.yml")
+    assert workflow.exists(), "no regression run is configured"
+    source = workflow.read_text(encoding="utf-8")
+    for forbidden in ("pip install", "pip3 install", "npm install",
+                      "npm ci", "poetry install", "uv pip"):
+        # Named in the leading comment on purpose; the assertion is about
+        # steps, so only lines that could run count.
+        for line in source.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+            assert forbidden not in stripped, (forbidden, line)
+    for version in ("3.9", "3.13"):
+        assert '"%s"' % version in source, version
+    assert "python tests.py" in source
+    # And no vendor key is available to it, so a green run is a green run of
+    # the dependency-free path rather than of somebody's billed account.
+    for variable in llm.VENDOR_KEY_VARS.values():
+        assert variable not in source, variable
+    assert "secrets." not in source
+
+
+@check
 def the_suite_never_reaches_a_hosted_provider():
     """A hosted run is something a person asks for at a terminal. It costs
     money and needs a network, and neither belongs in `python3 tests.py` —
