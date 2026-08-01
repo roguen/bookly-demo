@@ -1546,3 +1546,42 @@ proving doesn't exist?
 **Lives in.** `covers/ (39 files), covers.py (override_for, for_order, OVERRIDE_DIR), tests.py (override_covers_carry_no_forbidden_sink, covers_are_deterministic_and_need_no_network), issue #33`
 
 ---
+
+## 44. The wordmark is drawn in neutral ink, because the brand colour is already spoken for
+
+*v3.1.0*
+
+**Decision.** Both surfaces get a hand-drawn open-book mark beside the wordmark — static
+inline SVG in the topbar, the same mark on the console and the back office so
+they read as one product. It is drawn in `currentColor`, inheriting the
+wordmark's white, and is **never** purple. It is a sibling of the JS-filled
+`#brand` span, not inside it, so `clear(dom.brand)` on boot leaves the mark
+standing.
+
+**Why.** The obvious thing to do with a logo is paint it the brand colour, and the
+profile's `brand.accent` is `#5754FF` — which is exactly `--purple`. In this
+build purple is not a brand colour, it is the deterministic side of the
+provenance boundary, and entry 39 spends it on nothing decorative. A purple
+mark would be the first decorative purple in the interface, quietly telling the
+eye that the logo is "the deterministic side", which is meaningless and erodes
+the one association the whole console teaches. So the rule wins over the
+convention, exactly as the branch was briefed to resolve it: neutral ink, and
+the mark carries no side. It is a sibling of `#brand` rather than a child
+because the console fills the wordmark text from the profile at boot with
+`clear(dom.brand)`, and a mark inside that node would be wiped on the first
+render — the same "the interface names the speaker" plumbing entry 18 leaned
+on. Drawn rather than fetched keeps the no-network, no-image-file, CSP-clean
+constraints the rest of the build already holds: inline `<svg>` is neither
+script nor style nor an external image, so it passes `script-src 'self';
+style-src 'self'; img-src 'self' data:` untouched.
+
+**Rejected.** Painting the mark the profile's brand accent (it is the provenance purple);
+an image file or an icon-font glyph (a network fetch and a dependency); putting
+the mark inside `#brand` (boot would clear it).
+
+**Answers the question.** Why isn't your logo your brand colour? Where does the mark come from — is it
+an image?
+
+**Lives in.** `static/index.html, static/backoffice.html, static/app.css (.brand, .brand-mark, .brand-text), issue #34`
+
+---

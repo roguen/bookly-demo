@@ -137,12 +137,30 @@ body {
 
 .brand {
   display: flex;
-  align-items: baseline;
-  gap: 10px;
+  align-items: center;
+  gap: 11px;
   font-weight: 700;
   font-size: var(--step-1);
   color: #fff;
   letter-spacing: -0.01em;
+}
+
+/* The drawn mark. Neutral ink by inheriting the wordmark's white through
+   currentColor — never purple, because purple carries provenance and a logo
+   is not a side of the boundary. */
+.brand-mark {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: #fff;
+}
+
+/* Name and descriptor keep their baseline relationship to each other while
+   the mark centres against the pair. */
+.brand-text {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
 }
 
 .brand .descriptor {
