@@ -68,7 +68,14 @@ class NarrationEvent:
 
 
 VALID_INTENTS = frozenset(
-    ["order_status", "return_request", "policy_question", "human_handoff"]
+    [
+        "order_status",
+        "order_history",
+        "agent_identity",
+        "return_request",
+        "policy_question",
+        "human_handoff",
+    ]
 )
 
 
@@ -116,6 +123,35 @@ STATUS_SIGNAL_RE = re.compile(
 )
 STATUS_OBJECT_RE = re.compile(
     r"\b(order|package|delivery|it|book|copy)\b", re.IGNORECASE
+)
+
+# Catches a question about the account as a whole rather than one order —
+# "what have I ordered", "how many books". This needed an intent of its own
+# rather than a knowledge-base article: with no home, a hosted model maps the
+# question onto order_status, the read falls back to the likeliest single
+# order, and the customer gets a fluent answer to a question they did not ask.
+# Deliberately checked before order_status, because "what have I ordered" and
+# "where is my order" share vocabulary and only one of them is about one book.
+ORDER_HISTORY_RE = re.compile(
+    r"\b(how many|order history|purchase history|total number"
+    r"|(?:all|every|each) (?:of )?(?:my|the) (?:orders|books|purchases)"
+    r"|(?:list|show me|see) (?:all )?(?:my|the) (?:orders|books|purchases)"
+    r"|(?:everything|all) (?:i|we)(?:'ve| have)? (?:ever )?"
+    r"(?:ordered|bought|purchased)"
+    r"|what (?:\w+ ){0,3}have i (?:ever )?(?:ordered|bought|purchased))\b",
+    re.IGNORECASE,
+)
+
+# Catches being asked who the agent is. Its own intent for the same reason:
+# routing it through retrieval would need "you" and "your" as article
+# keywords, and that makes "how long do you keep your records?" retrieve the
+# identity article — the confident-wrong-article failure the floor exists to
+# prevent. An honest answer to "what is your name" is not worth reopening it.
+IDENTITY_RE = re.compile(
+    r"\b(what(?:'s| is| was)? your name|who are you|who am i (?:talking|"
+    r"speaking|chatting) (?:to|with)|are you (?:a |an )?"
+    r"(?:bot|robot|human|person|real|machine|ai)|your name)\b",
+    re.IGNORECASE,
 )
 
 # Catches general questions the knowledge base might answer. Retrieval makes
@@ -202,6 +238,12 @@ class RulesProvider:
             return "return_request"
         if HUMAN_HANDOFF_RE.search(segment):
             return "human_handoff"
+        if IDENTITY_RE.search(segment):
+            return "agent_identity"
+        # Before order_status: "what have I ordered" and "where is my order"
+        # share vocabulary, and only one of them is about a single book.
+        if ORDER_HISTORY_RE.search(segment):
+            return "order_history"
         # An explicit order reference — an id or a title — counts as the
         # object: "what's the status of Dune" is a status question even
         # without the word "order".
@@ -420,6 +462,34 @@ def _no_returnable_orders(f: dict) -> str:
     return "I don't see any delivered orders on your account to return."
 
 
+def _order_history(f: dict) -> str:
+    total, recent, more = f["total"], f["recent"], f["more"]
+    if not total:
+        return "I don't see any orders on your account yet."
+    listed = ", ".join("%s (%s)" % (o["title"], o["order_id"]) for o in recent)
+    tail = (
+        " There are %d more — ask me about any of them by title." % more
+        if more
+        else ""
+    )
+    return (
+        "You've placed %d order%s with us. The most recent %s: %s.%s"
+        % (
+            total, "" if total == 1 else "s",
+            "is" if len(recent) == 1 else "are", listed, tail,
+        )
+    )
+
+
+def _agent_identity(f: dict) -> str:
+    name = f.get("name") or "the support agent here"
+    return (
+        "My name is %s. I can check an order's status, start a return or "
+        "refund, and answer questions about shipping, returns and your "
+        "account — anything I can't settle goes to a human colleague." % name
+    )
+
+
 def _help(f: dict) -> str:
     return (
         "Happy to help. I can check an order's status, start a return or "
@@ -440,6 +510,8 @@ _TEMPLATES = {
     "kb_answer": _kb_answer,
     "kb_miss": _kb_miss,
     "no_returnable_orders": _no_returnable_orders,
+    "order_history": _order_history,
+    "agent_identity": _agent_identity,
     "help": _help,
 }
 
@@ -451,8 +523,11 @@ _TEMPLATES = {
 EXTRACTION_SYSTEM_PROMPT = """\
 You extract structured slots from one customer-support turn for an online
 bookstore. Split the turn into requests at conjunctions and sentence breaks.
-For each request report: intent (one of "order_status", "return_request",
-"policy_question", "human_handoff", or null), order_id (format BK-0000, or
+For each request report: intent (one of "order_status" for one specific
+order, "order_history" for a question about the account as a whole — how many
+orders, what they have bought, their order history — "agent_identity" for who
+or what you are, "return_request", "policy_question", "human_handoff", or
+null), order_id (format BK-0000, or
 null), title_words
 (words from the customer's own order titles listed below that the request
 refers to), option_number (if the request answers a numbered choice, else

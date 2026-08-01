@@ -33,6 +33,12 @@ a different intent is a topic change; asking about an order is never choosing
 it. Clarification is economic — ask only when more than one order could take
 the write — and bounded, two failed attempts then a human.
 
+An intent surface is a boundary too. A question with no intent to land in
+does not fail loudly — a hosted model maps it to the nearest one it has, and
+the answer comes back fluent and wrong. `order_history` and `agent_identity`
+exist because "how many books have I ordered" and "what is your name" were
+being answered as if they were "where is my order".
+
 **4. `tools.py` — facts and records out, never prose.**
 Order lookups scoped to the signed-in customer, and retrieval with a hard
 floor: fewer than two whole-word keyword matches, or a tie, returns nothing.
@@ -50,7 +56,7 @@ mock data). `app.py` is presentation only. `stub_receiver.py` is the
 orchestration layer's end of the webhook, demonstrating duplicate suppression.
 
 **7. `tests.py` — the claims, executable.**
-64 dependency-free checks, runnable from a terminal or from inside the
+66 dependency-free checks, runnable from a terminal or from inside the
 console. The ones to point at under questioning: `injection_changes_nothing`
 (the thesis, tested), `web_layer_emits_identical_envelopes` (the same
 scenarios through HTTP and through `Agent`, every decision field compared —

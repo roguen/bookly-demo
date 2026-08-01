@@ -34,7 +34,7 @@ For a live session:
 python3 app.py
 ```
 
-Run the check suite (standard library only, no pytest) — 64 checks, and they
+Run the check suite (standard library only, no pytest) — 66 checks, and they
 also run from inside the console:
 
 ```bash
@@ -194,7 +194,20 @@ inventing a timeframe, the same way retrieval fails closed.
 
 The agent can also explain itself. "What do you mean by limit?" after a
 clarify-limit handoff, and "how long until someone gets back to me?" after any
-escalation, are answered from the knowledge base like any other question.
+escalation, are answered from the knowledge base like any other question. It
+answers to its name too — "what is your name?" — though it never volunteers it.
+
+**Questions about the account, not an order.** "How many books have I
+ordered?" is a different question from "where is my order", and it has an
+intent of its own (`order_history`) rather than being routed to the nearest
+one. That matters more than it sounds: without a door, a hosted model maps
+the aggregate question onto `order_status`, the read falls back to the
+likeliest single order, and the customer gets a fluent answer to a question
+they did not ask — with nothing escalating, because from the state machine's
+view nothing went wrong. `agent_identity` exists for the same reason: the
+knowledge base could only reach it by matching on "you" and "your", which
+makes "how long do you keep your records?" retrieve the identity article, and
+no answer is worth reopening the retrieval floor.
 
 **A follow-up is answered as a follow-up.** Asking "when will it arrive?"
 right after asking where an order is has the same answer, and the agent says

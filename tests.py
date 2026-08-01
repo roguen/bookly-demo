@@ -816,6 +816,91 @@ def transcripts_are_present_and_blessed():
 
 
 @check
+def an_aggregate_question_is_not_answered_with_one_order():
+    """A question about the account is not a question about an order.
+
+    Reported from a live hosted session: "what books have I ordered in the
+    past?" came back with a fluent, confident report on one order. The
+    aggregate question had no intent to land in, so a hosted model mapped it
+    onto `order_status`, `_resolve_read_target` fell back to the likeliest
+    single order, and the customer got a precise answer to a question they had
+    not asked.
+
+    Nothing escalated, nothing declined, no reason code was produced. That is
+    the part that matters: the failure mode this build advertises — anything
+    uncovered goes to a human — cannot fire when the state machine has been
+    handed an intent it recognises and has handled correctly. The fix is a
+    door of its own, not a better fallback.
+    """
+    assert "order_history" in llm.VALID_INTENTS
+    # The hosted extractor has to know the intent exists, or the whole point
+    # is lost: it will keep reaching for order_status.
+    assert "order_history" in llm.EXTRACTION_SYSTEM_PROMPT
+    assert "the account as a whole" in llm.EXTRACTION_SYSTEM_PROMPT
+
+    watched = ListRecorder()
+    agent = Agent(RulesProvider(), "conv-history", recorder=watched)
+    result = agent.handle_turn("what books have I ordered in the past?")
+
+    # It answers the question asked: the whole account, with a count.
+    assert str(len(tools.orders_for_customer(CURRENT_CUSTOMER_ID))) in (
+        result.reply
+    ), result.reply
+    assert "37 orders" in result.reply, result.reply
+    assert result.envelopes == []
+    # And it does not read as a report on one order.
+    assert "is expected by" not in result.reply, result.reply
+    assert "was delivered on" not in result.reply, result.reply
+
+    # The read is the whole account, and it says so in the trace rather than
+    # arriving as an order_read that fell back.
+    lookups = [n for n in watched.notes if n.stage == "lookup"]
+    assert [n.payload["kind"] for n in lookups] == ["order_history"], lookups
+    assert lookups[0].payload["total"] == 37
+
+    # Scoped like every other read: another customer's order is not in it.
+    assert "BK-2077" not in result.reply
+    assert "Snow Crash" not in result.reply
+
+    # The phrasings from the report, and the ones a customer reaches for next.
+    for question in (
+        "Yeah, but what is the total number of books that I have ordered?",
+        "how many books have I ordered",
+        "show me my orders",
+        "everything I've bought",
+    ):
+        reply = _fresh_agent("conv-agg").handle_turn(question).reply
+        assert "37 orders" in reply, (question, reply)
+
+    # Asking one order's status still resolves to one order.
+    single = _fresh_agent("conv-single").handle_turn("Where's my Dune order?")
+    assert "BK-1041" in single.reply and "37 orders" not in single.reply
+
+    # And the agent answers to its name, which needed an intent for the same
+    # reason: routing it through retrieval would have meant matching on "you"
+    # and "your", and "how long do you keep your records?" would then retrieve
+    # the identity article — the confident-wrong-article failure the retrieval
+    # floor exists to prevent.
+    assert "agent_identity" in llm.VALID_INTENTS
+    named = _fresh_agent("conv-who").handle_turn("What is your name?").reply
+    assert "My name is Hal" in named, named
+    assert tools.search_policy("How long do you keep your records?") is None
+    # The name reaches the narrator as a fact, so a hosted model — no longer
+    # told to introduce itself — can still answer when it is actually asked.
+    seen = {}
+
+    class Recording(RulesProvider):
+        def narrate(self, event):
+            seen[event.kind] = dict(event.facts)
+            return super().narrate(event)
+
+    Agent(Recording(), "conv-who-facts").handle_turn("who are you?")
+    assert seen["agent_identity"]["name"] == store_module.AGENT["name"]
+    # It is still not volunteered: a greeting does not trigger it.
+    assert "My name is" not in _fresh_agent("conv-hi").handle_turn("hello").reply
+
+
+@check
 def a_coincidental_title_word_never_moves_money():
     """The customer has to have named the book.
 

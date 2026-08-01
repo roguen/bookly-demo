@@ -25,6 +25,7 @@ from llm import (
 )
 from recorder import NULL_RECORDER, Recorder
 from store import (
+    AGENT,
     CURRENT_CUSTOMER_ID,
     GENERIC_TITLE_WORDS,
     SERVICE_LEVELS,
@@ -35,6 +36,11 @@ from store import (
 # What one emitted action looks like to a caller: the envelope, and how
 # delivery went.
 Emission = Tuple[dict, str]
+
+# How many orders a history answer previews. Presentation, not policy: no
+# decision reads it, and reading thirty-seven titles back to a customer is the
+# same mistake the clarifying question used to make with thirty-four.
+HISTORY_PREVIEW = 3
 
 
 @dataclass
@@ -199,6 +205,10 @@ class Agent:
         for request in requests:
             if request.intent == "order_status":
                 self._answer_status(request, turn)
+            elif request.intent == "order_history":
+                self._answer_history(turn)
+            elif request.intent == "agent_identity":
+                self._answer_identity(turn)
             elif request.intent == "return_request":
                 self._handle_return(request, turn)
             elif request.intent == "policy_question":
@@ -225,6 +235,59 @@ class Agent:
         # reads as not having listened. Wording only; no verdict reads it.
         facts["already_discussed"] = rule == "order_under_discussion"
         self._narrate("status_report", facts, turn)
+
+    def _answer_history(self, turn: _Turn) -> None:
+        """A question about the account as a whole rather than one order.
+
+        This exists because without it the question has nowhere to land: a
+        hosted model maps "how many books have I ordered" onto order_status,
+        the read falls back to the likeliest single order, and the customer
+        gets a fluent, confident answer to a question they did not ask — with
+        nothing anywhere reporting that anything went wrong.
+
+        A read, scoped by `can_view` like every other. No verdict, no
+        envelope, and nothing here decides anything.
+        """
+        orders = tools.orders_for_customer(self.customer_id)
+        recent = sorted(orders, key=lambda o: o.ordered_on, reverse=True)
+        self.recorder.note(
+            "lookup",
+            {
+                "kind": "order_history",
+                "rule": "every order on this account, newest first",
+                "total": len(orders),
+                "shown": min(len(recent), HISTORY_PREVIEW),
+            },
+        )
+        self._narrate(
+            "order_history",
+            {
+                "total": len(orders),
+                # A preview, not the list. Thirty-seven titles read back is
+                # the same mistake the clarifying question used to make. How
+                # many to show is presentation — no decision reads it, which
+                # is why it is not a policy threshold.
+                "recent": _option_facts(recent[:HISTORY_PREVIEW]),
+                "more": max(0, len(orders) - HISTORY_PREVIEW),
+            },
+            turn,
+        )
+
+    def _answer_identity(self, turn: _Turn) -> None:
+        """Who the agent is, asked directly.
+
+        The name is voice data and travels as a fact on the event rather than
+        being read by the template, so a hosted narrator — which is no longer
+        told to introduce itself — can still answer when it is actually asked.
+        """
+        self.recorder.note(
+            "route", {"branch": "agent_identity", "intents": ["agent_identity"]}
+        )
+        self._narrate(
+            "agent_identity",
+            {"name": AGENT.get("name"), "full_name": AGENT.get("full_name")},
+            turn,
+        )
 
     def _resolve_read_target(
         self, request: Request
