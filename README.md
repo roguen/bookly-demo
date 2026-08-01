@@ -34,7 +34,8 @@ For a live session:
 python3 app.py
 ```
 
-Run the tests (standard library only, no pytest):
+Run the checks (standard library only, no pytest). Fifty of them, and they
+also run from inside the console:
 
 ```bash
 python3 tests.py
@@ -286,6 +287,9 @@ to drift and no place for a vendor to introduce a decision.
 ## Assumptions and limits
 
 - One demo customer is signed in (`C-1001`); authentication is out of scope.
+- The agent's name, its refusal line and the customer's name are profile
+  data. They change what the agent *says* and nothing it decides, which is
+  the line the profile is not allowed to cross.
 - The store and clock are mocked so every run is deterministic.
 - The knowledge base is deliberately small and deliberately has gaps —
   retrieval returning nothing on a gap is designed behavior, not a bug.
