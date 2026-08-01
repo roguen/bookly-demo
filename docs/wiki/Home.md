@@ -26,7 +26,7 @@ No dependencies. No API key. Python 3.9 or later.
 
 ```bash
 python3 app.py --script demo.txt   # four scripted scenarios, in a terminal
-python3 tests.py                   # 78 checks, no pytest
+python3 tests.py                   # 82 checks, no pytest
 python3 harness.py                 # the golden transcripts, and the rubric
 python3 web.py                     # the console, 127.0.0.1:8000
 python3 backoffice.py              # the executing side, 127.0.0.1:8787
@@ -79,7 +79,7 @@ browser to someone who will never read `policy.py`.
 Verified for the phase-2 release: the CLI byte-identical to `v1.0.0`; a clean
 clone makes zero external requests; `stub_receiver.py` untouched and its
 evidence procedure reproduced key for key. Since phase 3 the check count is
-enforced rather than repeated — 78 checks green on 3.9, 3.13 and 3.14, in CI
+enforced rather than repeated — 82 checks green on 3.9, 3.13 and 3.14, in CI
 on every push, and any document that cites a different number fails the
 suite.
 
@@ -152,17 +152,21 @@ finally fires, and stays bounded so a stray question is not a case. The door
 provably swallows nothing answerable: a check asserts every handled question
 still routes to its own intent, never to `out_of_scope`.
 
-### 3. The orchestration layer becoming real
+### 3. The orchestration layer becoming real — closed in v3.4.0
 
-Retries, dead-letter handling, and a durable idempotency store on the
-receiving end — none of which this repo implements, and all of which the
-envelope contract already accommodates. That is *why* the agent emits instead
-of executing.
+Retries, dead-letter handling, and a durable idempotency store on the receiving
+end — all of which the envelope contract was built to accommodate, which is
+*why* the agent emits instead of executing.
 
-The ledger in `backoffice.py` deduplicates in memory and dies with the
-process, exactly like `stub_receiver.py`, and both screens say so rather than
-implying a durability they do not have. Durable dedup is the real receiver's
-job.
+v3.4.0 builds it. A failed hop lands in a durable outbox instead of vanishing;
+`reconcile` (a CLI and a console button) re-delivers pending envelopes with
+bounded backoff, and dead-letters the ones that exhaust their attempts. The
+`backoffice.py` ledger persists and reloads on start, so it dedups across a
+restart — which is what makes a re-delivery safe: the same decision, hashed to
+the same key, is suppressed rather than posted twice. Exactly once, across a
+failure, proven end to end by a check. It is all on the executor's side: the
+agent still emits, never blocks on a dead receiver, and never branches on
+delivery. `stub_receiver.py` stays the in-memory drop-in.
 
 ### Deliberately out of scope
 

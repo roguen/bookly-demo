@@ -13,6 +13,18 @@ queue.json
 policy.json
 policy.json.tmp
 policy.checks.json
+# The delivery outbox and dead-letter store (v3.4.0): undelivered envelopes
+# waiting to be retried, and the ones that gave up. Runtime state like the
+# queue — a clean clone has none. The .checks variants are the suite's paths.
+outbox.json
+outbox.json.tmp
+dead_letter.json
+dead_letter.json.tmp
+outbox.checks.json
+dead_letter.checks.json
+ledger.json
+ledger.json.tmp
+ledger.checks.json
 .claude/
 .DS_Store
 

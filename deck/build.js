@@ -138,7 +138,7 @@ TALKING POINTS
 - policy.py does not import an LLM. That's a structural property you can grep for, not a promise.
 - The whole thing runs with no API key and no dependencies — there's a rules-based stand-in for both model jobs.
 - Verified, not assumed: same script through the regex stand-in and through gpt-5.4-mini, all eight replies worded differently, every decision field identical down to the idempotency key.
-- 78 checks, all dependency-free, and the decision tests never touch a model at all. They run from a terminal, from inside the console, and in CI on 3.9, 3.13 and 3.14.
+- 82 checks, all dependency-free, and the decision tests never touch a model at all. They run from a terminal, from inside the console, and in CI on 3.9, 3.13 and 3.14.
 
 IF ASKED
 
@@ -396,7 +396,7 @@ TALKING POINTS
 - Reason codes are named constants, so every denial is greppable and every escalation is attributable.
 - I ran the demo twice against a live receiver — the second run's envelopes came back flagged as duplicates. That transcript is in evidence/duplicate_receipt.txt.
 - Escalation can only turn a denial into a human review. It can never turn it into an approval.
-- Nothing in the repo retries — retry logic belongs to the orchestration layer. The key is what makes that layer safe to build.
+- Retries live on the executor's side, not in the agent's turn: a failed hop lands in a durable outbox, reconcile re-delivers it, and the key is what makes that safe — a re-delivery hashes to the same key and the receiver suppresses it (v3.4.0).
 
 IF ASKED
 
@@ -599,10 +599,10 @@ const nexts = [
   },
   {
     n: "3",
-    t: "The orchestration layer becoming real",
+    t: "The orchestration layer becoming real — closed",
     flines: 1,
-    b: "Retries, dead-letter handling, and a durable idempotency store on the receiving end — none of which this repo implements.",
-    f: "The envelope contract already accommodates it. That's why the agent emits instead of executing.",
+    b: "Retries, dead-letter handling, and a durable idempotency store on the receiving end — the envelope contract was built to accommodate them.",
+    f: "v3.4.0 builds it: a failed hop waits in a durable outbox, reconcile re-delivers it, the ledger dedups durably across a restart — exactly once across a failure, all on the executor's side, so the agent still just emits.",
     lines: 1,
   },
 ];
@@ -671,11 +671,11 @@ Now, the failure mode I've been selling you all deck is that anything the policy
 
 Adding order_history and agent_identity gave two questions doors, but that was two instances and not the class — you don't close it by adding intents one at a time until you run out of customers. So v3.3.0 closed the class. There's a door for "none of the above": the model classifies a request that fits no known intent as out_of_scope instead of force-fitting it, and the agent names the limit and offers a person rather than answering the nearest thing. A second out-of-scope turn in a row escalates — the dispute pattern applied to scope — so the failure mode I've been selling you finally fires: uncovered reaches a human, bounded, so a stray question isn't a case. And the door swallows nothing answerable — a check asserts every question it does handle still routes to its own intent. The one thing I was careful not to do is let it become a catch-all the model hides behind; that risk is the mirror of force-fitting, and it's bounded structurally, not hoped away.
 
-Third, the orchestration layer becoming real — retries, dead letters, durable idempotency. None of that is in the repo. But the envelope contract already accommodates it, which is why the agent emits instead of executing.
+Third, the orchestration layer becoming real — retries, dead letters, durable idempotency. v3.4.0 built it, because the envelope contract was designed to accommodate it: a failed hop now waits in a durable outbox instead of vanishing, reconcile re-delivers it when the receiver is back, and the ledger dedups durably across a restart — so the refund posts exactly once across a failure, and is dead-lettered for a human if it never gets through. All of it is on the executor's side of the boundary: the agent still emits and never blocks on a dead receiver, which is the whole reason it emits instead of executing.
 
 TALKING POINTS
 
-- 78 checks today, dependency-free, no pytest — running in CI on 3.9, 3.13 and 3.14, with no pip install anywhere in the workflow file.
+- 82 checks today, dependency-free, no pytest — running in CI on 3.9, 3.13 and 3.14, with no pip install anywhere in the workflow file.
 - A scenario is a file. Adding one is adding a fixture and running one command.
 - The rubric grades prose and cannot reach a decision, and that's asserted structurally — the same grep-for-it discipline as "policy.py does not import an LLM".
 - Open defects are listed in the fixture that produces them, with the issue number that will close them. A fix has to delete its own excuse, or the suite fails on the stale acknowledgement.

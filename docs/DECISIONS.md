@@ -1148,7 +1148,7 @@ already makes about thresholds — a document holding its own copy is the same
 failure with a slower fuse — and generation was unavailable because the no-
 build-step constraint does not move, so the registry *is* the centralisation.
 Failing on a removed citation stops the check being made vacuous by deletion.
-The check earned its keep unprompted as the count moved 51 → 52 → 56 → 68 → 69 → 74 → 75 → 78,
+The check earned its keep unprompted as the count moved 51 → 52 → 56 → 68 → 69 → 74 → 75 → 78 → 80 → 81 → 82,
 naming the files to update each time. CI matters because every claim about the
 suite being green was a claim about somebody's laptop, and slide 5 argues that
 agents die from silent regressions when somebody tweaks a prompt on a Thursday
@@ -1744,3 +1744,59 @@ reject a catch-all fallback in entry 14 — isn't this that? You've said uncover
 questions escalate since phase 1 — does that actually fire now?
 
 **Lives in.** `llm.py (VALID_INTENTS, OUT_OF_SCOPE_RE, _intent_of, _out_of_scope, EXTRACTION_SYSTEM_PROMPT, _escalation), agent.py (_is_actionable, _answer_out_of_scope, unhandled_streak, handle_turn), policy.py (UNHANDLED_BEFORE_ESCALATION, unhandled_limit_reached, ESCALATED_UNHANDLED, REASON_CODES), transcripts/out-of-scope-then-escalation.json, tests.py (an_out_of_scope_request_is_recognized_not_force_fit, persistent_out_of_scope_escalates_and_a_handled_turn_resets), issue #39, extends entries 8 and 14`
+
+## 48. The orchestration layer is real now — retries, dead-letter, durable dedup
+
+*v3.4.0*
+
+**Decision.** Reversal. Entries 4, 29 and 41 shipped the receiving end as a deliberate
+stub — "nothing in the repo retries", "deduplication is in memory and dies with
+this process", "durable dedup is the real receiver's job" — because claiming
+durability the demo did not have, on the one screen whose whole job is the
+exactly-once claim, would have been the dishonest thing. v3.4.0 builds it. A
+failed hop no longer records `failed_unreachable` and moves on: the envelope is
+appended to a **durable outbox**, and `reconcile()` re-delivers it with bounded
+exponential backoff, moving one that exhausts `MAX_DELIVERY_ATTEMPTS` to a
+**dead-letter** store for a human. The back-office ledger **persists and reloads
+on start**, so it dedups across a restart. Reconcile is a watched action — a CLI
+and a console button — not an always-running worker.
+
+**Why.** The whole point of the envelope contract from entry 4 was that it "already
+accommodates the retries, dead-lettering and durable idempotency store this repo
+deliberately does not implement." So building them changed no contract: the
+envelope bytes and the idempotency key are byte-identical, which is exactly what
+makes a retry safe — the same decision re-delivered hashes to the same key, and
+the receiver suppresses it. Every piece answers a question a sceptic asks.
+*What happens if the downstream system is down — is the refund lost?* No: the
+decision is audited before the hop as it always was, and now the envelope waits
+in the outbox instead of vanishing, so reconcile finishes the delivery when the
+receiver returns. *Is it double-posted when it comes back?* No: the ledger's
+dedup is durable, so a re-delivery it already recorded — the classic lost-ack
+case — is suppressed rather than executed twice, exactly once across the
+failure, and a check drives the whole loop end to end to prove it. *Doesn't
+retrying put the executor back inside the decision loop?* No: this is all on the
+executor's side of the boundary. The agent still emits, the outbox enqueue is
+transparent to it, the delivery string is still never branched on, and reconcile
+is a separate operation — so the agent's turn never blocks on a dead receiver
+(one fast attempt, then the outbox). No decision logic moved outside policy.py;
+retries and dedup are execution, not verdicts. The honesty move from entry 29 is
+kept by inverting it: the on-screen "in memory; dies with this process" notice
+becomes "durable", because it now is — the claim is real rather than mocked. And
+`stub_receiver.py` stays the in-memory drop-in, so "run one or the other" holds
+and its own smaller honesty is untouched — the real receiver's job is the back
+office's, now done.
+
+**Rejected.** An always-running background worker draining the outbox on a timer — less
+watchable and more concurrency to reason about, so reconcile is a manual action
+you run and see; sqlite for the durable stores — JSON keeps them consistent with
+the queue and the policy document and readable in a terminal during the demo;
+synchronous in-turn retries — they would block a turn while a dead receiver
+timed out, which is the opposite of "emit, don't execute"; making
+`MAX_DELIVERY_ATTEMPTS` authorable — it is an execution knob, and it stayed in
+code; and touching `stub_receiver.py`, which stays simple on purpose.
+
+**Answers the question.** What happens if the downstream system is down — does the refund get lost, or
+double-posted when it comes back? Is the deduplication durable now? Didn't you
+say nothing in the repo retries?
+
+**Lives in.** `envelope.py (outbox, reconcile, _enqueue_outbox, _append_deadletter, MAX_DELIVERY_ATTEMPTS, dead_letters), reconcile.py, backoffice.py (Ledger persistence, ledger_path), web.py (outbox_json, reconcile_json, /api/reconcile, /api/outbox), static/app.js (refreshOutbox), tests.py (a_failed_delivery_waits_in_the_outbox_rather_than_vanishing, reconcile_backs_off_and_dead_letters_after_its_attempts, the_ledger_dedups_durably_across_a_restart, a_reconciled_delivery_posts_exactly_once_across_a_failure), issue #41, supersedes the durability limits in entries 29 and 41`

@@ -33,6 +33,10 @@
                the state of the key, and opens the switcher. -->
           <button type="button" class="provider" id="provider-badge"></button>
           <button type="button" id="replay">Replay</button>
+          <!-- Drain the delivery outbox: retry envelopes a failed hop deferred.
+               Shows a count only when something is waiting; the receiver dedups,
+               so this posts nothing twice. -->
+          <button type="button" id="reconcile" hidden>Reconcile</button>
           <button type="button" id="reset">Reset</button>
         </div>
       </header>

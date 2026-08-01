@@ -14,15 +14,41 @@ import hashlib
 import json
 import os
 import socket
+import threading
+import time
 import urllib.error
 import urllib.request
 import uuid
-from typing import Optional, Tuple
+from pathlib import Path
+from typing import Callable, List, Optional, Tuple
 
 AUDIT_PATH = "audit.log"
 AUDIT_PATH_ENV_VAR = "BOOKLY_AUDIT_PATH"
 WEBHOOK_ENV_VAR = "BOOKLY_WEBHOOK_URL"
 DELIVERY_TIMEOUT_SECONDS = 3
+
+# --- the outbox: a failed delivery is not lost, it waits to be retried ------
+#
+# emit() still audits the decision first and makes one fast attempt, so the
+# turn never blocks. A *failed* attempt does not vanish: the envelope is
+# appended to a durable outbox, and reconcile() re-delivers it later with
+# bounded exponential backoff, moving one that exhausts its attempts to a
+# dead-letter store for a human. This is the executor's job, on the executor's
+# side of the boundary — the agent still emits and never branches on delivery.
+OUTBOX_PATH_ENV_VAR = "BOOKLY_OUTBOX_PATH"
+DEADLETTER_PATH_ENV_VAR = "BOOKLY_DEADLETTER_PATH"
+OUTBOX_PATH = "outbox.json"
+DEADLETTER_PATH = "dead_letter.json"
+# emit() is the first attempt; reconcile() makes the rest, so this is the total
+# across both before an envelope is dead-lettered.
+MAX_DELIVERY_ATTEMPTS = 5
+# Exponential, capped. Enforced by a not-before timestamp compared against the
+# clock reconcile is given — never by sleeping, so a check can step through the
+# backoff with an injected clock and the console never blocks.
+BACKOFF_BASE_SECONDS = 2
+BACKOFF_CAP_SECONDS = 300
+
+_store_lock = threading.RLock()
 
 
 def audit_path() -> str:
@@ -31,6 +57,38 @@ def audit_path() -> str:
     the trail the demo is about to show on screen. Read per call, not at
     import, so a test can redirect it and put it back."""
     return os.environ.get(AUDIT_PATH_ENV_VAR) or AUDIT_PATH
+
+
+def outbox_path() -> str:
+    """Undelivered envelopes waiting to be retried. Read per call so a test or
+    the console can redirect it, exactly like the audit trail."""
+    return os.environ.get(OUTBOX_PATH_ENV_VAR) or OUTBOX_PATH
+
+
+def deadletter_path() -> str:
+    """Envelopes that exhausted their delivery attempts and need a human."""
+    return os.environ.get(DEADLETTER_PATH_ENV_VAR) or DEADLETTER_PATH
+
+
+def _read_json(path: str, default):
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return default
+    return data if isinstance(data, list) else default
+
+
+def _write_json(path: str, data) -> None:
+    target = Path(path)
+    tmp = target.with_name(target.name + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    tmp.replace(target)  # atomic on the same filesystem
+
+
+def _backoff(attempts: int) -> float:
+    return min(
+        BACKOFF_BASE_SECONDS * (2 ** max(0, attempts - 1)), BACKOFF_CAP_SECONDS
+    )
 
 
 def idempotency_key(conversation_id: str, action: str, order_id: str) -> str:
@@ -79,6 +137,11 @@ def emit(
             "delivery": delivery,
         }
     )
+    # A failed hop is not lost. The decision is already audited; the envelope
+    # now waits in the outbox for reconcile() to retry it. The delivery string
+    # is still returned and still never branched on by the agent.
+    if delivery.startswith("failed"):
+        _enqueue_outbox(envelope, delivery)
     return envelope, delivery
 
 
@@ -132,6 +195,11 @@ def emit_resolution(
             "delivery": delivery,
         }
     )
+    # A failed hop is not lost. The decision is already audited; the envelope
+    # now waits in the outbox for reconcile() to retry it. The delivery string
+    # is still returned and still never branched on by the agent.
+    if delivery.startswith("failed"):
+        _enqueue_outbox(envelope, delivery)
     return envelope, delivery
 
 
@@ -158,6 +226,120 @@ def _deliver(envelope: dict) -> str:
         # is noise where "failed_unreachable" is the point: the decision was
         # already made and already audited, and only the hop was lost.
         return "failed_unreachable"
+
+
+def _enqueue_outbox(envelope: dict, delivery: str) -> None:
+    """Record an undelivered envelope so it is retried, not lost. Eligible for
+    the very next reconcile — the backoff starts only after the first retry
+    also fails, so `not_before` begins at 0."""
+    with _store_lock:
+        entries = _read_json(outbox_path(), [])
+        entries.append(
+            {
+                "envelope": envelope,
+                "attempts": 1,  # emit() was the first attempt
+                "last_error": delivery,
+                "not_before": 0.0,
+            }
+        )
+        _write_json(outbox_path(), entries)
+    _audit(
+        {
+            "event": "outbox_enqueued",
+            "envelope_id": envelope["envelope_id"],
+            "idempotency_key": envelope.get("idempotency_key"),
+            "delivery": delivery,
+        }
+    )
+
+
+def reconcile(
+    now: Optional[float] = None,
+    deliver: Optional[Callable[[dict], str]] = None,
+) -> dict:
+    """Retry the outbox. The executor draining its own backlog.
+
+    Each eligible envelope is re-delivered once; on success it leaves the
+    outbox, on failure its attempt count and its next-eligible time move out by
+    the backoff, and once it has used all its attempts it moves to the
+    dead-letter store for a human. Exactly-once is not this function's job —
+    it may re-deliver an envelope the receiver already recorded — but the
+    receiver dedups on the idempotency key, so a duplicate is suppressed rather
+    than executed twice. Deterministic: the clock is injected, and nothing here
+    sleeps.
+    """
+    now = time.time() if now is None else now
+    deliver = deliver or _deliver
+    delivered: List[str] = []
+    dead_lettered: List[str] = []
+    with _store_lock:
+        entries = _read_json(outbox_path(), [])
+        remaining: List[dict] = []
+        for entry in entries:
+            envelope = entry.get("envelope") or {}
+            envelope_id = envelope.get("envelope_id")
+            if now < entry.get("not_before", 0.0):
+                remaining.append(entry)  # still backing off
+                continue
+            result = deliver(envelope)
+            entry["attempts"] = entry.get("attempts", 1) + 1
+            entry["last_error"] = result
+            _audit(
+                {
+                    "event": "redelivery",
+                    "envelope_id": envelope_id,
+                    "idempotency_key": envelope.get("idempotency_key"),
+                    "attempt": entry["attempts"],
+                    "delivery": result,
+                }
+            )
+            if not result.startswith("failed"):
+                delivered.append(envelope_id)
+            elif entry["attempts"] >= MAX_DELIVERY_ATTEMPTS:
+                _append_deadletter(entry, result)
+                dead_lettered.append(envelope_id)
+            else:
+                entry["not_before"] = now + _backoff(entry["attempts"])
+                remaining.append(entry)
+        _write_json(outbox_path(), remaining)
+    return {
+        "delivered": delivered,
+        "dead_lettered": dead_lettered,
+        "pending": len(_read_json(outbox_path(), [])),
+    }
+
+
+def _append_deadletter(entry: dict, result: str) -> None:
+    with _store_lock:
+        dead = _read_json(deadletter_path(), [])
+        dead.append(
+            {
+                "envelope": entry.get("envelope"),
+                "attempts": entry.get("attempts"),
+                "last_error": result,
+            }
+        )
+        _write_json(deadletter_path(), dead)
+    _audit(
+        {
+            "event": "dead_letter",
+            "envelope_id": (entry.get("envelope") or {}).get("envelope_id"),
+            "idempotency_key": (entry.get("envelope") or {}).get(
+                "idempotency_key"
+            ),
+            "attempts": entry.get("attempts"),
+        }
+    )
+
+
+def outbox() -> List[dict]:
+    """The undelivered envelopes waiting, for a surface to show."""
+    return _read_json(outbox_path(), [])
+
+
+def dead_letters() -> List[dict]:
+    """The envelopes that gave up, for a surface to show."""
+    return _read_json(deadletter_path(), [])
 
 
 def _audit(record: dict) -> None:
