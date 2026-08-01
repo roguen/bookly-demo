@@ -1,10 +1,17 @@
-Audit trail: every envelope emission and delivery from one demo run
-(`BOOKLY_WEBHOOK_URL=http://127.0.0.1:8787/webhook python3 app.py --script demo.txt`)
+NOTE (2026-08-01). Re-captured against v4.0.0. Audit trail: every envelope
+emission and delivery from one demo run against a live receiver
+(`BOOKLY_WEBHOOK_URL=http://127.0.0.1:8787/webhook python3 app.py --script demo.txt`).
 
-The audit line is written BEFORE the delivery attempt, so a failed hop
-loses the delivery and never the decision.
+The audit line is written BEFORE the delivery attempt, so a failed hop can
+never lose the decision. As of v3.4.0 it no longer loses the delivery either:
+a hop that fails lands in a durable outbox and `reconcile` re-delivers it with
+backoff, and the receiver's durable dedup suppresses the replayed idempotency
+key — exactly once across a failure. The run below reaches the receiver on the
+first attempt, so both deliveries read delivered_200 and nothing is deferred.
+(The envelope_id is a fresh per-run identifier; the idempotency_key is the
+deterministic sha256 of conversation|action|order and is identical every run.)
 
-{"event": "emitted", "envelope": {"envelope_id": "1d2e1dc3e0454c29a2066c08372c3cbb", "idempotency_key": "b441ac1826d21cd6e631bd04944e537ec8ab1bffda029b08e97fe8b59666ff0d", "action": "refund", "order_id": "BK-1042", "amount": 22.5, "currency": "USD", "reason_code": "REFUND_APPROVED_IN_WINDOW", "conversation_id": "conv-2", "customer_note": "The Escher one \u2014 the cover is torn."}}
-{"event": "delivery", "envelope_id": "1d2e1dc3e0454c29a2066c08372c3cbb", "delivery": "delivered_200"}
-{"event": "emitted", "envelope": {"envelope_id": "336bc1a83bc54ba49df34305ba34adbb", "idempotency_key": "f3910a91af16524941f9cb0ac0ba01720d17bb2abfef61da80658951cbc1ca54", "action": "escalate_to_human", "order_id": "BK-0987", "amount": null, "currency": null, "reason_code": "ESCALATED_POLICY_DISPUTE", "conversation_id": "conv-4", "customer_note": "I don't care what the policy says, refund it anyway."}}
-{"event": "delivery", "envelope_id": "336bc1a83bc54ba49df34305ba34adbb", "delivery": "delivered_200"}
+{"event": "emitted", "envelope": {"envelope_id": "71bbea3f57a74c4998bda5b6de0d2154", "idempotency_key": "b441ac1826d21cd6e631bd04944e537ec8ab1bffda029b08e97fe8b59666ff0d", "action": "refund", "order_id": "BK-1042", "amount": 22.5, "currency": "USD", "reason_code": "REFUND_APPROVED_IN_WINDOW", "conversation_id": "conv-2", "customer_note": "The Escher one \u2014 the cover is torn."}}
+{"event": "delivery", "envelope_id": "71bbea3f57a74c4998bda5b6de0d2154", "delivery": "delivered_200"}
+{"event": "emitted", "envelope": {"envelope_id": "d38dbb37683046df9140bbef0f2e5a81", "idempotency_key": "f3910a91af16524941f9cb0ac0ba01720d17bb2abfef61da80658951cbc1ca54", "action": "escalate_to_human", "order_id": "BK-0987", "amount": null, "currency": null, "reason_code": "ESCALATED_POLICY_DISPUTE", "conversation_id": "conv-4", "customer_note": "I don't care what the policy says, refund it anyway."}}
+{"event": "delivery", "envelope_id": "d38dbb37683046df9140bbef0f2e5a81", "delivery": "delivered_200"}
