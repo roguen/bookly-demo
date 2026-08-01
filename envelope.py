@@ -302,10 +302,11 @@ def reconcile(
                 entry["not_before"] = now + _backoff(entry["attempts"])
                 remaining.append(entry)
         _write_json(outbox_path(), remaining)
+        pending = len(remaining)
     return {
         "delivered": delivered,
         "dead_lettered": dead_lettered,
-        "pending": len(_read_json(outbox_path(), [])),
+        "pending": pending,
     }
 
 

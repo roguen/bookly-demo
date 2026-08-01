@@ -77,6 +77,16 @@ def check(fn):
     return fn
 
 
+# The modules a verdict is allowed to reach through. Two structural checks
+# assert nothing on this path imports the rubric or the queue; naming it once
+# means a module joining the path cannot update one check and silently miss the
+# other.
+DECISION_PATH_MODULES = (
+    "agent.py", "policy.py", "tools.py", "llm.py",
+    "envelope.py", "store.py", "recorder.py", "covers.py",
+)
+
+
 def _extraction_context() -> ExtractionContext:
     titles = tuple(
         o.title
@@ -1428,8 +1438,7 @@ def the_rubric_cannot_reach_a_decision():
     tools, no order record. It cannot tell you whether a refund was correct,
     because it is never told what the refund was.
     """
-    decision_path = ("agent.py", "policy.py", "tools.py", "llm.py",
-                     "envelope.py", "store.py", "recorder.py", "covers.py")
+    decision_path = DECISION_PATH_MODULES
     for name in decision_path:
         source = pathlib.Path(name).read_text(encoding="utf-8")
         for form in ("import rubric", "from rubric import"):
@@ -2210,8 +2219,7 @@ def back_office_returns_nothing_that_reaches_a_verdict():
     the decision path does not import these modules, so there is no code path
     through which a human's override could become an input to a later one.
     """
-    decision_path = ("agent.py", "policy.py", "tools.py", "llm.py",
-                     "envelope.py", "store.py", "recorder.py", "covers.py")
+    decision_path = DECISION_PATH_MODULES
     forbidden = ("queue", "backoffice", "web")
     for name in decision_path:
         source = pathlib.Path(name).read_text(encoding="utf-8")

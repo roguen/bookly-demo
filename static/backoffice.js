@@ -320,7 +320,6 @@ function caseTicket(kase, actions) {
       factOf("CSAT", `${customer.csat} / 5 (${customer.csat_responses})`)
     );
   }
-  if (customer.email) factOf("Email", customer.email, true);
   who.appendChild(facts);
   if (customer.email) {
     who.appendChild(el("p", { class: "order-id", text: customer.email }));

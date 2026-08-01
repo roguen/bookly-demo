@@ -51,8 +51,7 @@ class ExtractionContext:
 class Request:
     """One thing the customer asked for in a turn. A turn can hold several."""
 
-    intent: Optional[str]  # "order_status", "return_request",
-    #                        "policy_question", or None
+    intent: Optional[str]  # one of VALID_INTENTS (below), or None
     order_id: Optional[str] = None
     title_words: Tuple[str, ...] = ()
     option_number: Optional[int] = None
