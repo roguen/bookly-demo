@@ -12,9 +12,10 @@ Three surfaces, one screen each:
   Refund ledger   receives envelopes at /webhook and renders them as ledger
                   lines. A repeated idempotency key is recorded as a
                   suppressed duplicate against the existing line rather than
-                  a second line. Deduplication is in memory and dies with
-                  this process — the same contract stub_receiver.py has, and
-                  the screen says so rather than implying durability.
+                  a second line. Deduplication is durable now (v3.4.0): the
+                  ledger is persisted and reloaded on start, so a replayed or
+                  retried key is suppressed across a restart. stub_receiver.py
+                  stays in-memory; this is the real receiver doing its job.
 
   Agent desk      the human review queue, rendered as a support console. The
                   queue file is the shared state between the two processes.
@@ -72,8 +73,10 @@ MAX_BODY_BYTES = 64 * 1024
 # that says so, on screen, permanently.
 STAND_IN_NOTICE = (
     "Stand-in. These screens are part of the demo, not a product: the ledger "
-    "is in memory and dies with this process, and nothing here returns a "
-    "value that reaches a verdict."
+    "records and displays rather than actually posting a refund to a bank, and "
+    "nothing here returns a value that reaches a verdict. Its deduplication is "
+    "durable now — it survives a restart, suppressing a replayed key on the "
+    "idempotency key rather than executing it twice."
 )
 
 
@@ -81,19 +84,44 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
-class Ledger:
-    """Refund lines, deduplicated by idempotency key.
+def ledger_path() -> str:
+    """Where the durable ledger persists. Read per call so a check can point it
+    at its own store, exactly like the audit trail and the queue."""
+    return os.environ.get("BOOKLY_LEDGER_PATH") or str(REPO / "ledger.json")
 
-    In memory, on purpose. Durable deduplication is the real receiver's job;
-    claiming it here would misrepresent what the demo proves. The screen says
-    the same thing, so nobody has to read this docstring to find out.
+
+class Ledger:
+    """Refund lines, deduplicated by idempotency key — durably (v3.4.0).
+
+    Persisted to disk and reloaded on start, so a replayed or retried envelope
+    is suppressed on its key across a restart of this process, rather than
+    executed a second time. This is what makes reconcile() safe: the sender may
+    re-deliver an envelope it is unsure landed, and the receiver posts it once.
+    It still records and displays rather than actually posting a refund to a
+    bank — that is the part still simulated — but the exactly-once contract is
+    now real, not a diagram.
     """
 
     def __init__(self, now: Callable[[], str] = _utc_now) -> None:
         self._now = now
         self._lock = threading.Lock()
-        self._lines: List[dict] = []
-        self._by_key: Dict[str, dict] = {}
+        self._lines: List[dict] = self._load()
+        self._by_key: Dict[str, dict] = {
+            line["idempotency_key"]: line for line in self._lines
+        }
+
+    def _load(self) -> List[dict]:
+        try:
+            data = json.loads(Path(ledger_path()).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return []
+        return data if isinstance(data, list) else []
+
+    def _persist(self) -> None:
+        path = Path(ledger_path())
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps(self._lines, indent=2), encoding="utf-8")
+        tmp.replace(path)  # atomic on the same filesystem
 
     def receive(self, envelope: dict) -> dict:
         key = envelope.get("idempotency_key") or ""
@@ -109,6 +137,7 @@ class Ledger:
                         "envelope_id": envelope.get("envelope_id"),
                     }
                 )
+                self._persist()
                 return {"duplicate": True, "line": dict(existing)}
             line = {
                 "received_at": self._now(),
@@ -127,6 +156,7 @@ class Ledger:
             }
             self._lines.append(line)
             self._by_key[key] = line
+            self._persist()
             return {"duplicate": False, "line": dict(line)}
 
     def lines(self) -> List[dict]:
@@ -147,9 +177,10 @@ class Ledger:
             "suppressed_duplicates": suppressed,
             "amount_posted": round(posted, 2),
             "durability": (
-                "in memory; dies with this process, exactly like "
-                "stub_receiver.py. Durable deduplication is the real "
-                "receiver's job."
+                "durable: persisted to disk and reloaded on start, so a "
+                "replayed or retried envelope is suppressed on its idempotency "
+                "key across a restart, not executed twice. stub_receiver.py "
+                "stays in-memory; this is the real receiver's job, now done."
             ),
         }
 

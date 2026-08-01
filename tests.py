@@ -2252,8 +2252,17 @@ class _BackOffice:
     def __init__(self):
         self.server = None
         self.url = None
+        self._dir = None
+        self._saved_ledger = None
 
     def __enter__(self):
+        # Each back office gets its own durable ledger, so two checks do not
+        # see each other's posted lines — the same isolation the console gets
+        # for its queue, now that the ledger persists rather than dying with
+        # the object.
+        self._saved_ledger = os.environ.get("BOOKLY_LEDGER_PATH")
+        self._dir = tempfile.mkdtemp(prefix="bookly-ledger-")
+        os.environ["BOOKLY_LEDGER_PATH"] = os.path.join(self._dir, "ledger.json")
         self.server = backoffice.BackOfficeServer(
             ("127.0.0.1", 0), backoffice.BackOfficeHandler,
             backoffice.BackOffice(),
@@ -2267,6 +2276,10 @@ class _BackOffice:
     def __exit__(self, *_exc):
         self.server.shutdown()
         self.server.server_close()
+        os.environ.pop("BOOKLY_LEDGER_PATH", None)
+        if self._saved_ledger is not None:
+            os.environ["BOOKLY_LEDGER_PATH"] = self._saved_ledger
+        shutil.rmtree(self._dir, ignore_errors=True)
 
     def get(self, path):
         return json.loads(
@@ -2373,10 +2386,45 @@ def ledger_records_one_line_for_a_repeated_key():
     assert ledger["summary"]["suppressed_duplicates"] == 1
     # The money posted once, not twice.
     assert ledger["summary"]["amount_posted"] == ORDERS["BK-1042"].price_paid
-    # And the screen says the deduplication is in memory rather than implying
-    # a durability this does not have.
-    assert "in memory" in ledger["summary"]["durability"]
+    # And the screen says the deduplication is durable now — it survives a
+    # restart, which is what makes reconcile's re-deliveries safe.
+    assert "durable" in ledger["summary"]["durability"]
     assert ledger["stand_in"]
+
+
+@check
+def the_ledger_dedups_durably_across_a_restart():
+    """A replayed or retried envelope is suppressed on its key even after the
+    receiver process restarts — which is what makes reconcile() safe to
+    re-deliver. The old ledger died with the process; this one reloads its state
+    from disk and still posts exactly once."""
+    saved = os.environ.get("BOOKLY_LEDGER_PATH")
+    directory = tempfile.mkdtemp(prefix="bookly-ledger-")
+    os.environ["BOOKLY_LEDGER_PATH"] = os.path.join(directory, "ledger.json")
+    try:
+        envelope = {
+            "idempotency_key": "durable-key-1", "action": "refund",
+            "amount": 22.5, "order_id": "BK-1042", "envelope_id": "e1",
+        }
+        first = backoffice.Ledger()
+        assert first.receive(envelope)["duplicate"] is False
+        assert len(first.lines()) == 1
+        # The receiver restarts: a fresh Ledger reloads from disk, so the same
+        # key arriving again — a retry, a replay — is a duplicate, not a second
+        # posted line.
+        restarted = backoffice.Ledger()
+        assert len(restarted.lines()) == 1
+        again = restarted.receive(dict(envelope, envelope_id="e2"))
+        assert again["duplicate"] is True
+        assert len(restarted.lines()) == 1
+        assert restarted.summary()["suppressed_duplicates"] == 1
+        assert restarted.summary()["amount_posted"] == 22.5  # posted once
+        assert "durable" in restarted.summary()["durability"]
+    finally:
+        os.environ.pop("BOOKLY_LEDGER_PATH", None)
+        if saved is not None:
+            os.environ["BOOKLY_LEDGER_PATH"] = saved
+        shutil.rmtree(directory, ignore_errors=True)
 
 
 @check
