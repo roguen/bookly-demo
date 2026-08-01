@@ -95,6 +95,30 @@ def escalate_if_disputed(verdict: Verdict, prior_denials: int) -> Verdict:
     return verdict
 
 
+def returnable_now(
+    orders: list, customer_id: str, today: date
+) -> list:
+    """The orders a return could actually be granted on.
+
+    Offering a customer a book and then refusing it is the confidently
+    unhelpful move: it costs them a turn to be told no. So the clarifying
+    question asks about what this module would say yes to, which is why this
+    filters through `decide_return` rather than applying a rule of its own.
+    There is no new threshold here and there must not be one — a second
+    definition of "returnable" would be a second place the answer could
+    change.
+
+    An order outside the window is still perfectly reachable: the customer
+    names it, and gets a denial with a reason code, exactly as before. What
+    changes is only what the agent volunteers.
+    """
+    return [
+        order
+        for order in orders
+        if decide_return(order, customer_id, today).decision == "approve_refund"
+    ]
+
+
 def can_view(order: Optional[Order], customer_id: str) -> bool:
     """A customer may see only their own orders. Applies to reads too."""
     return order is not None and order.customer_id == customer_id

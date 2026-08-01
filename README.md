@@ -348,6 +348,14 @@ to drift and no place for a vendor to introduce a decision.
 ## Assumptions and limits
 
 - One demo customer is signed in (`C-1001`); authentication is out of scope.
+- The customer has 37 orders, 34 of them delivered, and the clarifying
+  question offers the two a return could actually be granted on. Offering a
+  book and then refusing it costs the customer a turn to be told no, so
+  `policy.returnable_now` filters candidates through `decide_return` rather
+  than applying a rule of its own — there is deliberately no second definition
+  of "returnable". An order outside the window is still perfectly reachable by
+  name, and still answers with a reason code; what changed is only what the
+  agent volunteers.
 - The agent's name, its persona, the published service levels and the
   customer's name are profile data. They change what the agent *says* and
   nothing it decides, which is the line the profile is not allowed to cross.

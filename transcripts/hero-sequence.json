@@ -20,7 +20,7 @@
     },
     {
       "customer": "I'd like to return a book.",
-      "reply": "Sure — which book would you like to return? 1) Godel, Escher, Bach (BK-1042)  2) The Pragmatic Programmer (BK-0987)",
+      "reply": "Sure — which book would you like to return? 1) Godel, Escher, Bach (BK-1042)  2) Exhalation (BK-2131)",
       "stages": [
         "extract",
         "route",

@@ -330,21 +330,34 @@ class Agent:
         if self.focus_order_id and self.denials.get(self.focus_order_id):
             self._finish_return(tools.get_order(self.focus_order_id), turn)
             return
-        candidates = tools.delivered_orders(self.customer_id)
+        # What the agent volunteers is what policy would actually grant. A
+        # customer with thirty-four delivered books does not want thirty-four
+        # of them read back, and being offered a book only to be refused it
+        # costs them a turn to be told no.
+        delivered = tools.delivered_orders(self.customer_id)
+        candidates = policy.returnable_now(delivered, self.customer_id, TODAY)
         needs_choice = policy.should_clarify(len(candidates))
         self.recorder.note(
             "candidates",
             {
-                "source": "delivered_orders",
+                "source": "returnable_now",
+                "delivered_count": len(delivered),
                 "candidate_ids": [o.order_id for o in candidates],
                 "count": len(candidates),
                 "should_clarify": needs_choice,
-                "rule": "ask only when more than one order could take the "
-                        "write",
+                "rule": "offer what policy would approve, then ask only when "
+                        "more than one of those could take the write",
             },
         )
         if not candidates:
-            self._narrate("no_returnable_orders", {}, turn)
+            self._narrate(
+                "no_returnable_orders",
+                {
+                    "delivered_count": len(delivered),
+                    "window_days": policy.RETURN_WINDOW_DAYS,
+                },
+                turn,
+            )
         elif needs_choice:
             self._defer_which_order(candidates, turn)
         else:

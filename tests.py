@@ -154,10 +154,33 @@ def profile_load_preserves_the_fixtures():
         assert actual == expected, (order_id, actual, expected)
     assert TODAY == date(2026, 7, 30)
     assert CURRENT_CUSTOMER_ID == "C-1001"
+    # The record and the store agree about how many orders exist. They did not
+    # for a while — the card said 37 and five were loaded — and an agent that
+    # can only discuss five of the thirty-seven it claims is the same
+    # confidently-wrong sentence one level up.
+    orders = tools.orders_for_customer(CURRENT_CUSTOMER_ID)
+    assert len(orders) == store_module.CUSTOMER.orders_placed == 37
+    # A history that size is the point: it is what makes offering every
+    # delivered order as a choice absurd, and what the returnable_now filter
+    # exists to answer.
+    delivered = tools.delivered_orders(CURRENT_CUSTOMER_ID)
+    assert len(delivered) == 34
     # The clarifying question numbers its options in store order, so the
-    # order the profile lists them in is load bearing, not incidental.
-    assert [o.order_id for o in tools.delivered_orders(CURRENT_CUSTOMER_ID)] \
-        == ["BK-1042", "BK-0987"]
+    # order the profile lists them in is load bearing, not incidental — and
+    # what it offers is what policy would actually approve, not everything
+    # that was ever delivered.
+    returnable = policy.returnable_now(delivered, CURRENT_CUSTOMER_ID, TODAY)
+    assert [o.order_id for o in returnable] == ["BK-1042", "BK-2131"]
+    # Every one of them is genuinely grantable, which is the whole claim.
+    for order in returnable:
+        verdict = policy.decide_return(order, CURRENT_CUSTOMER_ID, TODAY)
+        assert verdict.decision == "approve_refund", order.order_id
+    # And an out-of-window order is still reachable by name — it is dropped
+    # from what the agent volunteers, not from what it will discuss.
+    assert "BK-0987" not in [o.order_id for o in returnable]
+    assert policy.decide_return(
+        ORDERS["BK-0987"], CURRENT_CUSTOMER_ID, TODAY
+    ).reason_code == policy.RETURN_WINDOW_EXPIRED
 
 
 @check

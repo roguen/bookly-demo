@@ -60,6 +60,166 @@
         "format": "Paperback",
         "published": 1988,
         "pages": 368
+      },
+      "Neuromancer": {
+        "format": "paperback",
+        "published": 1984,
+        "pages": 271
+      },
+      "Hyperion": {
+        "format": "paperback",
+        "published": 1989,
+        "pages": 482
+      },
+      "The Dispossessed": {
+        "format": "paperback",
+        "published": 1974,
+        "pages": 387
+      },
+      "Foundation": {
+        "format": "paperback",
+        "published": 1951,
+        "pages": 255
+      },
+      "Ubik": {
+        "format": "paperback",
+        "published": 1969,
+        "pages": 224
+      },
+      "Do Androids Dream of Electric Sheep?": {
+        "format": "paperback",
+        "published": 1968,
+        "pages": 210
+      },
+      "Solaris": {
+        "format": "paperback",
+        "published": 1961,
+        "pages": 204
+      },
+      "Roadside Picnic": {
+        "format": "paperback",
+        "published": 1972,
+        "pages": 209
+      },
+      "The Stars My Destination": {
+        "format": "paperback",
+        "published": 1956,
+        "pages": 258
+      },
+      "A Fire Upon the Deep": {
+        "format": "paperback",
+        "published": 1992,
+        "pages": 613
+      },
+      "Blindsight": {
+        "format": "paperback",
+        "published": 2006,
+        "pages": 384
+      },
+      "Rendezvous with Rama": {
+        "format": "paperback",
+        "published": 1973,
+        "pages": 243
+      },
+      "Childhood's End": {
+        "format": "paperback",
+        "published": 1953,
+        "pages": 224
+      },
+      "The Forever War": {
+        "format": "paperback",
+        "published": 1974,
+        "pages": 278
+      },
+      "Ringworld": {
+        "format": "paperback",
+        "published": 1970,
+        "pages": 342
+      },
+      "Kindred": {
+        "format": "paperback",
+        "published": 1979,
+        "pages": 287
+      },
+      "Dawn": {
+        "format": "paperback",
+        "published": 1987,
+        "pages": 264
+      },
+      "Parable of the Sower": {
+        "format": "paperback",
+        "published": 1993,
+        "pages": 329
+      },
+      "The Sparrow": {
+        "format": "paperback",
+        "published": 1996,
+        "pages": 408
+      },
+      "Annihilation": {
+        "format": "paperback",
+        "published": 2014,
+        "pages": 195
+      },
+      "Ancillary Justice": {
+        "format": "paperback",
+        "published": 2013,
+        "pages": 386
+      },
+      "A Canticle for Leibowitz": {
+        "format": "paperback",
+        "published": 1959,
+        "pages": 338
+      },
+      "Flowers for Algernon": {
+        "format": "paperback",
+        "published": 1966,
+        "pages": 311
+      },
+      "The Man in the High Castle": {
+        "format": "paperback",
+        "published": 1962,
+        "pages": 274
+      },
+      "The Fifth Season": {
+        "format": "paperback",
+        "published": 2015,
+        "pages": 468
+      },
+      "Spin": {
+        "format": "paperback",
+        "published": 2005,
+        "pages": 453
+      },
+      "Perdido Street Station": {
+        "format": "paperback",
+        "published": 2000,
+        "pages": 710
+      },
+      "Gateway": {
+        "format": "paperback",
+        "published": 1977,
+        "pages": 313
+      },
+      "Lord of Light": {
+        "format": "paperback",
+        "published": 1967,
+        "pages": 296
+      },
+      "Excession": {
+        "format": "paperback",
+        "published": 1996,
+        "pages": 451
+      },
+      "Hothouse": {
+        "format": "paperback",
+        "published": 1962,
+        "pages": 272
+      },
+      "Exhalation": {
+        "format": "hardcover",
+        "published": 2019,
+        "pages": 350
       }
     },
     "generic_words_note": "Words that can appear inside a book title and still be ordinary support English. A customer saying 'I'd like to return a book' is not naming The Book of the New Sun. Listing a word here means it can never identify a title on its own; policy.title_reference_is_strong decides how much is enough. Curate this per catalog — it is the readable half of the guard, and the rule in policy.py is the half that holds when this list is wrong.",
@@ -188,6 +348,326 @@
       "price_paid": 24.75,
       "status": "cancelled",
       "ordered_on": "2026-06-11"
+    },
+    {
+      "order_id": "BK-2100",
+      "customer_id": "C-1001",
+      "title": "Neuromancer",
+      "author": "William Gibson",
+      "price_paid": 14.99,
+      "status": "delivered",
+      "ordered_on": "2024-09-02",
+      "delivered_on": "2024-09-06"
+    },
+    {
+      "order_id": "BK-2101",
+      "customer_id": "C-1001",
+      "title": "Hyperion",
+      "author": "Dan Simmons",
+      "price_paid": 16.5,
+      "status": "delivered",
+      "ordered_on": "2024-10-14",
+      "delivered_on": "2024-10-18"
+    },
+    {
+      "order_id": "BK-2102",
+      "customer_id": "C-1001",
+      "title": "The Dispossessed",
+      "author": "Ursula K. Le Guin",
+      "price_paid": 15.99,
+      "status": "delivered",
+      "ordered_on": "2024-11-08",
+      "delivered_on": "2024-11-12"
+    },
+    {
+      "order_id": "BK-2103",
+      "customer_id": "C-1001",
+      "title": "Foundation",
+      "author": "Isaac Asimov",
+      "price_paid": 12.99,
+      "status": "delivered",
+      "ordered_on": "2024-12-01",
+      "delivered_on": "2024-12-05"
+    },
+    {
+      "order_id": "BK-2104",
+      "customer_id": "C-1001",
+      "title": "Ubik",
+      "author": "Philip K. Dick",
+      "price_paid": 13.25,
+      "status": "delivered",
+      "ordered_on": "2025-01-06",
+      "delivered_on": "2025-01-10"
+    },
+    {
+      "order_id": "BK-2105",
+      "customer_id": "C-1001",
+      "title": "Do Androids Dream of Electric Sheep?",
+      "author": "Philip K. Dick",
+      "price_paid": 13.99,
+      "status": "delivered",
+      "ordered_on": "2025-01-27",
+      "delivered_on": "2025-01-31"
+    },
+    {
+      "order_id": "BK-2106",
+      "customer_id": "C-1001",
+      "title": "Solaris",
+      "author": "Stanislaw Lem",
+      "price_paid": 14.25,
+      "status": "delivered",
+      "ordered_on": "2025-02-11",
+      "delivered_on": "2025-02-15"
+    },
+    {
+      "order_id": "BK-2107",
+      "customer_id": "C-1001",
+      "title": "Roadside Picnic",
+      "author": "Arkady Strugatsky",
+      "price_paid": 15.75,
+      "status": "delivered",
+      "ordered_on": "2025-03-03",
+      "delivered_on": "2025-03-07"
+    },
+    {
+      "order_id": "BK-2108",
+      "customer_id": "C-1001",
+      "title": "The Stars My Destination",
+      "author": "Alfred Bester",
+      "price_paid": 13.5,
+      "status": "delivered",
+      "ordered_on": "2025-03-19",
+      "delivered_on": "2025-03-23"
+    },
+    {
+      "order_id": "BK-2109",
+      "customer_id": "C-1001",
+      "title": "A Fire Upon the Deep",
+      "author": "Vernor Vinge",
+      "price_paid": 18.99,
+      "status": "delivered",
+      "ordered_on": "2025-04-07",
+      "delivered_on": "2025-04-11"
+    },
+    {
+      "order_id": "BK-2110",
+      "customer_id": "C-1001",
+      "title": "Blindsight",
+      "author": "Peter Watts",
+      "price_paid": 16.99,
+      "status": "delivered",
+      "ordered_on": "2025-04-22",
+      "delivered_on": "2025-04-26"
+    },
+    {
+      "order_id": "BK-2111",
+      "customer_id": "C-1001",
+      "title": "Rendezvous with Rama",
+      "author": "Arthur C. Clarke",
+      "price_paid": 13.99,
+      "status": "delivered",
+      "ordered_on": "2025-05-12",
+      "delivered_on": "2025-05-16"
+    },
+    {
+      "order_id": "BK-2112",
+      "customer_id": "C-1001",
+      "title": "Childhood's End",
+      "author": "Arthur C. Clarke",
+      "price_paid": 12.5,
+      "status": "delivered",
+      "ordered_on": "2025-06-02",
+      "delivered_on": "2025-06-06"
+    },
+    {
+      "order_id": "BK-2113",
+      "customer_id": "C-1001",
+      "title": "The Forever War",
+      "author": "Joe Haldeman",
+      "price_paid": 15.25,
+      "status": "delivered",
+      "ordered_on": "2025-06-23",
+      "delivered_on": "2025-06-27"
+    },
+    {
+      "order_id": "BK-2114",
+      "customer_id": "C-1001",
+      "title": "Ringworld",
+      "author": "Larry Niven",
+      "price_paid": 14.75,
+      "status": "delivered",
+      "ordered_on": "2025-07-14",
+      "delivered_on": "2025-07-18"
+    },
+    {
+      "order_id": "BK-2115",
+      "customer_id": "C-1001",
+      "title": "Kindred",
+      "author": "Octavia E. Butler",
+      "price_paid": 16.25,
+      "status": "delivered",
+      "ordered_on": "2025-08-04",
+      "delivered_on": "2025-08-08"
+    },
+    {
+      "order_id": "BK-2116",
+      "customer_id": "C-1001",
+      "title": "Dawn",
+      "author": "Octavia E. Butler",
+      "price_paid": 15.5,
+      "status": "delivered",
+      "ordered_on": "2025-08-25",
+      "delivered_on": "2025-08-29"
+    },
+    {
+      "order_id": "BK-2117",
+      "customer_id": "C-1001",
+      "title": "Parable of the Sower",
+      "author": "Octavia E. Butler",
+      "price_paid": 17.0,
+      "status": "delivered",
+      "ordered_on": "2025-09-15",
+      "delivered_on": "2025-09-19"
+    },
+    {
+      "order_id": "BK-2118",
+      "customer_id": "C-1001",
+      "title": "The Sparrow",
+      "author": "Mary Doria Russell",
+      "price_paid": 17.99,
+      "status": "delivered",
+      "ordered_on": "2025-10-06",
+      "delivered_on": "2025-10-10"
+    },
+    {
+      "order_id": "BK-2119",
+      "customer_id": "C-1001",
+      "title": "Annihilation",
+      "author": "Jeff VanderMeer",
+      "price_paid": 14.0,
+      "status": "delivered",
+      "ordered_on": "2025-10-27",
+      "delivered_on": "2025-10-31"
+    },
+    {
+      "order_id": "BK-2120",
+      "customer_id": "C-1001",
+      "title": "Ancillary Justice",
+      "author": "Ann Leckie",
+      "price_paid": 16.99,
+      "status": "delivered",
+      "ordered_on": "2025-11-17",
+      "delivered_on": "2025-11-21"
+    },
+    {
+      "order_id": "BK-2121",
+      "customer_id": "C-1001",
+      "title": "A Canticle for Leibowitz",
+      "author": "Walter M. Miller Jr.",
+      "price_paid": 15.99,
+      "status": "delivered",
+      "ordered_on": "2025-12-08",
+      "delivered_on": "2025-12-12"
+    },
+    {
+      "order_id": "BK-2122",
+      "customer_id": "C-1001",
+      "title": "Flowers for Algernon",
+      "author": "Daniel Keyes",
+      "price_paid": 13.75,
+      "status": "delivered",
+      "ordered_on": "2025-12-29",
+      "delivered_on": "2026-01-02"
+    },
+    {
+      "order_id": "BK-2123",
+      "customer_id": "C-1001",
+      "title": "The Man in the High Castle",
+      "author": "Philip K. Dick",
+      "price_paid": 14.5,
+      "status": "delivered",
+      "ordered_on": "2026-01-19",
+      "delivered_on": "2026-01-23"
+    },
+    {
+      "order_id": "BK-2124",
+      "customer_id": "C-1001",
+      "title": "The Fifth Season",
+      "author": "N. K. Jemisin",
+      "price_paid": 17.5,
+      "status": "delivered",
+      "ordered_on": "2026-02-09",
+      "delivered_on": "2026-02-13"
+    },
+    {
+      "order_id": "BK-2125",
+      "customer_id": "C-1001",
+      "title": "Spin",
+      "author": "Robert Charles Wilson",
+      "price_paid": 16.0,
+      "status": "delivered",
+      "ordered_on": "2026-03-02",
+      "delivered_on": "2026-03-06"
+    },
+    {
+      "order_id": "BK-2126",
+      "customer_id": "C-1001",
+      "title": "Perdido Street Station",
+      "author": "China Mieville",
+      "price_paid": 19.99,
+      "status": "delivered",
+      "ordered_on": "2026-03-23",
+      "delivered_on": "2026-03-27"
+    },
+    {
+      "order_id": "BK-2127",
+      "customer_id": "C-1001",
+      "title": "Gateway",
+      "author": "Frederik Pohl",
+      "price_paid": 14.25,
+      "status": "delivered",
+      "ordered_on": "2026-04-13",
+      "delivered_on": "2026-04-17"
+    },
+    {
+      "order_id": "BK-2128",
+      "customer_id": "C-1001",
+      "title": "Lord of Light",
+      "author": "Roger Zelazny",
+      "price_paid": 15.0,
+      "status": "delivered",
+      "ordered_on": "2026-05-04",
+      "delivered_on": "2026-05-08"
+    },
+    {
+      "order_id": "BK-2129",
+      "customer_id": "C-1001",
+      "title": "Excession",
+      "author": "Iain M. Banks",
+      "price_paid": 17.25,
+      "status": "delivered",
+      "ordered_on": "2026-05-25",
+      "delivered_on": "2026-05-29"
+    },
+    {
+      "order_id": "BK-2130",
+      "customer_id": "C-1001",
+      "title": "Hothouse",
+      "author": "Brian Aldiss",
+      "price_paid": 13.0,
+      "status": "delivered",
+      "ordered_on": "2026-06-15",
+      "delivered_on": "2026-06-19"
+    },
+    {
+      "order_id": "BK-2131",
+      "customer_id": "C-1001",
+      "title": "Exhalation",
+      "author": "Ted Chiang",
+      "price_paid": 26.0,
+      "status": "delivered",
+      "ordered_on": "2026-07-18",
+      "delivered_on": "2026-07-22"
     }
   ],
   "articles": [

@@ -408,9 +408,16 @@ def _kb_miss(f: dict) -> str:
 
 
 def _no_returnable_orders(f: dict) -> str:
-    return (
-        "I don't see any delivered orders on your account to return."
-    )
+    # "No delivered orders" would be false for a customer with thirty-four of
+    # them and simply none still inside the window. Say the true thing.
+    if f.get("delivered_count"):
+        return (
+            "None of your delivered orders are still inside the %d-day return "
+            "window, so there's nothing I can start a return on. If you think "
+            "one should qualify, tell me which and I'll take a look."
+            % f["window_days"]
+        )
+    return "I don't see any delivered orders on your account to return."
 
 
 def _help(f: dict) -> str:
