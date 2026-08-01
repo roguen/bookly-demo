@@ -160,10 +160,14 @@ writes its audit line, and records `failed_unreachable`.
 It binds the same port `stub_receiver.py` does, on purpose — it is a drop-in
 receiver. Run one or the other.
 
-Every back-office surface carries a permanent stand-in chip. The ledger's
-deduplication is in memory and dies with the process, the same contract the
-stub has, and the screen says so rather than implying durability it does not
-have.
+Every back-office surface carries a permanent stand-in chip: it records and
+displays rather than actually posting a refund to a bank. But as of v3.4.0 the
+ledger's deduplication is **durable** — persisted to disk and reloaded on start,
+so a replayed or retried envelope is suppressed on its idempotency key across a
+restart, not executed twice. That is what makes the outbox safe: a failed hop
+lands in a durable outbox, `reconcile` (a CLI and a console button) re-delivers
+it when the receiver is back, and one that exhausts its attempts dead-letters
+for a human. `stub_receiver.py` stays the in-memory drop-in.
 
 ### The agent's voice
 

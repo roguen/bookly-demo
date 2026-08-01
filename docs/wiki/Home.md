@@ -152,17 +152,21 @@ finally fires, and stays bounded so a stray question is not a case. The door
 provably swallows nothing answerable: a check asserts every handled question
 still routes to its own intent, never to `out_of_scope`.
 
-### 3. The orchestration layer becoming real
+### 3. The orchestration layer becoming real — closed in v3.4.0
 
-Retries, dead-letter handling, and a durable idempotency store on the
-receiving end — none of which this repo implements, and all of which the
-envelope contract already accommodates. That is *why* the agent emits instead
-of executing.
+Retries, dead-letter handling, and a durable idempotency store on the receiving
+end — all of which the envelope contract was built to accommodate, which is
+*why* the agent emits instead of executing.
 
-The ledger in `backoffice.py` deduplicates in memory and dies with the
-process, exactly like `stub_receiver.py`, and both screens say so rather than
-implying a durability they do not have. Durable dedup is the real receiver's
-job.
+v3.4.0 builds it. A failed hop lands in a durable outbox instead of vanishing;
+`reconcile` (a CLI and a console button) re-delivers pending envelopes with
+bounded backoff, and dead-letters the ones that exhaust their attempts. The
+`backoffice.py` ledger persists and reloads on start, so it dedups across a
+restart — which is what makes a re-delivery safe: the same decision, hashed to
+the same key, is suppressed rather than posted twice. Exactly once, across a
+failure, proven end to end by a check. It is all on the executor's side: the
+agent still emits, never blocks on a dead receiver, and never branches on
+delivery. `stub_receiver.py` stays the in-memory drop-in.
 
 ### Deliberately out of scope
 
