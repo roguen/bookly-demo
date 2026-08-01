@@ -136,16 +136,19 @@ strictly worse than the current honest miss.
 
 ### 2. Questions the intent surface does not model
 
-"How many books have I ordered?" has no intent to land in, so a hosted model
-maps it to the nearest one — `order_status` — and the agent answers about a
+"How many books have I ordered?" had no intent to land in, so a hosted model
+mapped it to the nearest one — `order_status` — and the agent answered about a
 single order, fluently and confidently.
 
 The failure mode this build advertises is that anything the policy engine does
-not cover escalates instead of resolving. Here it never fires, and not because
-the guard is broken: the state machine received an intent it recognised and
-handled it correctly. The gap is not that the agent was wrong. It is that it
-could not tell it was out of scope, which is a harder problem than adding an
-intent.
+not cover escalates instead of resolving. It never fired, and not because the
+guard is broken: the state machine received an intent it recognised and
+handled it correctly.
+
+`order_history` and `agent_identity` now exist, so those two questions have
+doors. That is two instances, not the class. The gap was never that the agent
+was wrong — it is that it could not tell it was out of scope, and adding
+intents one at a time does not fix that.
 
 ### 3. The orchestration layer becoming real
 

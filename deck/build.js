@@ -593,8 +593,8 @@ const nexts = [
     n: "2",
     t: "Questions the intent surface doesn't model",
     flines: 2,
-    b: "\"How many books have I ordered?\" has no intent to land in, so a model maps it to the nearest one — and answers confidently.",
-    f: "Escalating instead of guessing is this build's failure mode, and here it never fires: from the state machine's view nothing went wrong. The gap is not that the agent was wrong. It is that it could not tell it was out of scope.",
+    b: "\"How many books have I ordered?\" had no intent to land in — so a model mapped it to the nearest one, and answered confidently.",
+    f: "I added that door. But this build's failure mode — escalate rather than guess — never fired: the state machine got an intent it recognised. The gap is not that the agent was wrong; it is that it could not tell it was out of scope.",
     lines: 1,
   },
   {
@@ -665,7 +665,11 @@ Then three things still ahead.
 
 Embeddings for policy retrieval — behind the same hard floor, unchanged. The matching is weak; the floor is load-bearing. Better retrieval with no floor just gives you a more convincing wrong article.
 
-Second, and this is the one I find most interesting: questions the intent surface doesn't model. Ask this agent how many books you've ordered and there is no intent for it to land in, so a hosted model maps it to the nearest one — order status — and it answers about a single order, fluently and confidently. Now, the failure mode I've been selling you all deck is that anything the policy engine doesn't cover escalates instead of resolving. Here it doesn't fire. Not because the guard is broken, but because nothing looked wrong: the state machine got an intent it recognised and handled it correctly. The gap isn't that the agent was wrong. It's that it couldn't tell it was out of scope. That's a harder problem than adding an intent, and I'd rather name it than paper over it.
+Second, and this is the one I find most interesting: questions the intent surface doesn't model. Someone asked this agent how many books they'd ordered. There was no intent for that to land in, so the hosted model mapped it to the nearest one — order status — and it answered about a single order, fluently and confidently. Three times.
+
+Now, the failure mode I've been selling you all deck is that anything the policy engine doesn't cover escalates instead of resolving. Here it didn't fire. Not because the guard is broken — because nothing looked wrong. The state machine got an intent it recognised and handled it correctly.
+
+I added the door. That specific question works now. But I want to be careful about what I've actually fixed, because it's two instances and not the class. The gap was never that the agent was wrong. It's that it couldn't tell it was out of scope, and you don't solve that by adding intents one at a time until you run out of customers.
 
 Third, the orchestration layer becoming real — retries, dead letters, durable idempotency. None of that is in the repo. But the envelope contract already accommodates it, which is why the agent emits instead of executing.
 
