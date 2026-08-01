@@ -118,7 +118,13 @@ class Agent:
             self._process(requests, turn)
         self._ask_deferred_question(turn)
         if not turn.replies:
-            self._narrate("help", {}, turn)
+            # Nothing in the turn was actionable. If the customer asked for
+            # something out of scope, say so honestly rather than answering the
+            # nearest thing; a bare greeting or filler gets the opener.
+            if any(r.intent == "out_of_scope" for r in requests):
+                self._answer_out_of_scope(turn)
+            else:
+                self._narrate("help", {}, turn)
         return TurnResult(" ".join(turn.replies), turn.envelopes)
 
     # -- the intent-switching precedence rule -----------------------------
@@ -133,7 +139,7 @@ class Agent:
             others = [r for r in requests if not _is_answer(r)]
             self._note_route("continuation", asked_about, answers)
             self._continue_procedure(answers, others, turn)
-        elif any(r.intent for r in requests):
+        elif any(_is_actionable(r) for r in requests):
             self._note_route("topic_change", asked_about, requests)
             self._switch_topic(requests, turn)
         else:
@@ -334,6 +340,20 @@ class Agent:
             {"name": AGENT.get("name"), "full_name": AGENT.get("full_name")},
             turn,
         )
+
+    def _answer_out_of_scope(self, turn: _Turn) -> None:
+        """The customer asked for something the agent does not cover.
+
+        Knowing it does not know is the whole point: rather than mapping the
+        request onto the nearest intent and answering confidently, the agent
+        names the limit and offers a person. The recognition is recorded on the
+        deterministic side — the branch is `out_of_scope`, not a guess dressed
+        as an answer.
+        """
+        self.recorder.note(
+            "route", {"branch": "out_of_scope", "intents": ["out_of_scope"]}
+        )
+        self._narrate("out_of_scope", {}, turn)
 
     def _resolve_read_target(
         self, request: Request
@@ -776,6 +796,15 @@ def _is_answer(request: Request) -> bool:
         None,
         "return_request",
     )
+
+
+def _is_actionable(request: Request) -> bool:
+    """A request the agent can actually do something with — a handled intent,
+    not a bare out-of-scope note or empty filler. `out_of_scope` is a real
+    intent for the trace, but it names the *absence* of anything to do, so for
+    routing it behaves like no intent at all: an out-of-scope aside mid-
+    clarification re-asks the question rather than abandoning it."""
+    return request.intent is not None and request.intent != "out_of_scope"
 
 
 def _order_facts(order: Order) -> dict:
