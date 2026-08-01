@@ -20,8 +20,8 @@ Three surfaces, one screen each:
   Agent desk      the human review queue, rendered as a support console. The
                   queue file is the shared state between the two processes.
 
-  Policy viewer   the CX policy the agent enforces, and — new in v3.2.0 — an
-                  editor for it. The three thresholds are authored here: each
+  Policy editor   the CX policy the agent enforces, and — new in v3.2.0 —
+                  authorable. The three thresholds are authored here: each
                   change is validated against its bounds, carries who changed it
                   and why, is appended to a log that is never overwritten, and
                   is read live by the console. The decision structure and the

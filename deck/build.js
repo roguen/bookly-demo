@@ -661,9 +661,9 @@ And it caught two I did not know about — a persona line firing twice in consec
 
 Every one of those is prose. Not one of them moved a decision. That is the argument for the harness, made by the harness.
 
-Then three things still ahead.
+Then the three roadmap items I flagged here. One is still parked; the other two I've since built — and both are worth a minute, because each was a deliberate refusal to mock that I turned into the real thing once it could be real.
 
-Embeddings for policy retrieval — behind the same hard floor, unchanged. The matching is weak; the floor is load-bearing. Better retrieval with no floor just gives you a more convincing wrong article.
+Embeddings for policy retrieval — still parked, behind the same hard floor. The matching is weak; the floor is load-bearing. Better retrieval with no floor just gives you a more convincing wrong article.
 
 Second, and this is the one I find most interesting: questions the intent surface doesn't model. Someone asked this agent how many books they'd ordered. There was no intent for that to land in, so the hosted model mapped it to the nearest one — order status — and it answered about a single order, fluently and confidently. Three times.
 

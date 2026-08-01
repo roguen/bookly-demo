@@ -37,23 +37,31 @@ An intent surface is a boundary too. A question with no intent to land in
 does not fail loudly — a hosted model maps it to the nearest one it has, and
 the answer comes back fluent and wrong. `order_history` and `agent_identity`
 exist because "how many books have I ordered" and "what is your name" were
-being answered as if they were "where is my order".
+being answered as if they were "where is my order". And `out_of_scope` is the
+door for the rest: a request that fits no known intent is declined honestly and
+offered a person, not force-fit onto the nearest one — and a second out-of-scope
+turn in a row escalates, so uncovered questions reach a human, bounded.
 
 **4. `tools.py` — facts and records out, never prose.**
 Order lookups scoped to the signed-in customer, and retrieval with a hard
 floor: fewer than two whole-word keyword matches, or a tie, returns nothing.
 A miss is an honest "I don't know", never the nearest article.
 
-**5. `envelope.py` — deciding and executing are different systems.**
+**5. `envelope.py` + `reconcile.py` — deciding and executing are different systems.**
 The agent emits an envelope; it never calls a refund API. The idempotency key
 is `sha256(conversation|action|order_id)`, so replays and retries collapse to
-one write downstream. The audit line is written before the network hop — a
-failed delivery can lose the delivery, never the decision.
+one write downstream. The audit line is written before the network hop, so a
+failed delivery never loses the decision — and it no longer loses the delivery
+either: the envelope waits in a durable outbox, and `reconcile()` re-delivers it
+with backoff (dead-lettering after its attempts), which the receiver dedups on
+the key. Exactly once, across a failure.
 
 **6. `store.py`, `app.py`, `stub_receiver.py` — mocks and shell.**
 `store.py` holds the records and the frozen clock (determinism lives with the
-mock data). `app.py` is presentation only. `stub_receiver.py` is the
-orchestration layer's end of the webhook, demonstrating duplicate suppression.
+mock data). `app.py` is presentation only. `stub_receiver.py` is the simple
+in-memory drop-in for the webhook, demonstrating duplicate suppression; the real
+orchestration end — durable dedup, the outbox, reconcile — is `backoffice.py`
+plus `reconcile.py`, run instead of the stub.
 
 **7. `tests.py` — the claims, executable.**
 82 dependency-free checks, runnable from a terminal or from inside the
@@ -103,15 +111,20 @@ same `handle_turn` the CLI calls and computes nothing. `queue.py` is where
 escalations land, append-only, so an override adds an event and never edits
 the verdict. `backoffice.py` runs on a second port on purpose — the agent
 claims to emit rather than execute, and you can kill the receiver mid-turn to
-prove it. `covers.py` draws jackets from a hash. `profiles/*.json` holds the
-dataset, so re-skinning is a data edit.
+prove it, then reconcile and watch the refund post exactly once. It also holds
+the two surfaces built later: the **policy editor**, where a non-engineer
+authors the CX thresholds through a validated, append-only document the console
+reads live, and the **durable ledger** that dedups across a restart.
+`covers.py` draws a jacket from a hash, and serves a hand-drawn override from
+`covers/` when one exists. `profiles/*.json` holds the dataset, so re-skinning
+is a data edit.
 
 Read them in that order if you want the console; skip all of them if you only
 want the argument, because none of them can change an outcome.
 
 ## If you want the reasoning
 
-`docs/DECISIONS.md` is the decision record: 41 entries, each with the
+`docs/DECISIONS.md` is the decision record: 51 entries, each with the
 reasoning, the alternative that was rejected, and where the decision is
 enforced. Several record a diagnosis that turned out to be wrong and was
 corrected — kept deliberately, because "we thought X, it was actually Y" is

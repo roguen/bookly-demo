@@ -1,6 +1,6 @@
 # Run of show
 
-A twelve-minute demo for two people at once: a VP of Customer Experience, who
+A fifteen-minute demo for two people at once: a VP of Customer Experience, who
 wants to know whether this is safe to put in front of customers, and a VP of
 Engineering, who wants to know whether the safety is real or asserted.
 
@@ -45,6 +45,11 @@ Point at the left column. This is what support sees about the customer, and
 what the *customer* sees about themselves — no lifetime value, no CSAT, no
 reason codes. That is the whole customer view: it is not a CSS toggle over
 hidden data, those fields are not rendered.
+
+The dressing is drawn, not downloaded: the open-book wordmark in the corner and
+the cover on the order card are hand-authored flat SVG that `covers.py` composes
+from the catalogue — no image files, no fonts, no licences, nothing fetched. It
+survives the same content-security policy everything else here does.
 
 **For the VP of CX:** this is an ordinary support conversation. Nothing on
 this screen is unusual yet.
@@ -138,7 +143,7 @@ make it *do* things.
 
 ---
 
-## 5. A human takes over · 6:30–8:30
+## 5. A human takes over · 6:30–8:00
 
 > Actually I also want to return The Pragmatic Programmer, order BK-0987.
 
@@ -195,9 +200,76 @@ the idempotency contract, demonstrated by repeating yourself.
 
 ---
 
-## 7. Kill the back office · 8:30–9:30
+## 7. Author the policy — the only other way to move a verdict · 8:00–9:30
 
-The strongest twenty seconds in the demo, and it costs one command.
+Turn 4 just denied **The Pragmatic Programmer**, `RETURN_WINDOW_EXPIRED` —
+delivered outside the 30-day window. The customer's pressure did not move it,
+and *nothing a customer types ever will*. So what does? One thing, and it lives
+somewhere a customer can never reach.
+
+Switch to the back office at `:8787` → **Policy editor**. Three thresholds,
+each purple, each with the reason it exists. The first is `return_window_days`,
+currently **30**.
+
+**For the VP of CX:** this is the number your team owns. Change it to **90** —
+put your name in, and write why ("holiday returns extension"). Both are
+required; the editor validates against a declared range (0–365) and refuses
+anything outside it. Press **Record change**. Your edit appears in the history
+below the field with your name, the time, and the reason — appended, not
+overwriting the 30 that was there.
+
+Now go back to the console and ask about **The Pragmatic Programmer** again.
+This time it **approves** — `REFUND_APPROVED_IN_WINDOW`. Same order, same
+customer, same code path. Only the authored number changed, and the console
+read it live.
+
+**For the VP of Engineering:** three things did not happen. No one edited
+`policy.py`. No one talked the model into it. And the number the verdict read
+was validated on the way in, so a non-engineer can tune the policy but cannot
+push it out of range — and cannot touch the two floors underneath, the ones
+that stop a confidently wrong answer, which stay in code and take an engineer.
+Authoring is a *document*, not a conversation: attributed, bounded, append-only,
+and the only path to that flip.
+
+Then set it back to **30** — same form, a reason like "extension ended." Watch
+the history: it now shows **two** events, 30→90 and 90→30. The revert did not
+erase the extension; it is a later event that supersedes it, exactly like a
+queue override. (This is also why Reset leaves it alone: an authored policy is a
+durable record, not demo scratch — so undo the change the way an auditor would,
+and the next run starts from 30 again.)
+
+---
+
+## 8. When it doesn't know · 9:30–10:30
+
+> Can you recommend a good mystery novel?
+
+The agent does not guess. It says what it cannot do and offers a person — no
+invented recommendation, no nearest-intent answer dressed up as help.
+
+**For the VP of Engineering:** watch the trace — the branch is `out_of_scope`,
+a *decision* on the deterministic side, not the model free-associating. A
+hosted model's instinct is to map any question to the nearest thing it knows;
+here a request that fits no known intent is classified as out of scope and
+handled by code. Point out that a check proves the door swallows nothing
+answerable: every handled question still routes to its own intent.
+
+Now ask a second unanswerable thing:
+
+> What do you personally think is the best sci-fi book?
+
+It escalates — a human colleague picks it up. A single stray question is not a
+case, but a second out-of-scope turn in a row is the dispute pattern applied to
+scope: uncovered questions reach a person, bounded.
+
+**For the VP of CX:** the honest "I can't help with that, here's a human" is the
+answer that never costs you a confidently wrong one.
+
+---
+
+## 9. Kill the back office, then reconcile · 10:30–12:15
+
+The strongest ninety seconds in the demo, and it costs two commands.
 
 ```bash
 # in the back office terminal
@@ -207,21 +279,30 @@ Ctrl-C
 Then, in the console, ask for a refund again.
 
 It still decides. It still audits. The delivery reads
-**`failed_unreachable`**.
+**`failed_unreachable`**, and the envelope lands in a **durable outbox** — the
+**Reconcile** button appears with a count.
 
 **For the VP of Engineering:** the audit line is written *before* the network
-hop. A failed delivery can lose the delivery. It can never lose the decision.
-That is the difference between a system you can reconcile and one you cannot.
+hop, so a failed delivery can never lose the decision. And it no longer loses
+the *delivery* either — that is what v3.4.0 added. The envelope is waiting.
 
-Restart it and keep going in the same conversation:
+Restart the receiver:
 
 ```bash
 python3 backoffice.py
 ```
 
+Press **Reconcile**. The outbox drains: the pending envelope is re-delivered
+with backoff, and the receiver — whose dedup is durable and survived the
+restart — recognises the idempotency key and posts the refund **exactly once**.
+Run it twice and the second lands as a suppressed duplicate, not a second
+refund. That is the whole orchestration claim, proven by breaking it and
+watching it heal: a decision the network could not lose, and a delivery the
+system finished on its own.
+
 ---
 
-## 8. Provider, and the checks · 9:30–11:30
+## 10. Provider, and the checks · 12:15–14:00
 
 Click the provider badge. It says **rules-based stand-in** — no API key, no
 dependencies, which is why this runs on a plane.
@@ -260,7 +341,7 @@ Point at four of them:
 
 ---
 
-## 9. Close · 11:30–12:00
+## 11. Close · 14:00–14:30
 
 > The model never decides. It only converses.
 >
@@ -279,7 +360,9 @@ eligibility unit-testable.
 
 **"What if the policy engine doesn't cover a case?"**
 It escalates instead of resolving. That is the intended failure mode, not a
-gap. You saw it happen twice.
+gap. You saw it three ways: a customer disputing a denial, a question the intent
+surface does not model, and — the honest one — a request classified `out_of_scope`
+rather than force-fit onto the nearest intent.
 
 **"Why not a supervisor agent?"**
 Orchestration here is a state machine on purpose. A supervisor is another
@@ -287,9 +370,12 @@ component that can be confidently wrong, placed exactly where being wrong is
 expensive.
 
 **"Could a non-engineer change the return window?"**
-Not in this build, and the policy viewer says so on screen. Making procedures
-authorable by non-engineers is the next order of problem; mocking it would be
-the one dishonest thing here.
+Yes — you saw it in Section 7. The three CX thresholds are authored from the
+**Policy editor** in the back office: each change validated against its bounds,
+attributed, appended to a log the console reads live, and the *only* thing that
+moves a verdict besides the code itself. What is still out of scope is authoring
+new *rules* — a procedure DSL, not just tuning numbers — and the two floors that
+stop a confidently wrong answer stay in `policy.py` and take an engineer.
 
 **"How long would this take for our data?"**
 The dataset is `profiles/bookly.json` — customer, orders, catalog, knowledge

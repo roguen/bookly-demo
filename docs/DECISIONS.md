@@ -1899,3 +1899,50 @@ architecture, when the point is that it did not have to.
 for a release that ships no new verdict?
 
 **Lives in.** `CLAUDE.md (version and plan), the v3.1.0–v3.5.0 tags and their entries (42–49), issue #45`
+
+## 51. Cutting the release needed a full prose sweep, not the per-branch edits
+
+*v4.0.0*
+
+**Decision.** Before the v4.0.0 tag was allowed to stand, the whole project was
+evaluated for alignment — code, README, READING_GUIDE, DEMO, deck, wiki,
+evidence, and the issues. The code was clean and green; the narrative artifacts
+were not. They had drifted, all in one direction: the prose still described as
+*future* several capabilities the v3.1→v3.5 arc had since built. The fix was a
+single alignment sweep across every document, plus two artifact corrections that
+were not documentation at all: the back office's third surface still read
+**Policy viewer** when v3.2.0 had made it an editor (now **Policy editor**), and
+the stand-in evidence (`demo_transcript.txt`, `audit_trail.txt`) was re-captured
+against v4.0.0 while the hosted evidence kept its dated provenance note rather
+than being re-billed (entry 40). DEMO.md gained the three beats the arc earned —
+authoring a threshold to flip a real verdict, declining then escalating an
+out-of-scope turn, and reconciling a failed delivery to exactly-once — and grew
+from twelve minutes to fifteen.
+
+**Why.** On a multi-sub-version arc, per-branch doc edits are targeted at the
+branch, so each one leaves the surrounding prose describing the *old* world. The
+drift is therefore systematic and always the same shape — "future tense" left
+standing over shipped work — and the only reliable catch is a full sweep at the
+release cut. The one part that did not drift was the check count, because
+`documents_state_the_actual_check_count` (entry 33) fails the suite when a number
+goes stale. Nothing does that for a prose claim that a capability is unbuilt,
+which is exactly why that class of drift survived to the release gate. The most
+telling instance: the evidence NOTEs on the hosted transcripts had gone
+*backwards* — written the same day the persona was added, they promised "run it
+today and you get 'I'm sorry Dave'", but the persona was struck hours later
+(entry 18), so by the release the plain phrasing they showed matched the live
+agent again and the note contradicted its own file.
+
+**Rejected.** Tagging on green checks alone (the checks never saw the prose
+drift, by construction); re-billing the hosted-provider runs to refresh their
+transcripts, when a dated provenance note is the standing answer (entry 40);
+and adding a doc-linter check for "future tense" claims, which would guard a few
+phrasings and miss the class — the sweep-at-release discipline is the real
+control, recorded here rather than automated.
+
+**Answers the question.** The build is green and the architecture is sound — why
+does cutting the release still take a full read of every document? Because green
+checks prove the code, and nothing but a human read proves the story the
+documents tell about it is still true.
+
+**Lives in.** `every narrative doc (README, READING_GUIDE, DEMO, docs/wiki/Home), static/backoffice.html + backoffice.py (Policy editor), evidence/, issue #47`

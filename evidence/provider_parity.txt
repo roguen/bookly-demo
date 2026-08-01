@@ -1,7 +1,9 @@
-NOTE (2026-07-31). Captured before the agent was given a name and a
-refusal line (profiles/bookly.json -> agent.*). The stand-in's wording on the
-refusal turns below is therefore the earlier, plainer phrasing; run it again
-today and those lines open with "I'm sorry Dave, I can't do that."
+NOTE. Captured 2026-07-31, before the agent was briefly given a persona (a name
+and an "I'm sorry Dave, I can't do that." refusal line, profiles/bookly.json ->
+agent.*). That persona was struck the same day in DECISION #18, so the plain
+refusal wording below matches the current v4.0.0 agent again — re-confirmed
+2026-08-01. The persona only ever reached the narration prompt, never the
+decision layer, which is why nothing moved when it arrived or when it left.
 
 Nothing this file evidences has moved. It is a record of DECISION parity —
 every reason code, amount and idempotency key — and the persona is voice

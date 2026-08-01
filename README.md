@@ -225,6 +225,17 @@ knowledge base could only reach it by matching on "you" and "your", which
 makes "how long do you keep your records?" retrieve the identity article, and
 no answer is worth reopening the retrieval floor.
 
+**A door for "none of the above".** Modelling answerable questions one intent
+at a time closes instances, not the class — the agent still could not *tell*
+when a question was outside what it handles. `out_of_scope` is the door: a
+request that fits no known intent is classified out of scope rather than
+force-fit onto the nearest one, and the agent names its limit and offers a
+person instead of answering the closest thing it can. A single out-of-scope
+turn declines; a second in a row escalates — the dispute pattern applied to
+scope — so the advertised "uncovered reaches a human" finally fires without
+opening a case for every stray question. A check asserts the door swallows
+nothing answerable: every handled question still routes to its own intent.
+
 **A follow-up is answered as a follow-up.** Asking "when will it arrive?"
 right after asking where an order is has the same answer, and the agent says
 so as a continuation rather than repeating the sentence you just read. The
@@ -318,11 +329,13 @@ The Anthropic provider is implemented but has **not** been exercised — API
 access is billed separately from a claude.ai subscription, so a Pro or Max
 plan alone will not authorize those calls.
 
-One honest limit: the parity run proves the *decisions* are
-provider-independent, not the *prose*. On the knowledge-base miss the
-hosted model dropped the offer of a human agent that the template makes
-every time. No decision moved, but that is the kind of drift a graded
-narration rubric would catch, and this repo does not have one yet.
+The parity run proves the *decisions* are provider-independent, not the
+*prose*. On the knowledge-base miss the hosted model dropped the offer of a
+human agent that the template makes every time. No decision moved — and that is
+exactly the drift the graded narration rubric catches: `rubric.py` fails that
+recorded hosted reply while the template's own miss grades clean
+(`the_rubric_catches_the_recorded_hosted_drift`). Prose is the one place that
+failure exists, and the rubric is what pins it.
 
 To use a hosted model instead:
 
@@ -365,11 +378,12 @@ to drift and no place for a vendor to introduce a decision.
 | `store.py`            | records loaded from a profile, frozen clock         |
 | `recorder.py`         | the interface observes a turn, never joins it       |
 | `queue.py`            | a human resolves; the verdict is never edited       |
-| `covers.py`           | cover art with no files, downloads, or licences     |
+| `covers.py` + `covers/`| drawn cover art — a hand-drawn jacket per book, a generated fallback, no downloads or licences |
 | `web.py`              | the console's API — it decides nothing              |
-| `backoffice.py`       | receiving is a different process from deciding      |
+| `backoffice.py`       | receiving is a different process; durable ledger + policy editor |
+| `reconcile.py`        | re-delivers a failed hop; dead-letters after its attempts |
 | `app.py`              | the CLI shell                                       |
-| `stub_receiver.py`    | the orchestration layer's end of the webhook        |
+| `stub_receiver.py`    | the simple in-memory drop-in for the webhook        |
 | `tests.py`            | the claims, executable                              |
 | `harness.py`          | a scenario is a file, replayed and compared         |
 | `rubric.py`           | prose is graded; grading decides nothing            |
