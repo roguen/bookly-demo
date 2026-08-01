@@ -1856,3 +1856,46 @@ the technical debt this pass was for? Why keep some duplication and remove other
 duplication?
 
 **Lives in.** `static/app.js (exported helpers, resolveForm), static/backoffice.js (imports), envelope.py (_dispatch), web.py (DATA_PATHS, DELIVERY_STATES), tests.py (_temp_env_paths, _webhook, _recording_provider, DECISION_PATH_MODULES), issue #43`
+
+## 50. v4.0.0 is cut — the same architecture, refined until it reads as a product
+
+*v4.0.0*
+
+**Decision.** v4.0.0 is the release, cut once every item on the version-3 plan had landed:
+cosmetics (v3.1.0), authorable policy parameters (v3.2.0), the agent knowing
+when it does not know (v3.3.0), the orchestration layer becoming real (v3.4.0),
+and a full code review (v3.5.0). No code changes with this tag — it is the
+marker for the finished build, not a new feature. The version-3 architecture is
+unchanged: the language model still never decides, `policy.py` is still the only
+place a verdict is computed, and the demo envelopes are byte-identical to
+v3.0.0, asserted at every step across all five sub-versions.
+
+**Why.** A major version says "this is the shape it was meant to have", and that is
+what the arc produced rather than any single commit. Two things about how it got
+here are worth keeping. First, the sub-versions were not additive features
+bolted on — three of them *reversed* a limit v3.0.0 had shipped **as a
+deliberate refusal to mock**: the read-only policy viewer became a real,
+validated, append-only editor (entry 46); the in-memory ledger became durable,
+with retries and dead-letters and exactly-once across a failure (entry 48); and
+the unmodelled-question class the intent surface left open got its door (entry
+47). "Refuse to mock it, then build it for real when it can be real" is the
+through-line, and it is why the reversals read as the plan working rather than
+the plan changing. Second, every reversal was recorded against the entry it
+overturned rather than editing history, so this file still contains the honest
+account of what was stubbed and why, next to what replaced it — which is the
+same discipline the whole repo rests on. What stays out is stated, not hidden:
+embeddings for retrieval remain parked behind the no-dependencies constraint,
+and the review (entry 49) kept some duplication on purpose. There is no
+CHANGELOG, on purpose: the git tags, this file, the commit messages, and the
+closed issues already are the record, and a separate copy would be exactly the
+duplicated-fact problem the count-citation check (entry 33) exists to prevent.
+
+**Rejected.** Cutting v4.0.0 before the plan finished (the gate was explicit — all of them
+land first); a CHANGELOG.md duplicating what the tags, issues, and this file
+already carry; and treating a major bump as a licence to change the
+architecture, when the point is that it did not have to.
+
+**Answers the question.** What does v4.0.0 add over v3.0.0 if no decision changed? Why a major version
+for a release that ships no new verdict?
+
+**Lives in.** `CLAUDE.md (version and plan), the v3.1.0–v3.5.0 tags and their entries (42–49), issue #45`

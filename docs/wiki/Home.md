@@ -117,6 +117,30 @@ the suite, so a fix has to delete its own excuse.
 
 ---
 
+## The version-3 arc, and `v4.0.0`
+
+Phase 3 shipped as `v3.0.0`, then was refined across five sub-versions — each its
+own branch, PR, and tag, and each holding the claim: the model never decides, and
+every demo envelope stays byte-identical.
+
+- **`v3.1.0`** — cosmetics: a drawn open-book wordmark and a hand-drawn cover per
+  book, honest jackets computed with no files or licences.
+- **`v3.2.0`** — authorable policy: the CX thresholds are edited from the back
+  office through a validated, append-only document the console reads live.
+- **`v3.3.0`** — the agent knowing when it does not know: an out-of-scope door,
+  and uncovered questions that finally reach a human, bounded.
+- **`v3.4.0`** — the orchestration layer becoming real: a durable outbox, retries
+  with backoff, dead-letters, and durable dedup — exactly once across a failure.
+- **`v3.5.0`** — a full code review: consolidate the accumulated duplication,
+  keep the deliberate module-independence.
+
+**`v4.0.0`** is the release, cut once all five landed. Three of them turned an
+earlier *deliberate refusal to mock* into the real thing — the policy editor, the
+durable receiver, the out-of-scope door — which is the arc in one sentence:
+refuse to fake it, then build it when it can be real.
+
+---
+
 ## Known future phases
 
 These are in priority order, and they are the same ones the deck argues on its

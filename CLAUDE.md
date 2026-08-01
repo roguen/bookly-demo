@@ -1,7 +1,7 @@
 # Bookly — standing context
 
-A support agent for a fictional bookstore. `main` is at **v3.5.0** — every
-sub-version below has landed, so v4.0.0 can be cut.
+A support agent for a fictional bookstore. `main` is at **v4.0.0** — the whole
+version-3 arc has landed and the release is cut.
 
 ## The claim, which does not change
 
@@ -56,21 +56,22 @@ every stale line.
 
 ## Versioning and branching
 
-We stay on **version 3** until all of these land. Each is its own branch and
-sub-version, one item per branch:
+The version-3 arc is **complete** and **v4.0.0 is cut**. Each item was its own
+branch and sub-version, one item per branch, and all have landed:
 
-| | |
-| --- | --- |
-| `v3.1.0` | cosmetics — logo, cover art, visual dressing |
-| `v3.2.0` | authorable procedures |
-| `v3.3.0` | the agent knowing when it does not know |
-| `v3.4.0` | the orchestration layer becoming real |
-| `v3.5.0` | full code review — simplicity, clarity, technical debt |
-| `v4.0.0` | cut only when all of the above have landed |
+| | | |
+| --- | --- | --- |
+| `v3.1.0` | cosmetics — logo, cover art, visual dressing | ✅ |
+| `v3.2.0` | authorable policy parameters | ✅ |
+| `v3.3.0` | the agent knowing when it does not know | ✅ |
+| `v3.4.0` | the orchestration layer becoming real | ✅ |
+| `v3.5.0` | full code review — simplicity, clarity, technical debt | ✅ |
+| `v4.0.0` | the release, cut once all of the above landed | ✅ |
 
-Branch `claude/bookly-v3.N-<topic>`, PR into `main`, merge with `--merge`,
-then tag. Embeddings for retrieval is **parked** — it collides with the
-no-dependencies constraint and would have to be opt-in like the hosted model.
+Any further work keeps the same workflow: branch `claude/bookly-vN.M-<topic>`,
+PR into `main`, merge with `--merge`, then tag. Embeddings for retrieval remain
+**parked** — they collide with the no-dependencies constraint and would have to
+be opt-in like the hosted model.
 
 ## Working style
 
