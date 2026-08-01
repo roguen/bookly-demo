@@ -27,6 +27,7 @@ No dependencies. No API key. Python 3.9 or later.
 ```bash
 python3 app.py --script demo.txt   # four scripted scenarios, in a terminal
 python3 tests.py                   # 60 checks, no pytest
+python3 harness.py                 # the golden transcripts, and the rubric
 python3 web.py                     # the console, 127.0.0.1:8000
 python3 backoffice.py              # the executing side, 127.0.0.1:8787
 ```
@@ -75,37 +76,55 @@ browser to someone who will never read `policy.py`.
 - **The demo dataset in `profiles/`**, so re-skinning for another company is a
   data edit measured in minutes.
 
-Verified for the phase-2 release: 60 checks green on Python 3.9.6 and 3.14.2;
-the CLI byte-identical to `v1.0.0`; a clean clone makes zero external
-requests; `stub_receiver.py` untouched and its evidence procedure reproduced
-key for key.
+Verified for the phase-2 release: the CLI byte-identical to `v1.0.0`; a clean
+clone makes zero external requests; `stub_receiver.py` untouched and its
+evidence procedure reproduced key for key. Since phase 3 the check count is
+enforced rather than repeated — 60 checks green on 3.9, 3.13 and 3.14, in CI
+on every push, and any document that cites a different number fails the
+suite.
+
+---
+
+### Phase 3 — the eval harness
+
+Phase 3 adds **no decision logic either**. It pins the part of the build that
+was never pinned: the prose.
+
+- **A scenario is a file.** `transcripts/*.json`, replayed by `harness.py`
+  through the same `handle_turn` the CLI and the console call. Each fixture
+  pins the reply verbatim, every envelope decision field including the literal
+  idempotency key, and the sequence of trace stages — so a change that moved a
+  decision to the model side of the boundary fails a test rather than a review.
+- **A graded narration rubric.** `rubric.py` is handed the event kind, the
+  facts the agent gave the narrator, and the text that came back. Nothing else
+  — no `policy`, no `store`, no order record — which is why grading cannot
+  become deciding, and a check asserts that structurally in both directions.
+- **A regression run**, on 3.9, 3.13 and 3.14, with no `pip install` anywhere
+  in the workflow file, plus a job that boots a clean clone and reads a record
+  out of the console.
+- **A hosted mode that is not the default path.** `--provider openai` compares
+  every decision field exactly and grades the prose instead of comparing it
+  verbatim, because a hosted model wording things differently *is* the parity
+  claim rather than a defect.
+
+The rubric found four defects on its first run, offline, on the stand-in —
+every one of them in prose, and not one of them able to move a verdict, which
+is precisely why no existing check saw them. The measured knowledge-base drift
+it was built for is now a check that runs against the recorded hosted reply
+with no billed call. Open defects are listed in the fixture that produces
+them with the issue that will close them, and a stale acknowledgement fails
+the suite, so a fix has to delete its own excuse.
 
 ---
 
 ## Known future phases
 
-These are in priority order, and they are the same three the deck argues on
-its final slide. Deliberately, **the console is not among them** — that slide
+These are in priority order, and they are the same ones the deck argues on its
+final slide. Deliberately, **the console is not among them** — that slide
 argues correctness and durability, and a presentation-layer item would dilute
 it. The GUI is the medium, not the roadmap.
 
-### 1. The eval harness, first — *a regression risk, not a backlog item*
-
-Golden transcripts, a graded rubric for narration quality, and a regression
-run on every prompt change, wired into CI.
-
-Support agents do not die from a bad launch demo. They die from a silent
-regression after somebody tweaks a prompt on a Thursday. `tests.py` is the
-seed — 60 checks today, including a two-turn conversation asserted end to end
-on exact strings and envelope fields. Growing it means fixtures per scenario
-and a rubric the prose is graded against, not just the decisions.
-
-There is already one measured gap this would catch: on a knowledge-base miss,
-the hosted model dropped the offer of a human agent that the template makes
-every time. No decision moved, but that is exactly the drift a rubric exists
-to find.
-
-### 2. Embeddings for policy retrieval — behind the same hard floor
+### 1. Embeddings for policy retrieval — behind the same hard floor
 
 Keyword matching is the weakest part of the build. The *floor* is the part
 that matters, and it does not move: below two whole-word matches, or on a tie,
@@ -114,6 +133,19 @@ retrieval returns nothing rather than the nearest article.
 Swapping the matcher is a contained change. Removing the floor would
 reintroduce the confident-wrong-article failure at higher fidelity, which is
 strictly worse than the current honest miss.
+
+### 2. Questions the intent surface does not model
+
+"How many books have I ordered?" has no intent to land in, so a hosted model
+maps it to the nearest one — `order_status` — and the agent answers about a
+single order, fluently and confidently.
+
+The failure mode this build advertises is that anything the policy engine does
+not cover escalates instead of resolving. Here it never fires, and not because
+the guard is broken: the state machine received an intent it recognised and
+handled it correctly. The gap is not that the agent was wrong. It is that it
+could not tell it was out of scope, which is a harder problem than adding an
+intent.
 
 ### 3. The orchestration layer becoming real
 

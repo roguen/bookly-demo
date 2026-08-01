@@ -1814,7 +1814,20 @@ DOCUMENTS_CITING_THE_COUNT = (
 # numeral must sit immediately before "check"/"checks", with at most one
 # adjective between them, so a version string like "3.9.6" in the same
 # sentence is not mistaken for a count.
-COUNT_CLAIM_RE = re.compile(r"\b(\d+)\s+(?:[a-z][a-z-]*\s+)?checks?\b")
+#
+# The adjective slot needs a guard. "phase 3 the check count is enforced" is a
+# sentence about phase 3, and without this it reads as a claim that there are
+# three checks — which this rule duly reported, against itself, on the commit
+# that wrote that sentence. A determiner is never an adjective describing
+# checks, so excluding them costs no real claim and removes the whole class.
+NOT_AN_ADJECTIVE = (
+    "the", "a", "an", "this", "that", "these", "those",
+    "its", "their", "our", "your", "my", "his", "her",
+)
+COUNT_CLAIM_RE = re.compile(
+    r"\b(\d+)\s+(?:(?!(?:%s)\b)[a-z][a-z-]*\s+)?checks?\b"
+    % "|".join(NOT_AN_ADJECTIVE)
+)
 
 
 @check
