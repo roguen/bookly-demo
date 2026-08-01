@@ -527,6 +527,26 @@ def audit_json(limit: int = 500) -> List[dict]:
     return entries[:limit]
 
 
+def outbox_json() -> dict:
+    """Undelivered envelopes waiting to be retried, and the ones that gave up.
+    None of this decides anything; it is the executor's backlog, described."""
+    pending = envelope.outbox()
+    dead = envelope.dead_letters()
+    return {
+        "pending": pending,
+        "dead_letters": dead,
+        "counts": {"pending": len(pending), "dead_lettered": len(dead)},
+    }
+
+
+def reconcile_json() -> dict:
+    """Run one reconcile pass and report it. Re-delivers pending envelopes to
+    the receiver, which dedups on the idempotency key — so this posts nothing
+    twice; it only finishes deliveries a failed hop had deferred."""
+    result = envelope.reconcile()
+    return dict(result, counts=outbox_json()["counts"])
+
+
 def scenarios_json() -> List[dict]:
     """The scripted conversations, read from demo.txt so the CLI script and
     the console cannot drift, plus whatever the profile adds."""
@@ -701,6 +721,8 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 return lambda: self._json(policy_json())
             if path == "/api/audit":
                 return lambda: self._json({"entries": audit_json()})
+            if path == "/api/outbox":
+                return lambda: self._json(outbox_json())
             if path == "/api/scenarios":
                 return lambda: self._json({"scenarios": scenarios_json()})
             if path == "/api/provider":
@@ -728,6 +750,8 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 return lambda: self._set_provider(console)
             if path == "/api/reset":
                 return lambda: self._json(console.reset())
+            if path == "/api/reconcile":
+                return lambda: self._json(reconcile_json())
             if path == "/api/conversation/restart":
                 return lambda: self._restart(console)
             if path == "/api/checks":

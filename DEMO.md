@@ -247,7 +247,7 @@ written to disk, not logged, not put in a URL, and specifically not exported
 to the environment — because the next thing you are about to do spawns a
 subprocess.
 
-Press **Run the check suite**. It streams. 81 checks, in the app, on
+Press **Run the check suite**. It streams. 82 checks, in the app, on
 the machine in front of you.
 
 Point at four of them:

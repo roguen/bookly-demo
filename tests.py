@@ -2517,7 +2517,7 @@ def a_failed_delivery_waits_in_the_outbox_rather_than_vanishing():
         try:
             os.environ[envelope_module.WEBHOOK_ENV_VAR] = "http://127.0.0.1:9/x"
             env, delivery = envelope_module.emit(
-                "conv-orch", "refund", "BK-1042",
+                "refund", "conv-orch", "BK-1042",
                 policy.REFUND_APPROVED_IN_WINDOW, amount=22.5,
             )
         finally:
@@ -2547,7 +2547,7 @@ def reconcile_backs_off_and_dead_letters_after_its_attempts():
         try:
             os.environ[envelope_module.WEBHOOK_ENV_VAR] = "http://127.0.0.1:9/x"
             envelope_module.emit(
-                "conv-dead", "refund", "BK-1041",
+                "refund", "conv-dead", "BK-1041",
                 policy.REFUND_APPROVED_IN_WINDOW, amount=18.99,
             )
         finally:
@@ -2576,6 +2576,51 @@ def reconcile_backs_off_and_dead_letters_after_its_attempts():
         assert envelope_module.dead_letters()[0]["attempts"] == (
             envelope_module.MAX_DELIVERY_ATTEMPTS
         )
+
+
+@check
+def a_reconciled_delivery_posts_exactly_once_across_a_failure():
+    """The whole loop, end to end. A delivery that failed while the receiver was
+    down sits in the outbox; reconcile drains it once the receiver is back and
+    the refund posts — once. A re-delivery of the same decision, the sender
+    unsure it landed, is suppressed on the idempotency key rather than posted a
+    second time. Exactly once, across a failure."""
+    saved = os.environ.get(envelope_module.WEBHOOK_ENV_VAR)
+    with _delivery_state():
+        with _BackOffice() as office:
+            try:
+                # Receiver unreachable at emit: the decision is made and
+                # audited, and the envelope waits in the outbox — not lost.
+                os.environ[envelope_module.WEBHOOK_ENV_VAR] = (
+                    "http://127.0.0.1:9/webhook"
+                )
+                env, delivery = envelope_module.emit(
+                    "refund", "conv-e2e", "BK-1042",
+                    policy.REFUND_APPROVED_IN_WINDOW, amount=22.5,
+                )
+                assert delivery == "failed_unreachable"
+                assert len(envelope_module.outbox()) == 1
+                # The receiver is reachable now; reconcile drains the outbox and
+                # the refund posts, once.
+                os.environ[envelope_module.WEBHOOK_ENV_VAR] = office.url
+                result = envelope_module.reconcile(now=0.0)
+                assert result["delivered"] == [env["envelope_id"]]
+                assert envelope_module.outbox() == []
+                assert office.get("/api/ledger")["summary"]["lines"] == 1
+                # The same decision delivered again — a retry the sender was
+                # unsure about — is suppressed durably, not posted twice.
+                envelope_module.emit(
+                    "refund", "conv-e2e", "BK-1042",
+                    policy.REFUND_APPROVED_IN_WINDOW, amount=22.5,
+                )
+                summary = office.get("/api/ledger")["summary"]
+                assert summary["lines"] == 1  # still one line
+                assert summary["suppressed_duplicates"] == 1
+                assert summary["amount_posted"] == 22.5  # posted once
+            finally:
+                os.environ.pop(envelope_module.WEBHOOK_ENV_VAR, None)
+                if saved is not None:
+                    os.environ[envelope_module.WEBHOOK_ENV_VAR] = saved
 
 
 @check

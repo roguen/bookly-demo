@@ -34,7 +34,7 @@ For a live session:
 python3 app.py
 ```
 
-Run the check suite (standard library only, no pytest) — 81 checks, and they
+Run the check suite (standard library only, no pytest) — 82 checks, and they
 also run from inside the console:
 
 ```bash

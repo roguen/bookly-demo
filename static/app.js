@@ -58,6 +58,8 @@ export const Api = {
   reset: () => api("/api/reset"),
   restart: (conversationId) =>
     api("/api/conversation/restart", { conversation_id: conversationId }),
+  outbox: () => api("/api/outbox"),
+  reconcile: () => api("/api/reconcile", {}),
 
   /* The check suite streams, so this yields lines as they arrive rather
      than resolving once at the end. A button that spins for ten seconds
@@ -1057,6 +1059,26 @@ function notify(message) {
   dom.notice.textContent = message;
 }
 
+/* The delivery outbox: envelopes a failed hop deferred, waiting to be retried.
+   The Reconcile button appears with a count only when something is pending, so
+   in the ordinary demo (no receiver configured, nothing to defer) it stays out
+   of the way. Reconcile hands each pending envelope back to the receiver, which
+   dedups on the idempotency key — so it posts nothing twice. */
+async function refreshOutbox() {
+  if (!dom.reconcile) return;
+  let counts;
+  try {
+    counts = (await Api.outbox()).counts;
+  } catch (error) {
+    return;
+  }
+  const pending = counts.pending || 0;
+  const dead = counts.dead_lettered || 0;
+  dom.reconcile.hidden = pending === 0 && dead === 0;
+  dom.reconcile.textContent = pending ? `Reconcile (${pending})` : "Reconcile";
+  dom.reconcile.disabled = pending === 0;
+}
+
 /* --- scripted replay -----------------------------------------------------
    A recording is the leave-behind, and a live demo can always fail. Replay
    makes both survivable: it plays a scripted conversation into the real UI,
@@ -1198,6 +1220,9 @@ async function send(text) {
     renderTrace(true);
     if (state.tab === "audit") await renderAudit();
     notify(null);
+    // A turn may have emitted an envelope whose delivery failed and is now
+    // waiting in the outbox; surface it on the Reconcile button.
+    refreshOutbox();
   } catch (error) {
     notify(String(error));
   } finally {
@@ -1247,6 +1272,26 @@ async function boot() {
   dom.providerPanel = document.getElementById("provider-panel");
   dom.replayPanel = document.getElementById("replay-panel");
   dom.replay = document.getElementById("replay");
+  dom.reconcile = document.getElementById("reconcile");
+  dom.reconcile.addEventListener("click", async () => {
+    dom.reconcile.disabled = true;
+    try {
+      const result = await Api.reconcile();
+      const parts = [`${result.delivered.length} delivered`];
+      if (result.dead_lettered.length) {
+        parts.push(`${result.dead_lettered.length} dead-lettered`);
+      }
+      if (result.counts.pending) {
+        parts.push(`${result.counts.pending} still pending`);
+      }
+      notify(`Reconciled: ${parts.join(", ")}.`);
+      if (state.tab === "audit") await renderAudit();
+    } catch (error) {
+      notify(String(error));
+    } finally {
+      await refreshOutbox();
+    }
+  });
   dom.providerBadge.addEventListener("click", () => {
     state.providerOpen = !state.providerOpen;
     renderProviderPanel();
@@ -1301,6 +1346,7 @@ async function boot() {
     renderProviderPanel();
     if (state.tab === "audit") renderAudit();
     notify(null);
+    refreshOutbox();
   });
   document.getElementById("replay").addEventListener("click", toggleReplay);
 
@@ -1345,6 +1391,7 @@ async function boot() {
   renderMessages();
   renderTrace(false);
   renderProvider();
+  refreshOutbox();
 }
 
 /* The back office imports `el` and `clear` from this module so there is
