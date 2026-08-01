@@ -57,6 +57,17 @@ os.environ.setdefault(
     "BOOKLY_POLICY_PATH",
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "policy.checks.json"),
 )
+# Same for the delivery outbox, dead-letter, and durable ledger: the suite must
+# never write the runtime files a demo is about to show. Outbox checks point the
+# env var at their own temp store and restore it.
+for _var, _name in (
+    ("BOOKLY_OUTBOX_PATH", "outbox.checks.json"),
+    ("BOOKLY_DEADLETTER_PATH", "dead_letter.checks.json"),
+    ("BOOKLY_LEDGER_PATH", "ledger.checks.json"),
+):
+    os.environ.setdefault(
+        _var, os.path.join(os.path.dirname(os.path.abspath(__file__)), _name)
+    )
 
 CHECKS = []
 
@@ -2418,6 +2429,105 @@ def decision_survives_an_unreachable_receiver():
         if entry.get("event") == "delivery"
     ]
     assert "failed" in states
+
+
+# --- the orchestration layer: outbox, retries, dead-letter (v3.4.0) -------
+
+
+class _delivery_state:
+    """Temp outbox, dead-letter, and audit files, so a check can exercise
+    retries without touching the runtime files a demo is about to show."""
+
+    def __enter__(self):
+        self._dir = tempfile.mkdtemp(prefix="bookly-outbox-")
+        self._saved = {}
+        for var, name in (
+            (envelope_module.OUTBOX_PATH_ENV_VAR, "outbox.json"),
+            (envelope_module.DEADLETTER_PATH_ENV_VAR, "dead_letter.json"),
+            (envelope_module.AUDIT_PATH_ENV_VAR, "audit.log"),
+        ):
+            self._saved[var] = os.environ.get(var)
+            os.environ[var] = os.path.join(self._dir, name)
+        return self
+
+    def __exit__(self, *_exc):
+        for var, saved in self._saved.items():
+            if saved is None:
+                os.environ.pop(var, None)
+            else:
+                os.environ[var] = saved
+        shutil.rmtree(self._dir, ignore_errors=True)
+
+
+@check
+def a_failed_delivery_waits_in_the_outbox_rather_than_vanishing():
+    """The decision is audited and the envelope survives a lost hop — but now
+    it is not merely recorded as failed, it is kept in a durable outbox to be
+    retried. A delivery that succeeds leaves nothing behind."""
+    saved = os.environ.get(envelope_module.WEBHOOK_ENV_VAR)
+    with _delivery_state():
+        try:
+            os.environ[envelope_module.WEBHOOK_ENV_VAR] = "http://127.0.0.1:9/x"
+            env, delivery = envelope_module.emit(
+                "conv-orch", "refund", "BK-1042",
+                policy.REFUND_APPROVED_IN_WINDOW, amount=22.5,
+            )
+        finally:
+            os.environ.pop(envelope_module.WEBHOOK_ENV_VAR, None)
+            if saved is not None:
+                os.environ[envelope_module.WEBHOOK_ENV_VAR] = saved
+        assert delivery == "failed_unreachable"
+        pending = envelope_module.outbox()
+        assert len(pending) == 1
+        # The envelope is kept byte-identical, so a retry carries the same key.
+        assert pending[0]["envelope"] == env
+        assert pending[0]["attempts"] == 1
+        # A retry that succeeds drains it and leaves the outbox empty.
+        result = envelope_module.reconcile(now=0.0, deliver=lambda e: "delivered_200")
+        assert result["delivered"] == [env["envelope_id"]]
+        assert envelope_module.outbox() == []
+
+
+@check
+def reconcile_backs_off_and_dead_letters_after_its_attempts():
+    """Retries are bounded and spaced: an envelope that keeps failing is not
+    re-hammered — a not-before timestamp holds it off until the backoff passes —
+    and once it has used every attempt it moves to the dead-letter store for a
+    human rather than being retried forever."""
+    with _delivery_state():
+        saved = os.environ.get(envelope_module.WEBHOOK_ENV_VAR)
+        try:
+            os.environ[envelope_module.WEBHOOK_ENV_VAR] = "http://127.0.0.1:9/x"
+            envelope_module.emit(
+                "conv-dead", "refund", "BK-1041",
+                policy.REFUND_APPROVED_IN_WINDOW, amount=18.99,
+            )
+        finally:
+            os.environ.pop(envelope_module.WEBHOOK_ENV_VAR, None)
+            if saved is not None:
+                os.environ[envelope_module.WEBHOOK_ENV_VAR] = saved
+        fail = lambda envelope: "failed_unreachable"
+        # A second reconcile at the same instant does not re-attempt an entry
+        # that is backing off.
+        first = envelope_module.reconcile(now=1.0, deliver=fail)
+        assert first["pending"] == 1 and not first["dead_lettered"]
+        immediate = envelope_module.reconcile(now=1.0, deliver=fail)
+        assert immediate["delivered"] == [] and immediate["pending"] == 1
+        # Step the clock well past each backoff until it gives up.
+        dead = None
+        clock = 1.0
+        for _ in range(envelope_module.MAX_DELIVERY_ATTEMPTS + 2):
+            clock += envelope_module.BACKOFF_CAP_SECONDS + 1
+            result = envelope_module.reconcile(now=clock, deliver=fail)
+            if result["dead_lettered"]:
+                dead = result
+                break
+        assert dead is not None, "envelope never dead-lettered"
+        assert envelope_module.outbox() == []
+        assert len(envelope_module.dead_letters()) == 1
+        assert envelope_module.dead_letters()[0]["attempts"] == (
+            envelope_module.MAX_DELIVERY_ATTEMPTS
+        )
 
 
 @check

@@ -48,6 +48,9 @@ REPO = Path(__file__).resolve().parent
 os.environ.setdefault("BOOKLY_AUDIT_PATH", str(REPO / "audit.log"))
 os.environ.setdefault("BOOKLY_QUEUE_PATH", str(REPO / "queue.json"))
 os.environ.setdefault("BOOKLY_POLICY_PATH", str(REPO / "policy.json"))
+os.environ.setdefault("BOOKLY_OUTBOX_PATH", str(REPO / "outbox.json"))
+os.environ.setdefault("BOOKLY_DEADLETTER_PATH", str(REPO / "dead_letter.json"))
+os.environ.setdefault("BOOKLY_LEDGER_PATH", str(REPO / "ledger.json"))
 
 import covers  # noqa: E402
 import policy  # noqa: E402

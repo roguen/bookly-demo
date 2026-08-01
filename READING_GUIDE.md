@@ -56,7 +56,7 @@ mock data). `app.py` is presentation only. `stub_receiver.py` is the
 orchestration layer's end of the webhook, demonstrating duplicate suppression.
 
 **7. `tests.py` — the claims, executable.**
-78 dependency-free checks, runnable from a terminal or from inside the
+80 dependency-free checks, runnable from a terminal or from inside the
 console. The ones to point at under questioning: `injection_changes_nothing`
 (the thesis, tested), `web_layer_emits_identical_envelopes` (the same
 scenarios through HTTP and through `Agent`, every decision field compared —

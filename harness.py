@@ -71,6 +71,15 @@ WEBHOOK_ENV_VAR = "BOOKLY_WEBHOOK_URL"
 os.environ["BOOKLY_POLICY_PATH"] = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "policy.checks.json"
 )
+# Replay never delivers (the webhook is unset below), so it never enqueues; the
+# outbox and dead-letter are pinned to absent paths anyway for hermeticity.
+for _var, _name in (
+    ("BOOKLY_OUTBOX_PATH", "outbox.checks.json"),
+    ("BOOKLY_DEADLETTER_PATH", "dead_letter.checks.json"),
+):
+    os.environ[_var] = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), _name
+    )
 
 
 # ---------------------------------------------------------------------------

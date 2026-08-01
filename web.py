@@ -39,6 +39,9 @@ REPO = Path(__file__).resolve().parent
 os.environ.setdefault("BOOKLY_AUDIT_PATH", str(REPO / "audit.log"))
 os.environ.setdefault("BOOKLY_QUEUE_PATH", str(REPO / "queue.json"))
 os.environ.setdefault("BOOKLY_POLICY_PATH", str(REPO / "policy.json"))
+os.environ.setdefault("BOOKLY_OUTBOX_PATH", str(REPO / "outbox.json"))
+os.environ.setdefault("BOOKLY_DEADLETTER_PATH", str(REPO / "dead_letter.json"))
+os.environ.setdefault("BOOKLY_LEDGER_PATH", str(REPO / "ledger.json"))
 
 import covers  # noqa: E402  (after the paths are pinned)
 import envelope  # noqa: E402
@@ -586,6 +589,10 @@ def checks_command() -> Tuple[List[str], dict]:
     # And it decides on the historical defaults: a policy a demo authored must
     # not change what the suite reports, so it is pointed at an absent document.
     environment["BOOKLY_POLICY_PATH"] = str(REPO / "policy.checks.json")
+    # Delivery state gets its own files too, for the same reason the audit does.
+    environment["BOOKLY_OUTBOX_PATH"] = str(REPO / "outbox.checks.json")
+    environment["BOOKLY_DEADLETTER_PATH"] = str(REPO / "dead_letter.checks.json")
+    environment["BOOKLY_LEDGER_PATH"] = str(REPO / "ledger.checks.json")
     environment["PYTHONUNBUFFERED"] = "1"
     return [sys.executable, str(REPO / "tests.py")], environment
 
