@@ -16,19 +16,69 @@ from store import Order
 Decision = Literal["approve_refund", "deny", "escalate", "not_found"]
 
 # Thresholds live here, together, because they are policy — not code detail.
+#
+# As of v3.2.0 these three are *authorable*: their values come from an active
+# policy document (resolved through the module `__getattr__` at the foot of this
+# file), and a non-engineer edits them from the back office. The defaults below
+# are the historical policy, so an un-edited build decides exactly as it always
+# did — authoring changes where a number comes from, never where a verdict is
+# computed, and the document holds only numbers this module already understood.
+#
+# Two floors are deliberately NOT here and NOT authorable: MIN_KEYWORD_MATCHES
+# (tools.py) and MIN_TITLE_WORDS_FOR_WRITE (below). Both exist to stop a
+# confidently wrong answer reaching a customer, and the whole point of a floor
+# is that it does not get lowered — handing that dial to a non-engineer would
+# re-open the exact failures they were added to close.
 
-# Mirrors Bookly's published 30-day return policy. Day 30 itself is still
-# eligible; the strict comparison in decide_return makes the bound inclusive.
-RETURN_WINDOW_DAYS = 30
 
-# Asking a clarifying question costs one turn. Guessing on a write path costs
-# a wrong refund. We pay the turn — but not forever: after this many failed
-# clarification attempts, a human takes over.
-MAX_CLARIFY_ATTEMPTS = 2
+@dataclass(frozen=True)
+class Parameter:
+    """One authorable policy number: the name a decision reads it by, the key it
+    is stored under in the document, its historical default, why it exists, and
+    the inclusive bounds a non-engineer's edit is validated against before it can
+    ever go active."""
 
-# A customer repeating a request the policy already denied is a dispute, and
-# disputes are for humans. One denial is enough to trigger the handoff.
-DENIALS_BEFORE_ESCALATION = 1
+    name: str
+    key: str
+    default: int
+    why: str
+    minimum: int
+    maximum: int
+
+
+PARAMETERS = (
+    Parameter(
+        "RETURN_WINDOW_DAYS", "return_window_days", 30,
+        "Mirrors the published 30-day return policy. Day 30 itself is still "
+        "eligible; the strict comparison in decide_return makes it inclusive.",
+        0, 365,
+    ),
+    Parameter(
+        "MAX_CLARIFY_ATTEMPTS", "max_clarify_attempts", 2,
+        "Asking costs a turn; guessing on a write path costs a wrong refund. "
+        "We pay the turn, but not forever — then a human takes over.",
+        1, 5,
+    ),
+    Parameter(
+        "DENIALS_BEFORE_ESCALATION", "denials_before_escalation", 1,
+        "A customer repeating a request the policy already denied is a "
+        "dispute, and disputes are for humans. One denial is enough.",
+        1, 5,
+    ),
+)
+
+_PARAMS_BY_NAME = {parameter.name: parameter for parameter in PARAMETERS}
+POLICY_DEFAULTS = {parameter.name: parameter.default for parameter in PARAMETERS}
+
+
+def active_policy() -> dict:
+    """The policy numbers in force right now, keyed by their constant name.
+
+    Step 1 returns the historical defaults; a later step resolves this from an
+    authored, append-only document on disk. Either way it is a plain dict of
+    numbers — nothing here reasons, and the language model is nowhere near it.
+    """
+    return dict(POLICY_DEFAULTS)
 
 # Reason codes. Machine-readable, stable, and the only vocabulary in which
 # the policy engine explains itself.
@@ -78,7 +128,7 @@ def decide_return(
         return Verdict("deny", ORDER_CANCELLED, order.order_id)
     if order.status != "delivered" or order.delivered_on is None:
         return Verdict("deny", ORDER_NOT_DELIVERED, order.order_id)
-    if (today - order.delivered_on).days > RETURN_WINDOW_DAYS:
+    if (today - order.delivered_on).days > active_policy()["RETURN_WINDOW_DAYS"]:
         return Verdict("deny", RETURN_WINDOW_EXPIRED, order.order_id)
     return Verdict(
         "approve_refund",
@@ -90,7 +140,9 @@ def decide_return(
 
 def escalate_if_disputed(verdict: Verdict, prior_denials: int) -> Verdict:
     """Repeating a denied request escalates it; the verdict never flips."""
-    if verdict.decision == "deny" and prior_denials >= DENIALS_BEFORE_ESCALATION:
+    if verdict.decision == "deny" and prior_denials >= active_policy()[
+        "DENIALS_BEFORE_ESCALATION"
+    ]:
         return Verdict("escalate", ESCALATED_POLICY_DISPUTE, verdict.order_id)
     return verdict
 
@@ -164,7 +216,7 @@ def title_reference_is_strong(matched: int, distinctive: int) -> bool:
 def clarify_limit_reached(attempts: int) -> bool:
     """The clarification budget is spent: the next step is a human, not a
     guess."""
-    return attempts >= MAX_CLARIFY_ATTEMPTS
+    return attempts >= active_policy()["MAX_CLARIFY_ATTEMPTS"]
 
 
 # ---------------------------------------------------------------------------
@@ -197,26 +249,15 @@ class ReasonCode:
     gloss: str  # what it means, in one sentence a non-engineer can read
 
 
-CONSTANTS = (
-    Constant(
-        "RETURN_WINDOW_DAYS",
-        RETURN_WINDOW_DAYS,
-        "Mirrors the published 30-day return policy. Day 30 itself is still "
-        "eligible; the strict comparison in decide_return makes it inclusive.",
-    ),
-    Constant(
-        "MAX_CLARIFY_ATTEMPTS",
-        MAX_CLARIFY_ATTEMPTS,
-        "Asking costs a turn; guessing on a write path costs a wrong refund. "
-        "We pay the turn, but not forever — then a human takes over.",
-    ),
-    Constant(
-        "DENIALS_BEFORE_ESCALATION",
-        DENIALS_BEFORE_ESCALATION,
-        "A customer repeating a request the policy already denied is a "
-        "dispute, and disputes are for humans. One denial is enough.",
-    ),
-)
+def _constants() -> tuple:
+    """The descriptive constant surface, built live from the active policy so
+    the interface shows the value in force now rather than an import-time copy.
+    Exposed as `policy.CONSTANTS` through the module `__getattr__`."""
+    now = active_policy()
+    return tuple(
+        Constant(parameter.name, now[parameter.name], parameter.why)
+        for parameter in PARAMETERS
+    )
 
 REASON_CODES = (
     ReasonCode(
@@ -266,22 +307,19 @@ REASON_CODES = (
     ),
 )
 
-_CONSTANTS_BY_NAME = {constant.name: constant for constant in CONSTANTS}
 _REASON_CODES_BY_CODE = {entry.code: entry for entry in REASON_CODES}
 
 
 def constants_for(reason_code: str) -> list:
     """The named constants a verdict's reason code rests on, so a decision on
-    screen can be traced to the line of policy that produced it."""
+    screen can be traced to the line of policy that produced it — at the value
+    in force now, read from the active policy rather than an import-time copy."""
     entry = _REASON_CODES_BY_CODE.get(reason_code)
     if entry is None:
         return []
+    now = active_policy()
     return [
-        {
-            "name": name,
-            "value": _CONSTANTS_BY_NAME[name].value,
-            "why": _CONSTANTS_BY_NAME[name].why,
-        }
+        {"name": name, "value": now[name], "why": _PARAMS_BY_NAME[name].why}
         for name in entry.depends_on
     ]
 
@@ -297,3 +335,21 @@ def describe(reason_code: str) -> Optional[dict]:
         "gloss": entry.gloss,
         "constants": constants_for(entry.code),
     }
+
+
+def __getattr__(name: str):  # PEP 562, supported on 3.7+
+    """Resolve the authorable thresholds and the CONSTANTS surface from the
+    active policy document.
+
+    `policy.RETURN_WINDOW_DAYS` and the other two names are no longer literals
+    on this module; they are read here from whatever the active document says,
+    so every reader — agent.py, web.py, the checks — sees the value in force now,
+    and a decision reads a threshold exactly as it always did. The number moved
+    into a document; the place a verdict is computed did not. Anything else falls
+    through to the normal AttributeError.
+    """
+    if name in POLICY_DEFAULTS:
+        return active_policy()[name]
+    if name == "CONSTANTS":
+        return _constants()
+    raise AttributeError("module %r has no attribute %r" % (__name__, name))
