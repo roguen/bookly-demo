@@ -138,7 +138,7 @@ TALKING POINTS
 - policy.py does not import an LLM. That's a structural property you can grep for, not a promise.
 - The whole thing runs with no API key and no dependencies — there's a rules-based stand-in for both model jobs.
 - Verified, not assumed: same script through the regex stand-in and through gpt-5.4-mini, all eight replies worded differently, every decision field identical down to the idempotency key.
-- 52 checks, all dependency-free, and the decision tests never touch a model at all. They run from a terminal or from inside the console.
+- 56 checks, all dependency-free, and the decision tests never touch a model at all. They run from a terminal or from inside the console.
 
 IF ASKED
 
@@ -577,7 +577,7 @@ const nexts = [
     n: "1",
     t: "The eval harness, first",
     b: "Golden transcripts, a graded rubric, and a regression run on every prompt change. Support agents don't die from a bad launch demo — they die from a silent regression after somebody tweaks a prompt on a Thursday.",
-    f: "tests.py is the seed: 52 checks, including a two-turn conversation asserted end to end on exact strings and envelope fields. Growing it means fixtures per scenario, a rubric for narration quality, and wiring the run into CI.",
+    f: "tests.py is the seed: 56 checks, including a two-turn conversation asserted end to end on exact strings and envelope fields. Growing it means fixtures per scenario, a rubric for narration quality, and wiring the run into CI.",
     lines: 2,
   },
   {
@@ -633,7 +633,7 @@ First, and it's not close: the eval harness. Golden transcripts, a graded rubric
 
 I want to frame this as a risk, not a wish list. Support agents don't fail at launch. They fail three weeks in, when somebody tweaks a prompt and quietly breaks the escalation path. Nobody notices until the tickets pile up.
 
-That's what I'd build first. tests.py is the seed — 52 checks today, and one two-turn conversation checked line by line.
+That's what I'd build first. tests.py is the seed — 56 checks today, and one two-turn conversation checked line by line.
 
 I'll say something slightly against myself here. I found real bugs in this build by adversarially probing it. Then I fixed them, and the probe caught three more regressions I'd introduced in the fixes. That isn't carelessness. It's what it looks like when the harness does its job — and it's the argument for building one early.
 
@@ -643,7 +643,7 @@ Third, the orchestration layer becoming real — retries, dead letters, durable 
 
 TALKING POINTS
 
-- 52 checks today, dependency-free, no pytest — Python 3.9 and up.
+- 56 checks today, dependency-free, no pytest — Python 3.9 and up.
 - The golden transcript test asserts exact strings on purpose, so wording drift fails loudly.
 - Everything here is contained: none of the three requires reopening the decision layer.
 

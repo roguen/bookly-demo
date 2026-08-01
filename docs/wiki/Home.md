@@ -26,7 +26,7 @@ No dependencies. No API key. Python 3.9 or later.
 
 ```bash
 python3 app.py --script demo.txt   # four scripted scenarios, in a terminal
-python3 tests.py                   # 52 checks, no pytest
+python3 tests.py                   # 56 checks, no pytest
 python3 web.py                     # the console, 127.0.0.1:8000
 python3 backoffice.py              # the executing side, 127.0.0.1:8787
 ```
@@ -75,7 +75,7 @@ browser to someone who will never read `policy.py`.
 - **The demo dataset in `profiles/`**, so re-skinning for another company is a
   data edit measured in minutes.
 
-Verified for the phase-2 release: 52 checks green on Python 3.9.6 and 3.14.2;
+Verified for the phase-2 release: 56 checks green on Python 3.9.6 and 3.14.2;
 the CLI byte-identical to `v1.0.0`; a clean clone makes zero external
 requests; `stub_receiver.py` untouched and its evidence procedure reproduced
 key for key.
@@ -96,7 +96,7 @@ run on every prompt change, wired into CI.
 
 Support agents do not die from a bad launch demo. They die from a silent
 regression after somebody tweaks a prompt on a Thursday. `tests.py` is the
-seed — 52 checks today, including a two-turn conversation asserted end to end
+seed — 56 checks today, including a two-turn conversation asserted end to end
 on exact strings and envelope fields. Growing it means fixtures per scenario
 and a rubric the prose is graded against, not just the decisions.
 

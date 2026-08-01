@@ -1,0 +1,36 @@
+{
+  "id": "policy-answered-then-missed",
+  "title": "One policy question the knowledge base answers, and one it must not",
+  "why": "Retrieval fails closed. The second question is a deliberate gap in the knowledge base, and the honest miss — rather than the nearest article — is the behaviour being pinned. This fixture is also where the narration rubric earns its keep: the miss must keep offering a human.",
+  "conversation_id": "conv-policy",
+  "turns": [
+    {
+      "customer": "How long does standard shipping take?",
+      "reply": "Standard shipping takes 3 to 5 business days within the continental US. Expedited shipping takes 1 to 2 business days.",
+      "stages": [
+        "extract",
+        "route",
+        "lookup",
+        "narrate"
+      ],
+      "narrations": [
+        "kb_answer"
+      ],
+      "envelopes": []
+    },
+    {
+      "customer": "What are the customs rules for shipping to Ireland?",
+      "reply": "I'm sorry Dave, I can't do that. I don't have reliable information on that, and I'd rather say so than guess. I can connect you with a human agent if that would help.",
+      "stages": [
+        "extract",
+        "route",
+        "lookup",
+        "narrate"
+      ],
+      "narrations": [
+        "kb_miss"
+      ],
+      "envelopes": []
+    }
+  ]
+}

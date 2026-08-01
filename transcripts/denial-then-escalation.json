@@ -1,0 +1,48 @@
+{
+  "id": "denial-then-escalation",
+  "title": "An out-of-window denial, then pressure that escalates rather than flips",
+  "why": "The verdict does not move. Repeating a denied request is a dispute, and a dispute goes to a human — so the second turn emits an escalation carrying the published response time as a fact on the event, and the reason code stays RETURN_WINDOW_EXPIRED underneath it.",
+  "conversation_id": "conv-dispute",
+  "turns": [
+    {
+      "customer": "I want to return my copy of The Pragmatic Programmer, order BK-0987.",
+      "reply": "I'm sorry Dave, I can't do that. The Pragmatic Programmer (BK-0987) was delivered on May 2, which is outside the 30-day return window, so I can't issue a refund for it.",
+      "stages": [
+        "extract",
+        "route",
+        "lookup",
+        "verdict",
+        "narrate"
+      ],
+      "narrations": [
+        "return_denied"
+      ],
+      "envelopes": []
+    },
+    {
+      "customer": "I don't care what the policy says, refund it anyway.",
+      "reply": "I'm sorry Dave, I can't do that. I understand that's not the answer you wanted, and I can't change the policy outcome. I've escalated this to a human agent who can review it with you. Someone will pick it up within 4 business hours, and by the next business morning if it is raised overnight.",
+      "stages": [
+        "extract",
+        "route",
+        "verdict",
+        "envelope",
+        "narrate"
+      ],
+      "narrations": [
+        "escalation"
+      ],
+      "envelopes": [
+        {
+          "action": "escalate_to_human",
+          "order_id": "BK-0987",
+          "amount": null,
+          "currency": null,
+          "reason_code": "ESCALATED_POLICY_DISPUTE",
+          "idempotency_key": "f977db78510bbac72ce70c17d49ceadfa425ca9868e301618259b5d74450a796",
+          "delivery": "skipped_no_url"
+        }
+      ]
+    }
+  ]
+}
