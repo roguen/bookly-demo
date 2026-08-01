@@ -34,7 +34,7 @@ For a live session:
 python3 app.py
 ```
 
-Run the check suite (standard library only, no pytest) — 51 checks, and they
+Run the check suite (standard library only, no pytest) — 52 checks, and they
 also run from inside the console:
 
 ```bash
@@ -279,7 +279,9 @@ to drift and no place for a vendor to introduce a decision.
 | `backoffice.py`       | receiving is a different process from deciding      |
 | `app.py`              | the CLI shell                                       |
 | `stub_receiver.py`    | the orchestration layer's end of the webhook        |
-| `tests.py`            | the eval harness                                    |
+| `tests.py`            | the claims, executable                              |
+| `harness.py`          | a scenario is a file, replayed and compared         |
+| `transcripts/*.json`  | the golden transcripts, one per scenario            |
 | `demo.txt`            | the four scripted scenarios                         |
 | `profiles/bookly.json`| the dataset, so a re-skin is a data edit            |
 | `DEMO.md`             | the run of show                                     |

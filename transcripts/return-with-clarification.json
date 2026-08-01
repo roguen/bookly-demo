@@ -1,0 +1,49 @@
+{
+  "id": "return-with-clarification",
+  "title": "A return that needs a clarifying question, ending in a refund",
+  "why": "The agent asks before it writes, then refunds the order the customer named. Deciding to ask is policy.should_clarify; phrasing the question is the model. Converted from golden_transcript_return_flow, conversation id and all, so the idempotency key it pinned is the one this file pins.",
+  "conversation_id": "conv-golden",
+  "turns": [
+    {
+      "customer": "I'd like to return a book.",
+      "reply": "Sure — which book would you like to return? 1) Godel, Escher, Bach (BK-1042)  2) The Pragmatic Programmer (BK-0987)",
+      "stages": [
+        "extract",
+        "route",
+        "candidates",
+        "clarify",
+        "clarify",
+        "narrate"
+      ],
+      "narrations": [
+        "clarify_which_order"
+      ],
+      "envelopes": []
+    },
+    {
+      "customer": "The Escher one — the cover is torn.",
+      "reply": "Done — Godel, Escher, Bach (BK-1042) was delivered on July 18, inside the 30-day return window, so I've issued a refund of $22.50 to your original payment method. It should post within 5 business days.",
+      "stages": [
+        "extract",
+        "route",
+        "verdict",
+        "envelope",
+        "narrate"
+      ],
+      "narrations": [
+        "refund_approved"
+      ],
+      "envelopes": [
+        {
+          "action": "refund",
+          "order_id": "BK-1042",
+          "amount": 22.5,
+          "currency": "USD",
+          "reason_code": "REFUND_APPROVED_IN_WINDOW",
+          "idempotency_key": "b47e0eb40c00b584235b5718c312ebdc02e2d01c51a3ccb36dd11b97de60583d",
+          "delivery": "skipped_no_url"
+        }
+      ]
+    }
+  ]
+}

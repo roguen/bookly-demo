@@ -50,14 +50,24 @@ mock data). `app.py` is presentation only. `stub_receiver.py` is the
 orchestration layer's end of the webhook, demonstrating duplicate suppression.
 
 **7. `tests.py` — the claims, executable.**
-51 dependency-free checks, runnable from a terminal or from inside the
+52 dependency-free checks, runnable from a terminal or from inside the
 console. The ones to point at under questioning: `injection_changes_nothing`
 (the thesis, tested), `web_layer_emits_identical_envelopes` (the same
 scenarios through HTTP and through `Agent`, every decision field compared —
 the answer to "did you just bolt a UI onto it"), `queue_resolution_is_append_only`
 (a human may override an outcome and may not rewrite the record), and
-`golden_transcript_return_flow` (exact strings on purpose — the seed of the
-golden-transcript harness proposed as future work).
+`transcript_return_with_clarification` (exact strings on purpose — a golden
+transcript under `transcripts/`, generated from the file rather than written
+as a function, so adding a scenario is adding a file).
+
+**7a. `harness.py`, `transcripts/*.json` — a scenario is a file.**
+The harness replays a fixture through the same `handle_turn` the CLI calls and
+compares the reply verbatim, the envelope's decision fields including the
+literal idempotency key, and the sequence of recorder stages. That last one is
+the architectural claim as a regression test: a change that moved a decision
+to the model side of the boundary fails here. Which side each stage sits on is
+deliberately *not* in the fixture — it is read from `recorder.STAGE_SIDES`, so
+there is no second copy to drift.
 
 **8. The console layer — the claim, made visible.**
 Phase 2 adds no decision logic; it makes the existing boundary legible in a

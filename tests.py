@@ -26,6 +26,7 @@ from datetime import date
 import backoffice
 import covers
 import envelope as envelope_module
+import harness
 import llm
 import policy
 import queue as queue_module  # this repo's queue.py, not the stdlib
@@ -685,36 +686,51 @@ def provider_selection_is_explicit_and_bounded():
                 os.environ[key] = value
 
 
+# --- golden transcripts ---------------------------------------------------
+#
+# A scenario is a file under transcripts/, replayed through the same
+# handle_turn the CLI and the console call. `golden_transcript_return_flow`
+# used to live here as a function with the strings pasted into its body; it is
+# now transcripts/return-with-clarification.json, same conversation id and
+# therefore the same idempotency key. Adding the second scenario is adding a
+# file, which is the whole point of moving it.
+
+
 @check
-def golden_transcript_return_flow():
-    """One full conversation asserted end to end — the seed of the
-    golden-transcript harness. Exact strings on purpose: any wording or
-    decision drift should fail loudly."""
-    agent = _fresh_agent("conv-golden")
-    first = agent.handle_turn("I'd like to return a book.")
-    assert first.reply == (
-        "Sure — which book would you like to return? "
-        "1) Godel, Escher, Bach (BK-1042)  "
-        "2) The Pragmatic Programmer (BK-0987)"
-    )
-    assert first.envelopes == []
-    second = agent.handle_turn("The Escher one — the cover is torn.")
-    assert second.reply == (
-        "Done — Godel, Escher, Bach (BK-1042) was delivered on July 18, "
-        "inside the 30-day return window, so I've issued a refund of $22.50 "
-        "to your original payment method. It should post within 5 business "
-        "days."
-    )
-    emitted = _envelopes(second)
-    assert len(emitted) == 1
-    envelope = emitted[0]
-    assert envelope["action"] == "refund"
-    assert envelope["order_id"] == "BK-1042"
-    assert envelope["amount"] == ORDERS["BK-1042"].price_paid
-    assert envelope["reason_code"] == policy.REFUND_APPROVED_IN_WINDOW
-    assert envelope["idempotency_key"] == idempotency_key(
-        "conv-golden", "refund", "BK-1042"
-    )
+def transcripts_are_present_and_blessed():
+    """An empty transcripts/ would delete every generated check below without
+    turning the suite red — coverage would vanish and the output would look
+    exactly as good. So the fixtures existing is itself a check, and so is
+    their being blessed: an unblessed fixture has no expectations to fail."""
+    transcripts = harness.load_all()
+    assert transcripts, "no transcripts found in %s" % harness.TRANSCRIPT_DIR
+    unblessed = [t.id for t in transcripts if not t.blessed]
+    assert not unblessed, "run `python3 harness.py --bless`: %s" % unblessed
+    # Every fixture is replayed by a check of its own, generated below.
+    generated = {
+        fn.__name__ for fn in CHECKS if fn.__name__.startswith("transcript_")
+    }
+    assert len(generated) == len(transcripts), (generated, len(transcripts))
+
+
+def _register_transcript_checks() -> None:
+    """One generated check per fixture, named after it.
+
+    Named rather than anonymous because the console's Checks panel streams
+    these by name during a demo, and `transcript_return_with_clarification`
+    tells a viewer what just passed where `check_7` does not.
+    """
+    for transcript in harness.load_all():
+        def run(transcript=transcript):
+            failures = harness.compare(transcript, harness.replay(transcript))
+            assert not failures, "\n" + "\n".join(failures)
+
+        run.__name__ = "transcript_%s" % transcript.id.replace("-", "_")
+        run.__doc__ = transcript.why
+        check(run)
+
+
+_register_transcript_checks()
 
 
 # --- the web layer --------------------------------------------------------
