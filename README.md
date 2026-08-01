@@ -148,8 +148,10 @@ python3 backoffice.py
 BOOKLY_WEBHOOK_URL=http://127.0.0.1:8787/webhook python3 web.py
 ```
 
-`http://127.0.0.1:8787` — a refund ledger, an agent desk, and a read-only
-policy viewer. The separation is the architectural argument rather than
+`http://127.0.0.1:8787` — a refund ledger, an agent desk, and a policy editor
+where a non-engineer authors the CX thresholds (validated, attributed, and
+append-only; the console reads the change live). The separation is the
+architectural argument rather than
 packaging: the agent claims to *emit* actions rather than execute them, and if
 the receiver ran inside the agent's process you would have to take that on
 trust. Instead, kill it mid-conversation. The refund still decides, still
@@ -234,9 +236,13 @@ in `profiles/bookly.json`. `BOOKLY_PROFILE=<name>` selects another. Standing
 this up for a different company is a data edit.
 
 Thresholds and reason codes deliberately did **not** move into the profile.
-Those are policy, they live in `policy.py`, and a data file must not be able to
-reach them. The line between the two is the test: a profile may change what
-the agent *says* and never what it *decides*.
+Those are policy, and a re-skin — a profile data edit — must not be able to
+reach them. The CX thresholds *are* authorable now (v3.2.0), but through a
+separate, validated, bounded, append-only surface that records an actor and a
+justification, not by hand-editing a data file; the reason codes and the
+decision structure stay in `policy.py`, and so do the two floors that stop a
+confidently wrong answer. The line still holds: a profile may change what the
+agent *says* and never what it *decides*.
 
 ## How a turn flows
 

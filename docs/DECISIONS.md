@@ -1619,3 +1619,66 @@ touch the rest?
 **Lives in.** `static/app.css (.order img, button.order), issue #35`
 
 ---
+
+## 46. The policy is authorable now — the surface earlier builds refused to mock, built for real
+
+*v3.2.0*
+
+**Decision.** Reversal. Entries 29 and 41 shipped a *read-only* policy viewer and said, on
+screen and in the record, that this build ships no editing surface because
+"making procedures authorable by non-engineers is the next order of problem, and
+mocking it would be the one dishonest thing on screen." v3.2.0 builds it — for
+real, not a mock. The three CX thresholds (`RETURN_WINDOW_DAYS`,
+`MAX_CLARIFY_ATTEMPTS`, `DENIALS_BEFORE_ESCALATION`) are authored from the back
+office: `policy.py` reads them from an append-only, validated document instead
+of from literals, a non-engineer edits them with an actor and a justification,
+and the console reads the change live. Two things are deliberately **not**
+authorable and stay code: the decision *structure* (the functions and reason
+codes), and the two floors that stop a confidently wrong answer —
+`MIN_TITLE_WORDS_FOR_WRITE` and `tools.MIN_KEYWORD_MATCHES`.
+
+**Why.** The refusal was right *when it was made* — an editor built then would have been
+a mock, and a mocked policy editor on the one screen whose job is honesty is
+worse than an absent one. What changed is that it is real now, so the honest
+move flips with it. The design is what makes the reversal safe rather than a
+climb-down, and every piece answers a question a sceptic will ask. *Does this
+break "policy.py is the only place a verdict is computed"?* No: the authored
+document holds only numbers the module already understood, resolved through a
+module `__getattr__`; a decision reads a threshold exactly as it always did, the
+number just comes from a validated document — a change of storage, not of
+authority, and the language model is still nowhere near it. *Can a non-engineer
+break the agent?* No: every edit is range- and type-checked and the bounds hold
+on read as well as write, so a value that would move money wrongly is refused —
+which is the whole reason the two anti-"confident wrong answer" floors are the
+exact things left in code. Lowering `MIN_TITLE_WORDS_FOR_WRITE` to 1 would
+re-open the coincidental-word refund entry 12 closed; lowering the retrieval
+floor would re-open the wrong-article answer entry 9 closed. The point of a
+floor is that it does not get lowered, so it is not a dial. *Where is the
+authored change, and who made it?* In an append-only log — the same shape and
+ethos as the review queue in entry 28: an edit is a new event carrying who,
+what, why and when, a revert is another event, nothing is overwritten, and the
+mutation is a single validated POST rather than a REST update or a destructive
+verb. The editor lives only on the operator surface; the customer console has no
+route to author policy and is refused one by a check. And an un-edited build
+decides on exactly the historical numbers — asserted — so shipping all of this
+moved no envelope. This is also the honest answer to the standing Decagon
+question (entry 41): the convergence with Agent Operating Procedures is real,
+and the authorship gap it named is now half-closed — CX authors the parameters;
+authoring new *rules* (a small procedure DSL) is the harder step still ahead,
+and its being harder is exactly why it is not smuggled into this branch.
+
+**Rejected.** Authoring rules — a procedure DSL — in this branch (the larger, riskier
+problem; scoped out on purpose and named as the next step); making the floors
+authorable, which would hand a non-engineer the dials entries 9 and 12 exist to
+weld shut; a REST update or overwrite instead of an append (it would destroy the
+record an auditor needs); putting the editor on the customer console; and
+rewriting entries 29 and 41 rather than leaving them as the true account of what
+was refused and why, with this entry as the reversal.
+
+**Answers the question.** Isn't this the exact thing you said you couldn't do without mocking it? Can a
+CX manager change the return window without an engineer — and can they break the
+agent doing it? This looks like Decagon's AOPs — is it?
+
+**Lives in.** `policy.py (PARAMETERS, active_policy, change_parameter, policy_changes, __getattr__), policy.json, web.py (policy_json, checks_command), backoffice.py (_policy_change), static/backoffice.js (policyEditor), tests.py (policy_defaults_are_the_historical_policy, an_authored_change_moves_a_verdict_through_policy_only, a_policy_change_is_validated_and_requires_an_actor, the_policy_log_is_append_only_and_reloads_live, a_hand_edited_document_cannot_push_a_threshold_out_of_range, policy_is_authored_in_the_back_office_and_the_console_reads_it), issue #37, supersedes entries 29 and 41`
+
+---

@@ -164,10 +164,13 @@ job.
 
 ### Deliberately out of scope
 
-- **No editable policy-authoring surface.** Making procedures authorable by
-  non-engineers is the next order of problem. The policy viewer is read-only
-  and names who can change a threshold and where; mocking an editor would be
-  the one dishonest thing on screen.
+- **No authorable *rules* — yet.** As of v3.2.0 the three CX thresholds are
+  authorable for real: a non-engineer edits them from the back office, each
+  change validated against its bounds, attributed, and appended to a log the
+  console reads live, while the decision structure and the two floors that stop
+  a confidently wrong answer stay in `policy.py`. What is still out of scope is
+  authoring new *rules* — a procedure DSL, not just tuning numbers — which is
+  the harder next step and is not smuggled into a parameter-editing branch.
 - **No supervisor agent or tool-calling loop.** Orchestration here is a state
   machine on purpose. A supervisor is one more component that can be
   confidently wrong, placed exactly where being wrong is expensive.
@@ -180,7 +183,7 @@ job.
 
 | File | What it exists to prove |
 | --- | --- |
-| `policy.py` | decisions are pure functions with reason codes |
+| `policy.py` + `policy.json` | decisions are pure functions with reason codes; the CX thresholds are authorable through a validated, append-only document |
 | `llm.py` | the model's two jobs, and nothing else |
 | `agent.py` | the state machine, memory tiers, when it asks |
 | `tools.py` | facts and records out — never prose |
