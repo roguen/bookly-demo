@@ -93,6 +93,10 @@ class Agent:
         # This is the agent remembering what it has already done, which is a
         # different question from what policy would allow.
         self.refunds: Dict[str, dict] = {}
+        # Consecutive out-of-scope turns. One is answered honestly; a repeat is
+        # a customer the agent cannot help, and policy sends that to a person.
+        # Any turn the agent actually handles resets it.
+        self.unhandled_streak = 0
 
     # -- the single entry point -------------------------------------------
 
@@ -124,7 +128,12 @@ class Agent:
             if any(r.intent == "out_of_scope" for r in requests):
                 self._answer_out_of_scope(turn)
             else:
+                self.unhandled_streak = 0
                 self._narrate("help", {}, turn)
+        else:
+            # A turn the agent handled — a status, a return, a clarify re-ask —
+            # breaks any run of out-of-scope requests.
+            self.unhandled_streak = 0
         return TurnResult(" ".join(turn.replies), turn.envelopes)
 
     # -- the intent-switching precedence rule -----------------------------
@@ -349,11 +358,28 @@ class Agent:
         names the limit and offers a person. The recognition is recorded on the
         deterministic side — the branch is `out_of_scope`, not a guess dressed
         as an answer.
+
+        One out-of-scope turn is answered honestly. A second in a row is a
+        customer the agent cannot help, and that is the advertised failure mode
+        made real: uncovered reaches a human. The decision is policy's; the
+        streak that feeds it is conversation memory, reset by any handled turn.
         """
+        escalating = policy.unhandled_limit_reached(self.unhandled_streak)
         self.recorder.note(
-            "route", {"branch": "out_of_scope", "intents": ["out_of_scope"]}
+            "route",
+            {
+                "branch": "out_of_scope",
+                "intents": ["out_of_scope"],
+                "streak": self.unhandled_streak,
+                "escalating": escalating,
+            },
         )
-        self._narrate("out_of_scope", {}, turn)
+        if escalating:
+            self._emit_escalation(policy.ESCALATED_UNHANDLED, None, turn)
+            self.unhandled_streak = 0
+        else:
+            self.unhandled_streak += 1
+            self._narrate("out_of_scope", {}, turn)
 
     def _resolve_read_target(
         self, request: Request

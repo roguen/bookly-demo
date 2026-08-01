@@ -246,6 +246,7 @@ ORDER_NOT_OWNED_BY_CUSTOMER = "ORDER_NOT_OWNED_BY_CUSTOMER"
 ESCALATED_POLICY_DISPUTE = "ESCALATED_POLICY_DISPUTE"
 ESCALATED_CLARIFY_LIMIT = "ESCALATED_CLARIFY_LIMIT"
 ESCALATED_CUSTOMER_REQUEST = "ESCALATED_CUSTOMER_REQUEST"
+ESCALATED_UNHANDLED = "ESCALATED_UNHANDLED"
 
 
 @dataclass(frozen=True)
@@ -373,6 +374,19 @@ def clarify_limit_reached(attempts: int) -> bool:
     return attempts >= active_policy()["MAX_CLARIFY_ATTEMPTS"]
 
 
+# A single out-of-scope request is answered honestly and offered a person; the
+# escalation is for the customer who keeps asking for things the agent cannot
+# do. A code constant, not an authorable parameter: it governs when a
+# conversation reaches a human, and this branch keeps it in code deliberately.
+UNHANDLED_BEFORE_ESCALATION = 1
+
+
+def unhandled_limit_reached(streak: int) -> bool:
+    """A repeated out-of-scope request is a customer the agent cannot help, and
+    that belongs with a person. One honest decline first; the next escalates."""
+    return streak >= UNHANDLED_BEFORE_ESCALATION
+
+
 # ---------------------------------------------------------------------------
 # What this module says about itself.
 #
@@ -458,6 +472,12 @@ REASON_CODES = (
     ReasonCode(
         ESCALATED_CUSTOMER_REQUEST, (), "the agent, on an explicit request",
         "The customer asked for a person.",
+    ),
+    ReasonCode(
+        ESCALATED_UNHANDLED, (),
+        "the agent, on a repeated out-of-scope request",
+        "The customer asked for something the agent does not cover, more than "
+        "once; a human picks it up rather than the agent guessing.",
     ),
 )
 

@@ -470,6 +470,11 @@ def _escalation(f: dict) -> str:
             "Of course — I've flagged this conversation for a human agent "
             "to pick up. %s" % promise
         )
+    if f["reason_code"] == "ESCALATED_UNHANDLED":
+        return (
+            "This is beyond what I can help with here, so I've passed you to "
+            "a human colleague who can take it from here. %s" % promise
+        )
     return (
         "I don't want to guess with a refund, so I've handed this to a "
         "human agent who can look at your account with you. %s" % promise
