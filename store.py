@@ -210,6 +210,17 @@ CURRENT_CUSTOMER_ID = CUSTOMER.customer_id
 
 ORDERS = build_orders(PROFILE)
 
+# Words that appear inside titles but cannot identify one. A customer saying
+# "book", "copy" or "cover" is speaking ordinary support English, not naming a
+# book, and a catalog large enough to contain those words as titles makes the
+# two indistinguishable to a keyword matcher. Which words are generic is a
+# property of a catalog, so it is profile data; how much of a title has to
+# match before a refund may act on it is disambiguation, and that lives in
+# policy.py.
+GENERIC_TITLE_WORDS = frozenset(
+    word.lower() for word in CATALOG.get("generic_words", ())
+)
+
 # The knowledge base is deliberately small and deliberately has gaps
 # (no international shipping article, for example). Retrieval must fail
 # closed on the gaps rather than serve the nearest neighbor.

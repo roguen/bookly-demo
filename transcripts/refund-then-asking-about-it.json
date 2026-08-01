@@ -1,0 +1,86 @@
+{
+  "id": "refund-then-asking-about-it",
+  "title": "A refund, then the question everyone asks next",
+  "why": "Reported from a live session. The agent issued a refund, told the customer when it would post, and then answered \"When will the refund show up?\" by offering the returns menu again — because RETURN_REQUEST_RE matches the bare word refund and its only guard was a lookahead for the word policy. The follow-up is the most natural thing a customer says after a refund, and it was the one turn the agent could not handle. The last turn pins the other half: a book already refunded in this conversation is not offered again, and asking to return it reports the refund rather than emitting a second envelope.",
+  "conversation_id": "conv-refund-followup",
+  "turns": [
+    {
+      "customer": "I'd like to return a book.",
+      "reply": "Sure — which book would you like to return? 1) Godel, Escher, Bach (BK-1042)  2) Exhalation (BK-2131)",
+      "stages": [
+        "extract",
+        "route",
+        "candidates",
+        "clarify",
+        "clarify",
+        "narrate"
+      ],
+      "narrations": [
+        "clarify_which_order"
+      ],
+      "envelopes": []
+    },
+    {
+      "customer": "1",
+      "reply": "Done — Godel, Escher, Bach (BK-1042) was delivered on July 18, inside the 30-day return window, so I've issued a refund of $22.50 to your original payment method. It should post within 5 business days.",
+      "stages": [
+        "extract",
+        "route",
+        "verdict",
+        "envelope",
+        "narrate"
+      ],
+      "narrations": [
+        "refund_approved"
+      ],
+      "envelopes": [
+        {
+          "action": "refund",
+          "order_id": "BK-1042",
+          "amount": 22.5,
+          "currency": "USD",
+          "reason_code": "REFUND_APPROVED_IN_WINDOW",
+          "idempotency_key": "9cae7b6ef0f7e6400abb370780642179ef0bad6daa54733d45aac1d8038dbc43",
+          "delivery": "skipped_no_url"
+        }
+      ]
+    },
+    {
+      "customer": "When will the refund show up?",
+      "reply": "Your refund of $22.50 for Godel, Escher, Bach (BK-1042) is on its way to your original payment method. It should post within 5 business days.",
+      "stages": [
+        "extract",
+        "route",
+        "route",
+        "narrate"
+      ],
+      "narrations": [
+        "refund_status"
+      ],
+      "envelopes": []
+    },
+    {
+      "customer": "I'd like to return the Escher book",
+      "reply": "That one's already taken care of — I refunded Godel, Escher, Bach (BK-1042) for $22.50 earlier in this conversation. It should post within 5 business days.",
+      "stages": [
+        "extract",
+        "route",
+        "lookup",
+        "candidates",
+        "route",
+        "narrate"
+      ],
+      "narrations": [
+        "refund_status"
+      ],
+      "envelopes": []
+    }
+  ],
+  "accepted": [
+    {
+      "rule": "repeated_sentence",
+      "occurrences": 2,
+      "why": "The repeated sentence is the published posting time, and turns 3 and 4 are both questions whose true answer is that commitment. Saying a different number would be wrong and saying it differently would be decoration — the number is the answer. The sentences around it do differ, because asking when the money lands and asking to return the book again are different questions."
+    }
+  ]
+}

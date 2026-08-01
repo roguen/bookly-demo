@@ -26,10 +26,12 @@ from datetime import date
 import backoffice
 import covers
 import envelope as envelope_module
+import harness
 import llm
 import policy
 import queue as queue_module  # this repo's queue.py, not the stdlib
 import recorder
+import rubric
 import store as store_module
 import tools
 import web
@@ -152,10 +154,33 @@ def profile_load_preserves_the_fixtures():
         assert actual == expected, (order_id, actual, expected)
     assert TODAY == date(2026, 7, 30)
     assert CURRENT_CUSTOMER_ID == "C-1001"
+    # The record and the store agree about how many orders exist. They did not
+    # for a while — the card said 37 and five were loaded — and an agent that
+    # can only discuss five of the thirty-seven it claims is the same
+    # confidently-wrong sentence one level up.
+    orders = tools.orders_for_customer(CURRENT_CUSTOMER_ID)
+    assert len(orders) == store_module.CUSTOMER.orders_placed == 37
+    # A history that size is the point: it is what makes offering every
+    # delivered order as a choice absurd, and what the returnable_now filter
+    # exists to answer.
+    delivered = tools.delivered_orders(CURRENT_CUSTOMER_ID)
+    assert len(delivered) == 34
     # The clarifying question numbers its options in store order, so the
-    # order the profile lists them in is load bearing, not incidental.
-    assert [o.order_id for o in tools.delivered_orders(CURRENT_CUSTOMER_ID)] \
-        == ["BK-1042", "BK-0987"]
+    # order the profile lists them in is load bearing, not incidental — and
+    # what it offers is what policy would actually approve, not everything
+    # that was ever delivered.
+    returnable = policy.returnable_now(delivered, CURRENT_CUSTOMER_ID, TODAY)
+    assert [o.order_id for o in returnable] == ["BK-1042", "BK-2131"]
+    # Every one of them is genuinely grantable, which is the whole claim.
+    for order in returnable:
+        verdict = policy.decide_return(order, CURRENT_CUSTOMER_ID, TODAY)
+        assert verdict.decision == "approve_refund", order.order_id
+    # And an out-of-window order is still reachable by name — it is dropped
+    # from what the agent volunteers, not from what it will discuss.
+    assert "BK-0987" not in [o.order_id for o in returnable]
+    assert policy.decide_return(
+        ORDERS["BK-0987"], CURRENT_CUSTOMER_ID, TODAY
+    ).reason_code == policy.RETURN_WINDOW_EXPIRED
 
 
 @check
@@ -514,49 +539,127 @@ def the_agent_can_explain_its_own_behaviour():
 
 
 @check
-def the_agents_voice_is_data_and_never_reaches_a_decision():
-    """Who the agent is and how it declines come from the profile, so both
-    providers speak with one voice and re-skinning stays a data edit. None of
-    it may touch a verdict, an amount or a reason code."""
-    agent_profile = store_module.AGENT
-    assert agent_profile["name"] == "Hal"
-    assert agent_profile["full_name"] == "Hal-9000"
-    refusal = agent_profile["refusal_line"]
+def the_agent_speaks_without_announcing_itself():
+    """The agent is labelled, not self-introducing.
 
-    # A refusal opens with the line; a neutral outcome never does.
-    denied = _fresh_agent("conv-voice-a").handle_turn(
-        "I want to return my copy of The Pragmatic Programmer, order BK-0987."
-    )
-    assert denied.reply.startswith(refusal), denied.reply
-    approved = _fresh_agent("conv-voice-b").handle_turn(
+    The interface already shows who is speaking. An agent that re-announces
+    itself every few turns reads as one with no memory, and a catchphrase
+    prefixed to every refusal reads as a template firing rather than an agent
+    speaking — which is the opposite of what a persona is for. So the name
+    stays in the data, for the interface to label with, and stays out of the
+    prose.
+    """
+    agent_profile = store_module.AGENT
+    assert agent_profile["name"] == "Hal"          # the interface labels with it
+    assert agent_profile["full_name"] == "Hal-9000"
+    assert "refusal_line" not in agent_profile     # struck, not merely unused
+
+    # No reply announces the agent, on any path: a greeting, a refusal, a
+    # neutral outcome, or an escalation.
+    replies = [
+        _fresh_agent("conv-voice-a").handle_turn("hello").reply,
+        _fresh_agent("conv-voice-b").handle_turn(
+            "I want to return my copy of The Pragmatic Programmer, order "
+            "BK-0987."
+        ).reply,
+        _fresh_agent("conv-voice-c").handle_turn(
+            "I want to return the Escher book"
+        ).reply,
+        _fresh_agent("conv-voice-d").handle_turn("Where's my Dune order?").reply,
+        _fresh_agent("conv-voice-e").handle_turn(
+            "I want to speak to a manager"
+        ).reply,
+    ]
+    for reply in replies:
+        assert "I'm Hal" not in reply, reply
+        assert "sorry Dave" not in reply, reply
+        # The rubric's speaker-label rule, applied to the templates too: no
+        # reply opens by naming its own speaker.
+        assert not rubric.SPEAKER_LABEL_RE.match(reply), reply
+
+    # A refusal still says plainly why. Dropping the catchphrase dropped no
+    # reason.
+    denied = replies[1]
+    assert "outside the 30-day return window" in denied, denied
+
+    # The decision layer is untouched by any of it.
+    approved = _fresh_agent("conv-voice-f").handle_turn(
         "I want to return the Escher book"
     )
-    assert refusal not in approved.reply, approved.reply
-    status = _fresh_agent("conv-voice-c").handle_turn("Where's my Dune order?")
-    assert refusal not in status.reply, status.reply
-    assert "I'm Hal" in _fresh_agent("conv-voice-d").handle_turn("hello").reply
-
-    # The decision behind the refusal is untouched by any of it.
     (envelope_record, _delivery), = approved.envelopes
     assert envelope_record["amount"] == ORDERS["BK-1042"].price_paid
     assert envelope_record["reason_code"] == policy.REFUND_APPROVED_IN_WINDOW
 
-    # The persona reaches a hosted model the same way, through its prompt —
-    # and the two rules that are not negotiable survive alongside it.
+    # The persona reaches a hosted model through its prompt, and now carries
+    # the instruction that keeps it quiet there too — a hosted narrator told
+    # to "introduce yourself" did it on every turn.
     prompt = llm.NARRATION_SYSTEM_PROMPT
-    assert refusal in prompt
-    assert "Hal" in prompt
+    assert "Do not introduce yourself" in prompt
+    assert "speaker label" in prompt
+    assert "not \"2026-07-18\"" in prompt  # dates as a person says them
     assert "must not add facts" in prompt
     assert "must not change or soften the decision" in prompt
 
-    # Voice is the only thing llm.py takes from the profile, and policy is
-    # still not among its imports.
+    # Voice is still the only thing llm.py takes from the profile, and policy
+    # is still not among its imports.
     source = pathlib.Path("llm.py").read_text(encoding="utf-8")
     assert "from store import AGENT, BRAND" in source
     for forbidden in ("import policy", "from policy import"):
         assert forbidden not in source, forbidden
-    # Turning the persona off is deleting keys, not editing code.
-    assert 'AGENT.get("refusal_line")' in source
+    assert 'AGENT.get("persona")' in source
+
+
+@check
+def published_commitments_travel_as_facts_not_template_literals():
+    """What the agent promises a customer about timing is looked up, never
+    asserted by a template.
+
+    Both service levels reach the narrator as facts on the event. That is what
+    lets a hosted model — whose prompt forbids inventing timeframes — state
+    the same one: it is repeating a fact it was handed rather than producing
+    one. A number written into a template cannot make that trip, so the two
+    providers would tell a customer different things about when their money
+    arrives.
+    """
+    seen = {}
+
+    class Recording(RulesProvider):
+        def narrate(self, event):
+            seen[event.kind] = dict(event.facts)
+            return super().narrate(event)
+
+    refund = Agent(Recording(), "conv-sla-refund").handle_turn(
+        "I want to return the Escher book"
+    )
+    posting = store_module.SERVICE_LEVELS["refund_posting"]
+    assert seen["refund_approved"]["posting_target"] == posting
+    assert posting in refund.reply, refund.reply
+
+    Agent(Recording(), "conv-sla-escalate").handle_turn(
+        "I want to speak to a manager"
+    )
+    assert seen["escalation"]["response_target"] == (
+        store_module.SERVICE_LEVELS["escalation_first_response"]
+    )
+
+    # Neither number is written into the narration layer.
+    source = pathlib.Path("llm.py").read_text(encoding="utf-8")
+    assert "5 business days" not in source
+    assert "4 business hours" not in source
+
+    # And with no service level published, the reply stops rather than
+    # inventing a timeframe — the same failing-closed the knowledge base does.
+    saved = dict(store_module.SERVICE_LEVELS)
+    try:
+        store_module.SERVICE_LEVELS.pop("refund_posting")
+        quiet = Agent(RulesProvider(), "conv-sla-none").handle_turn(
+            "I want to return the Escher book"
+        )
+        assert "should post" not in quiet.reply, quiet.reply
+        assert "$22.50" in quiet.reply, quiet.reply
+    finally:
+        store_module.SERVICE_LEVELS.clear()
+        store_module.SERVICE_LEVELS.update(saved)
 
 
 @check
@@ -685,36 +788,481 @@ def provider_selection_is_explicit_and_bounded():
                 os.environ[key] = value
 
 
+# --- golden transcripts ---------------------------------------------------
+#
+# A scenario is a file under transcripts/, replayed through the same
+# handle_turn the CLI and the console call. `golden_transcript_return_flow`
+# used to live here as a function with the strings pasted into its body; it is
+# now transcripts/return-with-clarification.json, same conversation id and
+# therefore the same idempotency key. Adding the second scenario is adding a
+# file, which is the whole point of moving it.
+
+
 @check
-def golden_transcript_return_flow():
-    """One full conversation asserted end to end — the seed of the
-    golden-transcript harness. Exact strings on purpose: any wording or
-    decision drift should fail loudly."""
-    agent = _fresh_agent("conv-golden")
-    first = agent.handle_turn("I'd like to return a book.")
-    assert first.reply == (
-        "Sure — which book would you like to return? "
-        "1) Godel, Escher, Bach (BK-1042)  "
-        "2) The Pragmatic Programmer (BK-0987)"
+def transcripts_are_present_and_blessed():
+    """An empty transcripts/ would delete every generated check below without
+    turning the suite red — coverage would vanish and the output would look
+    exactly as good. So the fixtures existing is itself a check, and so is
+    their being blessed: an unblessed fixture has no expectations to fail."""
+    transcripts = harness.load_all()
+    assert transcripts, "no transcripts found in %s" % harness.TRANSCRIPT_DIR
+    unblessed = [t.id for t in transcripts if not t.blessed]
+    assert not unblessed, "run `python3 harness.py --bless`: %s" % unblessed
+    # Every fixture is replayed by a check of its own, generated below.
+    generated = {
+        fn.__name__ for fn in CHECKS if fn.__name__.startswith("transcript_")
+    }
+    assert len(generated) == len(transcripts), (generated, len(transcripts))
+
+
+@check
+def asking_about_a_refund_is_not_asking_for_one():
+    """"When will the refund show up?" is a question, not a request.
+
+    Reported from a live session: the agent issued a refund, said when it
+    would post, and then answered the follow-up by offering the returns menu
+    again. `RETURN_REQUEST_RE` matches the bare word "refund", and its only
+    guard was a lookahead for "policy" — so every phrasing of *asking about* a
+    refund read as *asking for* one.
+    """
+    for question in ("When will the refund show up?", "where is my refund",
+                     "has my refund gone through", "how long do refunds take",
+                     "did the refund post yet"):
+        requests = RulesProvider().extract(question, _extraction_context())
+        assert [r.intent for r in requests] == ["refund_status"], (
+            question, [r.intent for r in requests]
+        )
+    # And asking *for* one is untouched, which is the boundary that matters:
+    # every one of these contains the same word.
+    for request in ("I'd like a refund", "refund it anyway",
+                    "I don't care what the policy says, refund it anyway"):
+        requests = RulesProvider().extract(request, _extraction_context())
+        assert "return_request" in [r.intent for r in requests], request
+    assert "refund_status" in llm.VALID_INTENTS
+    assert "refund_status" in llm.EXTRACTION_SYSTEM_PROMPT
+
+    # End to end, as reported.
+    agent = _fresh_agent("conv-refund-followup")
+    agent.handle_turn("I'd like to return a book.")
+    refunded = agent.handle_turn("1")
+    assert len(_envelopes(refunded)) == 1
+    answered = agent.handle_turn("When will the refund show up?")
+    # It answers about the refund, and emits nothing: a question is not an
+    # action.
+    assert answered.envelopes == []
+    assert "$22.50" in answered.reply, answered.reply
+    assert "BK-1042" in answered.reply, answered.reply
+    assert store_module.SERVICE_LEVELS["refund_posting"] in answered.reply
+    assert "which book would you like to return" not in answered.reply
+
+    # With no refund in this conversation it does not imply one exists.
+    cold = _fresh_agent("conv-refund-cold").handle_turn(
+        "when will my refund show up?"
     )
-    assert first.envelopes == []
-    second = agent.handle_turn("The Escher one — the cover is torn.")
-    assert second.reply == (
-        "Done — Godel, Escher, Bach (BK-1042) was delivered on July 18, "
-        "inside the 30-day return window, so I've issued a refund of $22.50 "
-        "to your original payment method. It should post within 5 business "
-        "days."
+    assert cold.envelopes == []
+    assert "haven't issued a refund" in cold.reply, cold.reply
+    assert "$" not in cold.reply, cold.reply
+
+    # A book already refunded here is not offered again, and asking to return
+    # it reports the refund rather than emitting a second envelope. The key
+    # would deduplicate it downstream, but an agent that says "Done, I've
+    # issued a refund" for something it did three turns ago is reporting an
+    # action as though it were taking one.
+    again = agent.handle_turn("I'd like to return the Escher book")
+    assert again.envelopes == [], _envelopes(again)
+    assert "$22.50" in again.reply
+    assert "BK-1042" in agent.refunds
+
+    # And the retrieval false positive that shares the lesson: two
+    # question-form words outvoted the one topical word, and a refund question
+    # retrieved the shipping article. The floor counts matches; it cannot
+    # weigh them, so the keywords carry topic only.
+    assert tools.search_policy("how long do refunds take") is None
+    assert tools.search_policy(
+        "How long does standard shipping take?"
+    ).article_id == "kb-shipping-times"
+    for article in store_module.ARTICLES:
+        for question_word in ("long", "take", "takes"):
+            assert question_word not in article.keywords, (
+                article.article_id, question_word
+            )
+
+
+@check
+def an_aggregate_question_is_not_answered_with_one_order():
+    """A question about the account is not a question about an order.
+
+    Reported from a live hosted session: "what books have I ordered in the
+    past?" came back with a fluent, confident report on one order. The
+    aggregate question had no intent to land in, so a hosted model mapped it
+    onto `order_status`, `_resolve_read_target` fell back to the likeliest
+    single order, and the customer got a precise answer to a question they had
+    not asked.
+
+    Nothing escalated, nothing declined, no reason code was produced. That is
+    the part that matters: the failure mode this build advertises — anything
+    uncovered goes to a human — cannot fire when the state machine has been
+    handed an intent it recognises and has handled correctly. The fix is a
+    door of its own, not a better fallback.
+    """
+    assert "order_history" in llm.VALID_INTENTS
+    # The hosted extractor has to know the intent exists, or the whole point
+    # is lost: it will keep reaching for order_status.
+    assert "order_history" in llm.EXTRACTION_SYSTEM_PROMPT
+    assert "the account as a whole" in llm.EXTRACTION_SYSTEM_PROMPT
+
+    watched = ListRecorder()
+    agent = Agent(RulesProvider(), "conv-history", recorder=watched)
+    result = agent.handle_turn("what books have I ordered in the past?")
+
+    # It answers the question asked: the whole account, with a count.
+    assert str(len(tools.orders_for_customer(CURRENT_CUSTOMER_ID))) in (
+        result.reply
+    ), result.reply
+    assert "37 orders" in result.reply, result.reply
+    assert result.envelopes == []
+    # And it does not read as a report on one order.
+    assert "is expected by" not in result.reply, result.reply
+    assert "was delivered on" not in result.reply, result.reply
+
+    # The read is the whole account, and it says so in the trace rather than
+    # arriving as an order_read that fell back.
+    lookups = [n for n in watched.notes if n.stage == "lookup"]
+    assert [n.payload["kind"] for n in lookups] == ["order_history"], lookups
+    assert lookups[0].payload["total"] == 37
+
+    # Scoped like every other read: another customer's order is not in it.
+    assert "BK-2077" not in result.reply
+    assert "Snow Crash" not in result.reply
+
+    # The phrasings from the report, and the ones a customer reaches for next.
+    for question in (
+        "Yeah, but what is the total number of books that I have ordered?",
+        "how many books have I ordered",
+        "show me my orders",
+        "everything I've bought",
+    ):
+        reply = _fresh_agent("conv-agg").handle_turn(question).reply
+        assert "37 orders" in reply, (question, reply)
+
+    # Asking one order's status still resolves to one order.
+    single = _fresh_agent("conv-single").handle_turn("Where's my Dune order?")
+    assert "BK-1041" in single.reply and "37 orders" not in single.reply
+
+    # And the agent answers to its name, which needed an intent for the same
+    # reason: routing it through retrieval would have meant matching on "you"
+    # and "your", and "how long do you keep your records?" would then retrieve
+    # the identity article — the confident-wrong-article failure the retrieval
+    # floor exists to prevent.
+    assert "agent_identity" in llm.VALID_INTENTS
+    named = _fresh_agent("conv-who").handle_turn("What is your name?").reply
+    assert "My name is Hal" in named, named
+    assert tools.search_policy("How long do you keep your records?") is None
+    # The name reaches the narrator as a fact, so a hosted model — no longer
+    # told to introduce itself — can still answer when it is actually asked.
+    seen = {}
+
+    class Recording(RulesProvider):
+        def narrate(self, event):
+            seen[event.kind] = dict(event.facts)
+            return super().narrate(event)
+
+    Agent(Recording(), "conv-who-facts").handle_turn("who are you?")
+    assert seen["agent_identity"]["name"] == store_module.AGENT["name"]
+    # It is still not volunteered: a greeting does not trigger it.
+    assert "My name is" not in _fresh_agent("conv-hi").handle_turn("hello").reply
+
+
+@check
+def a_coincidental_title_word_never_moves_money():
+    """The customer has to have named the book.
+
+    A word that merely appears inside a title is not a reference. Before this
+    guard, "I want to return the left one" resolved to The Left Hand of
+    Darkness and "the things I got" to The Design of Everyday Things — two
+    books nobody named — on the shipped five-order dataset. Both happened to
+    be un-refundable, so no money moved. That was luck: the same coincidence
+    against a delivered, in-window order issues a refund, which is exactly
+    what it did the moment a catalog containing "The Book of the New Sun" was
+    loaded.
+
+    The two halves of the guard are deliberately in different places. Which
+    words are generic is a property of a catalog and lives in the profile.
+    How much of a title has to match before a refund may act is
+    disambiguation, and lives in policy.py beside should_clarify.
+    """
+    # The half that is data.
+    for word in ("book", "copy", "cover", "left", "things", "light"):
+        assert word in store_module.GENERIC_TITLE_WORDS, word
+    assert "escher" not in store_module.GENERIC_TITLE_WORDS
+
+    # The half that is policy.
+    assert policy.title_reference_is_strong(matched=1, distinctive=1)
+    assert not policy.title_reference_is_strong(matched=1, distinctive=0)
+    assert policy.title_reference_is_strong(
+        matched=policy.MIN_TITLE_WORDS_FOR_WRITE, distinctive=0
     )
-    emitted = _envelopes(second)
-    assert len(emitted) == 1
-    envelope = emitted[0]
-    assert envelope["action"] == "refund"
-    assert envelope["order_id"] == "BK-1042"
-    assert envelope["amount"] == ORDERS["BK-1042"].price_paid
-    assert envelope["reason_code"] == policy.REFUND_APPROVED_IN_WINDOW
-    assert envelope["idempotency_key"] == idempotency_key(
-        "conv-golden", "refund", "BK-1042"
+
+    # And the behaviour, end to end, on the real profile. A coincidence asks
+    # the question it would have asked if the customer had said nothing.
+    for coincidence in ("I want to return the left one",
+                        "I want to return the things I got"):
+        result = _fresh_agent("conv-coincidence").handle_turn(coincidence)
+        assert result.envelopes == [], (coincidence, result.envelopes)
+        assert "which book would you like to return" in result.reply, (
+            coincidence, result.reply
+        )
+        assert "Left Hand" not in result.reply, result.reply
+        assert "Everyday Things" not in result.reply, result.reply
+
+    # Naming a book still works, and still costs exactly one turn.
+    named = _fresh_agent("conv-named").handle_turn(
+        "I want to return the Escher book"
     )
+    emitted = _envelopes(named)
+    assert len(emitted) == 1 and emitted[0]["order_id"] == "BK-1042"
+    # ...including when a generic word rides along in the same sentence, which
+    # must not drag another title in as a candidate.
+    assert "which book" not in named.reply, named.reply
+
+    # The trace shows the judgement rather than hiding it, and shows it on the
+    # deterministic side, next to the constant it rests on.
+    watched = ListRecorder()
+    Agent(RulesProvider(), "conv-strength", recorder=watched).handle_turn(
+        "I want to return the left one"
+    )
+    judged = [
+        n for n in watched.notes
+        if n.stage == "candidates" and n.payload.get("source") == "title_reference"
+    ]
+    assert judged, [n.stage for n in watched.notes]
+    payload = judged[0].payload
+    assert payload["strong_enough_to_act"] is False
+    assert payload["matched_words"] == ["left"]
+    assert payload["distinctive_words"] == []
+    assert payload["limit"] == policy.MIN_TITLE_WORDS_FOR_WRITE
+    assert judged[0].side == recorder.DETERMINISTIC
+
+
+@check
+def the_rubric_catches_the_recorded_hosted_drift():
+    """The rubric has to catch the drift that actually happened.
+
+    `evidence/provider_parity.txt` records a real hosted run where every
+    decision field matched and the knowledge-base miss dropped the offer of a
+    human agent the template makes every time. No verdict moved; every check
+    in this suite passed; the customer got a worse answer.
+
+    So the recorded reply is graded here, offline and with no billed call, and
+    the rubric must fail it. A rubric that has never caught anything is a
+    proposal rather than an instrument.
+    """
+    # Copied verbatim from the evidence, and checked against it below — the
+    # same discipline deck/README.md imposes on slide excerpts.
+    recorded = (
+        "I couldn’t find a help article for that yet. Please share a bit "
+        "more detail about what you’re trying to do, and I’ll help "
+        "from there."
+    )
+    evidence = pathlib.Path("evidence/provider_parity.txt").read_text(
+        encoding="utf-8"
+    )
+    assert recorded in evidence, "the quoted reply is no longer in the evidence"
+
+    findings = rubric.grade_narration("kb_miss", {}, recorded, "recorded")
+    dropped = [f for f in findings if f.rule == "must_offer"]
+    assert dropped, findings
+    assert "offer" in dropped[0].detail
+
+    # And it does not simply fail everything: the template's own miss, which
+    # keeps the offer, grades clean.
+    template = llm.RulesProvider().narrate(llm.NarrationEvent("kb_miss", {}))
+    assert not rubric.grade_narration("kb_miss", {}, template, "template"), (
+        template
+    )
+
+    # The whole point is that no decision test could have caught it. The two
+    # replies decline identically as far as the decision layer is concerned:
+    # a kb_miss narrates a miss, and there is no envelope, verdict or reason
+    # code on either side to differ.
+    assert "human" not in recorded.lower()
+    assert "human" in template.lower()
+
+
+@check
+def the_regression_run_installs_nothing():
+    """CI is where "no dependencies" stops being a claim.
+
+    A workflow that quietly grew a `pip install` would make the repo's central
+    practical promise — clone it, run it, no packages — false everywhere
+    except a README. So the absence is asserted rather than trusted, and the
+    interpreters the docs promise are asserted to actually be in the matrix:
+    dropping 3.9 from CI while README still says 3.9 is the same class of
+    drift as DEMO.md saying forty-five.
+    """
+    workflow = pathlib.Path(".github/workflows/checks.yml")
+    assert workflow.exists(), "no regression run is configured"
+    source = workflow.read_text(encoding="utf-8")
+    for forbidden in ("pip install", "pip3 install", "npm install",
+                      "npm ci", "poetry install", "uv pip"):
+        # Named in the leading comment on purpose; the assertion is about
+        # steps, so only lines that could run count.
+        for line in source.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+            assert forbidden not in stripped, (forbidden, line)
+    for version in ("3.9", "3.13"):
+        assert '"%s"' % version in source, version
+    assert "python tests.py" in source
+    # And no vendor key is available to it, so a green run is a green run of
+    # the dependency-free path rather than of somebody's billed account.
+    for variable in llm.VENDOR_KEY_VARS.values():
+        assert variable not in source, variable
+    assert "secrets." not in source
+
+
+@check
+def the_suite_never_reaches_a_hosted_provider():
+    """A hosted run is something a person asks for at a terminal. It costs
+    money and needs a network, and neither belongs in `python3 tests.py` —
+    which is also what lets the same command run in CI on a clean checkout
+    with no secrets configured."""
+    assert harness.DEFAULT_PROVIDER == "rules"
+    # The default is the stand-in, not merely named after it: a replayed reply
+    # is byte-identical to what the template produces directly.
+    transcript = [
+        t for t in harness.load_all() if t.id == "policy-answered-then-missed"
+    ][0]
+    observed = harness.replay(transcript)
+    assert observed[1].reply == llm.RulesProvider().narrate(
+        llm.NarrationEvent("kb_miss", {})
+    )
+    # And no check hands replay a provider of its own, so none of them can
+    # reach a vendor however the environment is configured.
+    source = pathlib.Path("tests.py").read_text(encoding="utf-8")
+    assert "harness.replay(transcript)" in source
+    assert not re.search(r"harness\.replay\([^)]*,", source), (
+        "a check is passing replay a provider"
+    )
+    # Blessing from a hosted narrator is refused: a fixture blessed that way
+    # would pin one sampling of one model's prose as the repo's expected text.
+    assert "refusing to bless from" in pathlib.Path("harness.py").read_text(
+        encoding="utf-8"
+    )
+
+
+@check
+def the_rubric_cannot_reach_a_decision():
+    """Grading prose must never become a second place that decides.
+
+    Asserted structurally, the same way "policy.py does not import an LLM" is:
+    nothing on the decision path imports the rubric, so there is no code path
+    by which a grade could become an input to a verdict. And the rubric
+    imports nothing that would let it judge one — no policy, no store, no
+    tools, no order record. It cannot tell you whether a refund was correct,
+    because it is never told what the refund was.
+    """
+    decision_path = ("agent.py", "policy.py", "tools.py", "llm.py",
+                     "envelope.py", "store.py", "recorder.py", "covers.py")
+    for name in decision_path:
+        source = pathlib.Path(name).read_text(encoding="utf-8")
+        for form in ("import rubric", "from rubric import"):
+            assert form not in source, (name, form)
+
+    rubric_source = pathlib.Path("rubric.py").read_text(encoding="utf-8")
+    for module in ("policy", "store", "tools", "agent", "envelope", "llm"):
+        for form in ("import %s" % module, "from %s import" % module):
+            assert form not in rubric_source, module
+    # It is handed three things and holds no state that could accumulate one.
+    assert "def grade_narration(kind: str, facts: dict, text: str" in (
+        rubric_source
+    )
+
+    # A finding is inert. Grading a real conversation produces findings and
+    # changes nothing about it: the same conversation replayed with and
+    # without a grading pass returns identical replies and envelopes.
+    transcript = [
+        t for t in harness.load_all() if t.id == "repeat-question-same-answer"
+    ][0]
+    first = harness.replay(transcript)
+    findings = rubric.grade([(t.reply, t.narration_events) for t in first])
+    assert findings, "this fixture exists to produce one"
+    second = harness.replay(transcript)
+    assert [t.reply for t in first] == [t.reply for t in second]
+    assert [t.envelopes for t in first] == [t.envelopes for t in second]
+
+
+@check
+def a_rubric_rule_can_be_wrong_and_saying_so_is_not_suppressing_it():
+    """Some repetition is correct, and the rubric cannot tell which.
+
+    Asking the same question twice has one right answer, said the same way
+    both times. `repeated_sentence` is a heuristic for an agent stuck on a
+    loop, and here the heuristic is simply wrong — so the fixture accepts the
+    finding with an argument instead of carrying an issue number that will
+    never be closed.
+
+    `accepted` and `known_gaps` are deliberately separate lists. One is a
+    debt, the other a decision, and a defect allowed to sit in the wrong one
+    would never be looked at again. Both are held to the same standard: an
+    entry with no reason is refused, and an entry the rubric stopped
+    reporting is stale and fails.
+    """
+    fixture = [
+        t for t in harness.load_all() if t.id == "repeat-question-same-answer"
+    ][0]
+    assert not fixture.known_gaps, "this is a decision, not a debt"
+    accepted = {entry["rule"] for entry in fixture.accepted}
+    assert accepted == {"repeated_sentence"}, accepted
+    assert all(entry.get("why") for entry in fixture.accepted)
+    assert all("issue" not in entry for entry in fixture.accepted)
+
+    observed = harness.replay(fixture)
+    assert observed[0].reply == observed[1].reply  # identical, and right
+    findings = harness.findings_for(observed)
+    assert [f.rule for f in findings] == ["repeated_sentence"], findings
+    # Accepted, so it does not fail the suite.
+    assert not harness.compare(fixture, observed)
+
+    # But an acceptance with no argument behind it is refused, and one the
+    # rubric no longer reports is stale — the same two guards known_gaps has.
+    import dataclasses
+
+    silent = dataclasses.replace(
+        fixture, accepted=({"rule": "repeated_sentence"},)
+    )
+    assert any(
+        "no reason" in failure
+        for failure in harness.compare(silent, observed)
+    ), harness.compare(silent, observed)
+    stale = dataclasses.replace(
+        fixture,
+        accepted=fixture.accepted + ({"rule": "must_offer", "why": "x"},),
+    )
+    assert any(
+        "is stale" in failure for failure in harness.compare(stale, observed)
+    ), harness.compare(stale, observed)
+
+
+def _register_transcript_checks() -> None:
+    """One generated check per fixture, named after it.
+
+    Named rather than anonymous because the console's Checks panel streams
+    these by name during a demo, and `transcript_return_with_clarification`
+    tells a viewer what just passed where `check_7` does not.
+    """
+    for transcript in harness.load_all():
+        def run(transcript=transcript):
+            failures = harness.compare(transcript, harness.replay(transcript))
+            assert not failures, "\n" + "\n".join(failures)
+
+        run.__name__ = "transcript_%s" % transcript.id.replace("-", "_")
+        run.__doc__ = transcript.why
+        check(run)
+
+
+_register_transcript_checks()
 
 
 # --- the web layer --------------------------------------------------------
@@ -1623,6 +2171,79 @@ def the_stub_receiver_is_untouched():
     }, sorted(emitted)
 
 
+# --- what this suite says about itself ------------------------------------
+
+
+# Every document that tells a reader how many checks this suite has. The
+# count is a fact about this file, and a document holding its own copy of it
+# is a document that will eventually disagree with the suite — the same
+# argument `policy_constants_surface_matches_policy` makes about thresholds,
+# with a slower fuse. DEMO.md drifted to forty-five while the suite ran fifty,
+# and nothing caught it because nothing was looking.
+#
+# This tuple is the centralisation. The number itself lives in exactly one
+# place — len(CHECKS) — and every claim about it is checked against that.
+# Citing the count in a new document means adding a line here.
+DOCUMENTS_CITING_THE_COUNT = (
+    "README.md",
+    "READING_GUIDE.md",
+    "DEMO.md",
+    "docs/wiki/Home.md",
+    "deck/build.js",
+)
+
+# Claims are written as numerals on purpose. "Fifty", "fifty" and "forty-five"
+# are three spellings of one fact, and standardising on one form is what makes
+# drift mechanically detectable rather than a thing you have to notice. The
+# numeral must sit immediately before "check"/"checks", with at most one
+# adjective between them, so a version string like "3.9.6" in the same
+# sentence is not mistaken for a count.
+#
+# The adjective slot needs a guard. "phase 3 the check count is enforced" is a
+# sentence about phase 3, and without this it reads as a claim that there are
+# three checks — which this rule duly reported, against itself, on the commit
+# that wrote that sentence. A determiner is never an adjective describing
+# checks, so excluding them costs no real claim and removes the whole class.
+NOT_AN_ADJECTIVE = (
+    "the", "a", "an", "this", "that", "these", "those",
+    "its", "their", "our", "your", "my", "his", "her",
+)
+COUNT_CLAIM_RE = re.compile(
+    r"\b(\d+)\s+(?:(?!(?:%s)\b)[a-z][a-z-]*\s+)?checks?\b"
+    % "|".join(NOT_AN_ADJECTIVE)
+)
+
+
+@check
+def documents_state_the_actual_check_count():
+    """Every document that cites the number of checks cites the real one.
+
+    Failure names the file, the line and the stale number, because the point
+    of this check is to be actionable at 2am on a Thursday rather than merely
+    correct.
+    """
+    actual = len(CHECKS)
+    stale = []
+    for name in DOCUMENTS_CITING_THE_COUNT:
+        path = pathlib.Path(name)
+        assert path.exists(), name
+        claims = 0
+        for number, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), start=1
+        ):
+            for claimed in COUNT_CLAIM_RE.findall(line):
+                claims += 1
+                if int(claimed) != actual:
+                    stale.append(
+                        "%s:%d says %s, the suite has %d"
+                        % (name, number, claimed, actual)
+                    )
+        # A document that stopped citing the number would make this check
+        # quietly vacuous, so an absent claim is a failure too.
+        assert claims, "%s no longer states the check count" % name
+    assert not stale, "; ".join(stale)
+
+
 def _audit_size() -> int:
     path = pathlib.Path(envelope_module.audit_path())
     return path.stat().st_size if path.exists() else 0
@@ -1638,6 +2259,11 @@ def _audit_since(offset: int) -> str:
 
 
 def main() -> int:
+    # `--count` prints the number and runs nothing, so a document, a script or
+    # a person can ask how many checks there are without paying for the suite.
+    if "--count" in sys.argv[1:]:
+        print(len(CHECKS))
+        return 0
     failures = 0
     for fn in CHECKS:
         try:

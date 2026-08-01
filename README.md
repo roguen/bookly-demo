@@ -34,12 +34,53 @@ For a live session:
 python3 app.py
 ```
 
-Run the checks (standard library only, no pytest). Fifty of them, and they
+Run the check suite (standard library only, no pytest) — 68 checks, and they
 also run from inside the console:
 
 ```bash
 python3 tests.py
 ```
+
+### Golden transcripts and the narration rubric
+
+A scenario is a file. `transcripts/*.json` holds one conversation each,
+replayed by `harness.py` through the same `handle_turn` the CLI and the
+console call, with the reply compared verbatim, the envelope's decision fields
+compared including the literal idempotency key, and the sequence of recorder
+stages compared — so a change that moved a decision to the model side of the
+boundary fails a test rather than a review.
+
+```bash
+python3 harness.py
+```
+
+`rubric.py` grades the prose, because the decisions were pinned and the prose
+was not. It is handed the event kind, the facts the agent gave the narrator,
+and the text that came back — and nothing else, which is why grading cannot
+become deciding. Findings a fixture still produces are listed in its
+`known_gaps` with the issue number that will close them; an unacknowledged
+finding fails, and so does an acknowledgement the rubric no longer reports —
+a fix has to delete its own excuse.
+
+A rule can also just be wrong. Asking the same question twice has one right
+answer, said the same way both times, and `repeated_sentence` cannot tell
+that from an agent stuck on a loop. A fixture may `accept` a finding with an
+argument instead of an issue number — a separate list from `known_gaps`,
+because one is a debt and the other a decision, and a defect allowed to sit
+in the wrong one would never be looked at again.
+
+To run the whole thing through a hosted narrator, which is **not** the default
+path and is never what `tests.py` does:
+
+```bash
+OPENAI_API_KEY=your-key python3 harness.py --provider openai --out evidence/narration_rubric_openai.txt
+```
+
+The decision layer is compared exactly on every provider. The verbatim reply
+comparison is skipped on a hosted run on purpose — a hosted model is expected
+to word things differently, and that is the parity claim rather than a defect
+— so the prose is graded by the rubric instead and the report says which mode
+it ran in.
 
 ## The console
 
@@ -124,26 +165,66 @@ have.
 
 ### The agent's voice
 
-The agent introduces itself as **Hal**, and declines with a line the profile
-supplies rather than one written into the code:
+The agent is called **Hal**, and the interface says so. The agent does not.
 
-> I'm sorry Dave, I can't do that. The Pragmatic Programmer (BK-0987) was
-> delivered on May 2, which is outside the 30-day return window, so I can't
-> issue a refund for it.
+It has no self-introduction and no catchphrase. Both were tried and both were
+struck, for the same reason: the interface already shows who is speaking, so
+an agent that announces itself every few turns reads as one with no memory,
+and a line prefixed to every refusal reads as a template firing rather than an
+agent talking. A persona that fires on a loop is not a persona.
 
-That line is applied to genuine refusals only — never to a successful refund
-or a status report, because an agent that apologises for doing what you asked
-reads as broken. `agent.persona` reaches a hosted model through the narration
-system prompt and the stand-in through its templates, so both providers
-decline in the same words. Delete the `agent` block and the agent is anonymous
-and plainly worded again; nothing in the decision layer changes either way.
+What remains is `agent.persona`, which reaches a hosted model through the
+narration system prompt and tells it, in as many words, not to introduce
+itself or prefix a speaker label — because a hosted narrator told to
+"introduce yourself" does it on every single turn. A refusal now just says
+plainly why:
+
+> The Pragmatic Programmer (BK-0987) was delivered on May 2, which is outside
+> the 30-day return window, so I can't issue a refund for it.
+
+Dropping the catchphrase dropped no reason.
+
+**Commitments are looked up, never asserted.** When a refund posts and how
+fast an escalation gets picked up are published service levels in the profile,
+and both travel as *facts on the event* rather than numbers in a template.
+That is what lets a hosted narrator — whose prompt forbids inventing
+timeframes — state the same one: it is repeating a fact it was handed rather
+than producing one. Remove a service level and the reply stops rather than
+inventing a timeframe, the same way retrieval fails closed.
 
 The agent can also explain itself. "What do you mean by limit?" after a
 clarify-limit handoff, and "how long until someone gets back to me?" after any
-escalation, are answered from the knowledge base like any other question — and
-the published response time travels as a *fact on the escalation event*, not a
-string in a template, so a hosted narrator forbidden from inventing promises
-can state it too.
+escalation, are answered from the knowledge base like any other question. It
+answers to its name too — "what is your name?" — though it never volunteers it.
+
+**A question about a refund is not a request for one.** "When will the refund
+show up?" contains the word *refund*, and used to be read as asking to start
+another return — so the agent answered the most natural follow-up to a refund
+by offering the returns menu again. `refund_status` handles it, names the
+refund it is talking about from conversation memory, and states the posting
+service level. A book already refunded in this conversation is not offered as
+a candidate again either: `policy.returnable_now` judges the record and the
+record has not changed, so this is the agent declining to repeat work it just
+did, not policy changing its mind.
+
+**Questions about the account, not an order.** "How many books have I
+ordered?" is a different question from "where is my order", and it has an
+intent of its own (`order_history`) rather than being routed to the nearest
+one. That matters more than it sounds: without a door, a hosted model maps
+the aggregate question onto `order_status`, the read falls back to the
+likeliest single order, and the customer gets a fluent answer to a question
+they did not ask — with nothing escalating, because from the state machine's
+view nothing went wrong. `agent_identity` exists for the same reason: the
+knowledge base could only reach it by matching on "you" and "your", which
+makes "how long do you keep your records?" retrieve the identity article, and
+no answer is worth reopening the retrieval floor.
+
+**A follow-up is answered as a follow-up.** Asking "when will it arrive?"
+right after asking where an order is has the same answer, and the agent says
+so as a continuation rather than repeating the sentence you just read. The
+facts do not change; the phrasing acknowledges that you already asked. Which
+rule resolved the read is recorded in the trace already, and it reaches the
+narrator as a fact — wording only, and no verdict reads it.
 
 ### Re-skinning
 
@@ -279,7 +360,10 @@ to drift and no place for a vendor to introduce a decision.
 | `backoffice.py`       | receiving is a different process from deciding      |
 | `app.py`              | the CLI shell                                       |
 | `stub_receiver.py`    | the orchestration layer's end of the webhook        |
-| `tests.py`            | the eval harness                                    |
+| `tests.py`            | the claims, executable                              |
+| `harness.py`          | a scenario is a file, replayed and compared         |
+| `rubric.py`           | prose is graded; grading decides nothing            |
+| `transcripts/*.json`  | the golden transcripts, one per scenario            |
 | `demo.txt`            | the four scripted scenarios                         |
 | `profiles/bookly.json`| the dataset, so a re-skin is a data edit            |
 | `DEMO.md`             | the run of show                                     |
@@ -287,12 +371,26 @@ to drift and no place for a vendor to introduce a decision.
 ## Assumptions and limits
 
 - One demo customer is signed in (`C-1001`); authentication is out of scope.
-- The agent's name, its refusal line and the customer's name are profile
-  data. They change what the agent *says* and nothing it decides, which is
-  the line the profile is not allowed to cross.
+- The customer has 37 orders, 34 of them delivered, and the clarifying
+  question offers the two a return could actually be granted on. Offering a
+  book and then refusing it costs the customer a turn to be told no, so
+  `policy.returnable_now` filters candidates through `decide_return` rather
+  than applying a rule of its own — there is deliberately no second definition
+  of "returnable". An order outside the window is still perfectly reachable by
+  name, and still answers with a reason code; what changed is only what the
+  agent volunteers.
+- The agent's name, its persona, the published service levels and the
+  customer's name are profile data. They change what the agent *says* and
+  nothing it decides, which is the line the profile is not allowed to cross.
 - The store and clock are mocked so every run is deterministic.
 - The knowledge base is deliberately small and deliberately has gaps —
   retrieval returning nothing on a gap is designed behavior, not a bug.
+- Article keywords carry topic only. "Long" and "take" are how English forms
+  a duration question and appear in questions about everything; with them in
+  the keyword sets, two question-form words outvoted the one topical word and
+  "how long do refunds take" retrieved the *shipping* article. The floor
+  counts matches and cannot weigh them, so the weighing is done by curating
+  what counts as a keyword.
 - Cases the policy engine does not model escalate to a human rather than
   resolve. That is the intended failure mode.
 - The `[envelope …]` lines in the CLI are back-office telemetry, shown for
@@ -303,6 +401,14 @@ to drift and no place for a vendor to introduce a decision.
   unknown title ("my Snow Crash order") reads as title-less and falls back
   to the likeliest order. Replies always name the order they describe, so a
   wrong read is visible and cheap; writes never fall back.
+- A write additionally requires that the customer *named* the book. A word
+  that merely appears inside a title is a coincidence — "I want to return the
+  left one" is not a reference to The Left Hand of Darkness — and a
+  coincidence asks the clarifying question instead of acting. Which words are
+  generic is catalog data (`catalog.generic_words`); how much of a title has
+  to match is disambiguation and lives in `policy.py`. The cost is that a
+  title whose every long word is generic cannot be named directly and needs
+  the clarifying question: one extra turn, in the safe direction.
 - The rules-based stand-in has a fixed phrase vocabulary. Turns it cannot
   classify ("pick up where we left off", keyword-free demands) fall to a
   safe help reply rather than a guess; the hosted model narrows this gap.

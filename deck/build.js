@@ -138,7 +138,7 @@ TALKING POINTS
 - policy.py does not import an LLM. That's a structural property you can grep for, not a promise.
 - The whole thing runs with no API key and no dependencies — there's a rules-based stand-in for both model jobs.
 - Verified, not assumed: same script through the regex stand-in and through gpt-5.4-mini, all eight replies worded differently, every decision field identical down to the idempotency key.
-- Fifty checks, all dependency-free, and the decision tests never touch a model at all. They run from a terminal or from inside the console.
+- 68 checks, all dependency-free, and the decision tests never touch a model at all. They run from a terminal, from inside the console, and in CI on 3.9, 3.13 and 3.14.
 
 IF ASKED
 
@@ -299,7 +299,7 @@ IF ASKED
 - How much would swapping in a real LLM change?: For a given order, nothing — same verdict, same reason code, same amount. What changes is how well it reads the customer's sentence. There's a Provider protocol, and both providers satisfy it.
 - Have you actually run it against a hosted model?: Yes. I ran the same four-scenario script twice, changing only the provider — the regex stand-in, then gpt-5.4-mini through the OpenAI API. All eight replies came back differently worded. Every decision field was identical, including the idempotency key, which is a hash of conversation, action, and order. That transcript is in evidence/provider_parity.txt.
 - Why does the idempotency key matter in that comparison?: Because it's derived from the decision, not the text. Two providers landing on the same key means they reached the same action on the same order. A downstream receiver deduping on it can't tell which model ran, and doesn't need to.
-- Did anything differ besides wording?: One thing worth naming. On the knowledge-base miss, the stand-in offers a human agent and the hosted model asks for more detail instead. Both correctly declined to invent an answer and no decision moved — but the model dropped an offer the template makes every time. That's narration drift, and it's exactly what the graded rubric on the last slide would catch.`);
+- Did anything differ besides wording?: One thing worth naming. On the knowledge-base miss, the stand-in offers a human agent and the hosted model asks for more detail instead. Both correctly declined to invent an answer and no decision moved — but the model dropped an offer the template makes every time. That's narration drift, and the graded rubric now catches it: the recorded reply is a check in the suite, run offline against the text from that transcript, with no billed call.`);
 
 // ---------------------------------------------------------------------------
 // Slide 3 — Key decisions
@@ -565,7 +565,7 @@ s5.addText("What I'd do differently", {
   bold: true, color: WHITE, margin: 0,
 });
 s5.addText(
-  "In priority order. The first one is a regression risk, not a backlog item.",
+  "Item one on this slide used to be the eval harness. It shipped — and the first thing it did was find four things I could not see.",
   {
     x: L, y: 1.06, w: CONTENT_W, h: 0.32, fontFace: FONT, fontSize: 14,
     color: "B9B8D4", margin: 0,
@@ -574,30 +574,44 @@ s5.addText(
 
 const nexts = [
   {
-    n: "1",
-    t: "The eval harness, first",
-    b: "Golden transcripts, a graded rubric, and a regression run on every prompt change. Support agents don't die from a bad launch demo — they die from a silent regression after somebody tweaks a prompt on a Thursday.",
-    f: "tests.py is the seed: 50 checks, including a two-turn conversation asserted end to end on exact strings and envelope fields. Growing it means fixtures per scenario, a rubric for narration quality, and wiring the run into CI.",
-    lines: 2,
+    n: "✓",
+    t: "The eval harness — built, and it earned its place immediately",
+    flines: 2,
+    b: "Golden transcripts as files, a graded narration rubric, and a regression run on 3.9, 3.13 and 3.14.",
+    f: "It found four defects in prose that every decision test passed clean, because not one of them moved a verdict. The sharpest: the refund template promises \"within 5 business days\" — carried by no fact on the event, and forbidden to the hosted narrator by its own prompt.",
+    lines: 1,
   },
   {
-    n: "2",
+    n: "1",
     t: "Embeddings for policy retrieval — behind the same hard floor",
+    flines: 1,
     b: "Keyword matching is the weak part. The floor is the part that matters, and it stays exactly as it is.",
     f: "Swapping the matcher is a contained change; removing the floor would reintroduce the confident-wrong-article failure at higher fidelity.",
     lines: 1,
   },
   {
+    n: "2",
+    t: "Questions the intent surface doesn't model",
+    flines: 2,
+    b: "\"How many books have I ordered?\" had no intent to land in — so a model mapped it to the nearest one, and answered confidently.",
+    f: "I added that door. But this build's failure mode — escalate rather than guess — never fired: the state machine got an intent it recognised. The gap is not that the agent was wrong; it is that it could not tell it was out of scope.",
+    lines: 1,
+  },
+  {
     n: "3",
     t: "The orchestration layer becoming real",
+    flines: 1,
     b: "Retries, dead-letter handling, and a durable idempotency store on the receiving end — none of which this repo implements.",
     f: "The envelope contract already accommodates it. That's why the agent emits instead of executing.",
     lines: 1,
   },
 ];
 const LINE_H = 0.26; // one wrapped line of 13pt body at this width
+const FOOT_LINE_H = 0.21; // one wrapped line of 12pt footnote at this width
 
-let ny = 1.86;
+// Four items now that the harness is one of them, so the rhythm is tighter
+// than the three-item version this slide used to hold.
+let ny = 1.72;
 nexts.forEach((item) => {
   s5.addShape(pres.ShapeType.ellipse, {
     x: L, y: ny + 0.02, w: BADGE, h: BADGE, fill: { color: PURPLE },
@@ -622,35 +636,56 @@ nexts.forEach((item) => {
     x: 1.24, y: footTop, w: 11.4, h: 0.5, fontFace: FONT, fontSize: 12,
     color: "9997B8", lineSpacing: 15, margin: 0,
   });
-  ny = footTop + 0.95;
+  // Advance past the footnote's actual depth, not just its top. Spacing the
+  // items by a constant from footTop made a two-line footnote sit closer to
+  // the next item than a one-line one, which reads as an uneven rhythm on a
+  // projector even when nothing overlaps.
+  ny = footTop + (item.flines || 1) * FOOT_LINE_H + 0.46;
 });
 
 s5.addNotes(`SCRIPT
 
-Three things, in the order I'd actually do them.
+The first item on this slide used to be the eval harness, and I argued it as a risk rather than a wish list: support agents don't fail at launch, they fail three weeks in when somebody tweaks a prompt and quietly breaks the escalation path.
 
-First, and it's not close: the eval harness. Golden transcripts, a graded rubric, a regression run that fires on every prompt change.
+So I built it. And I want to spend a moment on what it did, because it made the argument better than I could.
 
-I want to frame this as a risk, not a wish list. Support agents don't fail at launch. They fail three weeks in, when somebody tweaks a prompt and quietly breaks the escalation path. Nobody notices until the tickets pile up.
+Golden transcripts are files now — a scenario is a JSON fixture, not a test function, so adding one costs a file. Each pins the reply verbatim, every envelope field including the literal idempotency key, and the sequence of trace stages, which means a change that moved a decision to the model side of the boundary fails a test rather than a code review.
 
-That's what I'd build first. tests.py is the seed — fifty checks today, and one two-turn conversation checked line by line.
+Then the rubric, which is the part I'd point at. Decisions were pinned three ways over. Prose was pinned nowhere — and prose is the only part of this a customer reads. The rubric grades it, and it is handed exactly three things: the event kind, the facts the agent already gave the narrator, and the text that came back. No policy, no store, no order record. It cannot tell you whether a refund was correct, because it is never told what the refund was. That is deliberate. The whole risk with a grader is that it quietly becomes a second place that decides, and the defence is that there is nothing in its hands to decide with.
 
-I'll say something slightly against myself here. I found real bugs in this build by adversarially probing it. Then I fixed them, and the probe caught three more regressions I'd introduced in the fixes. That isn't carelessness. It's what it looks like when the harness does its job — and it's the argument for building one early.
+Four findings, first run, offline. The one I'd lead with: the refund template ends "It should post within 5 business days." No fact on the event carries that five. And the narration prompt tells a hosted model, in as many words, not to invent promises. So the template makes a promise about the customer's money that the hosted narrator is forbidden to make, and the two providers cannot say the same thing. Every decision test passed that. There was nothing for them to catch — no verdict moved.
 
-Second, embeddings for policy retrieval. Keyword matching is the weak part — but I'd put embeddings behind the same hard floor, unchanged. The matching is weak. The floor is load-bearing. Better retrieval with no floor just gives you a more convincing wrong article.
+It also caught the thing I already knew about from the parity run: on a knowledge-base miss, the hosted model dropped the offer of a human that the template makes every time. That drift is now a check that runs against the recorded reply, offline, with no billed call.
 
-Third, the orchestration layer becoming real — retries, dead letters, durable idempotency. None of that is in the repo today. But the envelope contract already accommodates it. That's why the agent emits instead of executing.
+And it caught two I did not know about — a persona line firing twice in consecutive turns, and a follow-up question getting a byte-identical answer, which from the customer's seat is indistinguishable from not being listened to.
+
+Every one of those is prose. Not one of them moved a decision. That is the argument for the harness, made by the harness.
+
+Then three things still ahead.
+
+Embeddings for policy retrieval — behind the same hard floor, unchanged. The matching is weak; the floor is load-bearing. Better retrieval with no floor just gives you a more convincing wrong article.
+
+Second, and this is the one I find most interesting: questions the intent surface doesn't model. Someone asked this agent how many books they'd ordered. There was no intent for that to land in, so the hosted model mapped it to the nearest one — order status — and it answered about a single order, fluently and confidently. Three times.
+
+Now, the failure mode I've been selling you all deck is that anything the policy engine doesn't cover escalates instead of resolving. Here it didn't fire. Not because the guard is broken — because nothing looked wrong. The state machine got an intent it recognised and handled it correctly.
+
+I added the door. That specific question works now. But I want to be careful about what I've actually fixed, because it's two instances and not the class. The gap was never that the agent was wrong. It's that it couldn't tell it was out of scope, and you don't solve that by adding intents one at a time until you run out of customers.
+
+Third, the orchestration layer becoming real — retries, dead letters, durable idempotency. None of that is in the repo. But the envelope contract already accommodates it, which is why the agent emits instead of executing.
 
 TALKING POINTS
 
-- 50 checks today, dependency-free, no pytest — Python 3.9 and up.
-- The golden transcript test asserts exact strings on purpose, so wording drift fails loudly.
-- Everything here is contained: none of the three requires reopening the decision layer.
+- 68 checks today, dependency-free, no pytest — running in CI on 3.9, 3.13 and 3.14, with no pip install anywhere in the workflow file.
+- A scenario is a file. Adding one is adding a fixture and running one command.
+- The rubric grades prose and cannot reach a decision, and that's asserted structurally — the same grep-for-it discipline as "policy.py does not import an LLM".
+- Open defects are listed in the fixture that produces them, with the issue number that will close them. A fix has to delete its own excuse, or the suite fails on the stale acknowledgement.
 
 IF ASKED
 
 - This looks a lot like Decagon's Agent Operating Procedures — did you know that?: Yes, and the convergence is real. I got here from first principles, because letting the model decide loses in production. Decagon describes AOPs as combining the flexibility of natural language with the reliability of code, and the published examples are order tracking and refunds — which are exactly this repo's two use cases. The honest gap is authorship. My procedures live in policy.py, so changing one takes an engineer. Yours are written by the CX teams who own the policy. Making them authorable by non-engineers is the next order of problem, and it's harder than what I built.
-- What would you cut if you had to ship tomorrow?: Nothing in the decision layer. I'd ship with the stand-in provider and add the hosted model after the harness exists.`);
+- Why not have a model grade the prose?: Because then a language model is in the grading seat, and the harness stops being deterministic and starts needing a network and a bill to tell you whether you regressed. Every rule in the rubric is mechanical. That's also why I can run it in CI on three interpreters for free.
+- Aren't those four findings just nitpicks?: Two are cosmetic and two are not. A template promising a refund posts in five business days when the hosted narrator is forbidden to say so means half your customers get a commitment and half don't, depending on a provider setting. And an agent that answers a question you didn't ask, confidently, is the exact failure this whole architecture exists to prevent — it just arrived through the prose rather than the decision.
+- What would you cut if you had to ship tomorrow?: Nothing in the decision layer, and not the harness — it's the cheapest thing here and it's the reason I'd trust anyone else to touch a prompt.`);
 
 pres.writeFile({ fileName: process.argv[2] || "Bookly_Agent_Architecture.pptx" })
   .then((f) => console.log("wrote", f));

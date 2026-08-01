@@ -1,0 +1,87 @@
+# The regression run.
+#
+# Slide 5 argues that support agents do not die from a bad launch demo — they
+# die from a silent regression after somebody tweaks a prompt on a Thursday.
+# A suite that is only green when somebody remembers to run it does not answer
+# that, so this file is the answer.
+#
+# Read the steps: there is no `pip install` anywhere in this workflow, and
+# there is no `npm`. That absence is the point. The claim "standard library
+# only, runs on a clean clone with no dependencies" is otherwise something you
+# take on trust from a README; here it is a file a sceptic can read in ten
+# seconds. `the_regression_run_installs_nothing` in tests.py fails if a step
+# ever quietly adds one.
+name: checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  suite:
+    name: suite on ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      # Every interpreter reports. A 3.9-only failure is exactly the kind of
+      # thing that would otherwise be discovered on somebody else's laptop.
+      fail-fast: false
+      matrix:
+        # 3.9 is the floor the README promises. 3.13 and 3.14 are what a
+        # reader is likely to have. The suite is claimed green on all of them,
+        # so all of them run.
+        python: ["3.9", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: The checks
+        run: python tests.py
+
+      - name: The golden transcripts, standalone
+        # tests.py already replays every fixture. This runs the harness on its
+        # own as well, because it is a command a person is told to run and a
+        # command nobody runs in CI is a command that breaks.
+        run: python harness.py
+
+  boots:
+    name: a clean clone boots
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # The floor, on purpose: if it boots on the oldest supported
+          # interpreter it boots on the rest.
+          python-version: "3.9"
+
+      - name: The console serves records with nothing installed
+        run: |
+          set -euo pipefail
+          python web.py &
+          console=$!
+          trap 'kill "$console" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8000/api/customer -o payload.json; then
+              break
+            fi
+            sleep 1
+          done
+          test -s payload.json
+          python -c "
+          import json, sys
+          served = json.load(open('payload.json'))
+          assert served['customer']['customer_id'] == 'C-1001', served
+          assert served['orders'], 'no orders served'
+          assert served['policy']['constants'], 'no policy constants served'
+          print('console booted and served %d orders' % len(served['orders']))
+          "
+
+      - name: The CLI walks the demo script with nothing installed
+        run: python app.py --script demo.txt

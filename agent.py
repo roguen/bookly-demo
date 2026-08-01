@@ -24,11 +24,23 @@ from llm import (
     Request,
 )
 from recorder import NULL_RECORDER, Recorder
-from store import CURRENT_CUSTOMER_ID, SERVICE_LEVELS, TODAY, Order
+from store import (
+    AGENT,
+    CURRENT_CUSTOMER_ID,
+    GENERIC_TITLE_WORDS,
+    SERVICE_LEVELS,
+    TODAY,
+    Order,
+)
 
 # What one emitted action looks like to a caller: the envelope, and how
 # delivery went.
 Emission = Tuple[dict, str]
+
+# How many orders a history answer previews. Presentation, not policy: no
+# decision reads it, and reading thirty-seven titles back to a customer is the
+# same mistake the clarifying question used to make with thirty-four.
+HISTORY_PREVIEW = 3
 
 
 @dataclass
@@ -75,6 +87,12 @@ class Agent:
         # How many times each order's return has already been denied. A
         # repeat is a dispute, which policy escalates.
         self.denials: Dict[str, int] = {}
+        # Refunds already issued in this conversation, by order. The store
+        # never changes — the agent emits, it does not execute, and that is
+        # deliberate — so policy will keep judging the record as returnable.
+        # This is the agent remembering what it has already done, which is a
+        # different question from what policy would allow.
+        self.refunds: Dict[str, dict] = {}
 
     # -- the single entry point -------------------------------------------
 
@@ -193,6 +211,12 @@ class Agent:
         for request in requests:
             if request.intent == "order_status":
                 self._answer_status(request, turn)
+            elif request.intent == "order_history":
+                self._answer_history(turn)
+            elif request.intent == "agent_identity":
+                self._answer_identity(turn)
+            elif request.intent == "refund_status":
+                self._answer_refund_status(turn)
             elif request.intent == "return_request":
                 self._handle_return(request, turn)
             elif request.intent == "policy_question":
@@ -207,14 +231,113 @@ class Agent:
     # -- reads: order status ----------------------------------------------
 
     def _answer_status(self, request: Request, turn: _Turn) -> None:
-        order = self._resolve_read_target(request)
+        order, rule = self._resolve_read_target(request)
         if order is None:
             self._narrate("order_not_found", {}, turn)
             return
         self.focus_order_id = order.order_id
-        self._narrate("status_report", _order_facts(order), turn)
+        facts = _order_facts(order)
+        # Whether the customer already knows which order this is. A follow-up
+        # about the order under discussion has the same answer as the question
+        # before it, and often should — but saying the identical sentence back
+        # reads as not having listened. Wording only; no verdict reads it.
+        facts["already_discussed"] = rule == "order_under_discussion"
+        self._narrate("status_report", facts, turn)
 
-    def _resolve_read_target(self, request: Request) -> Optional[Order]:
+    def _answer_refund_status(
+        self, turn: _Turn, asked_to_return: bool = False
+    ) -> None:
+        """A question about a refund, not a request for one.
+
+        The customer asked when the money lands. Before this existed the word
+        "refund" made the turn a return request, and the agent answered by
+        offering the returns menu again — moments after issuing the refund
+        being asked about.
+
+        The posting time is a published service level, so it travels as a fact
+        the same way the escalation response time does. What the agent adds is
+        the one thing only it knows: which refund, for how much.
+        """
+        latest = list(self.refunds.values())[-1] if self.refunds else None
+        self.recorder.note(
+            "route",
+            {
+                "branch": "refund_status",
+                "asked_to_return": asked_to_return,
+                "refunds_this_conversation": list(self.refunds),
+                "intents": ["refund_status"],
+            },
+        )
+        self._narrate(
+            "refund_status",
+            {
+                "refund": latest,
+                "posting_target": SERVICE_LEVELS.get("refund_posting"),
+                # Asking when the money lands and asking to return the book
+                # again are different questions with the same answer. Saying
+                # the identical sentence to both is how an agent reads as not
+                # having listened.
+                "asked_to_return": asked_to_return,
+            },
+            turn,
+        )
+
+    def _answer_history(self, turn: _Turn) -> None:
+        """A question about the account as a whole rather than one order.
+
+        This exists because without it the question has nowhere to land: a
+        hosted model maps "how many books have I ordered" onto order_status,
+        the read falls back to the likeliest single order, and the customer
+        gets a fluent, confident answer to a question they did not ask — with
+        nothing anywhere reporting that anything went wrong.
+
+        A read, scoped by `can_view` like every other. No verdict, no
+        envelope, and nothing here decides anything.
+        """
+        orders = tools.orders_for_customer(self.customer_id)
+        recent = sorted(orders, key=lambda o: o.ordered_on, reverse=True)
+        self.recorder.note(
+            "lookup",
+            {
+                "kind": "order_history",
+                "rule": "every order on this account, newest first",
+                "total": len(orders),
+                "shown": min(len(recent), HISTORY_PREVIEW),
+            },
+        )
+        self._narrate(
+            "order_history",
+            {
+                "total": len(orders),
+                # A preview, not the list. Thirty-seven titles read back is
+                # the same mistake the clarifying question used to make. How
+                # many to show is presentation — no decision reads it, which
+                # is why it is not a policy threshold.
+                "recent": _option_facts(recent[:HISTORY_PREVIEW]),
+                "more": max(0, len(orders) - HISTORY_PREVIEW),
+            },
+            turn,
+        )
+
+    def _answer_identity(self, turn: _Turn) -> None:
+        """Who the agent is, asked directly.
+
+        The name is voice data and travels as a fact on the event rather than
+        being read by the template, so a hosted narrator — which is no longer
+        told to introduce itself — can still answer when it is actually asked.
+        """
+        self.recorder.note(
+            "route", {"branch": "agent_identity", "intents": ["agent_identity"]}
+        )
+        self._narrate(
+            "agent_identity",
+            {"name": AGENT.get("name"), "full_name": AGENT.get("full_name")},
+            turn,
+        )
+
+    def _resolve_read_target(
+        self, request: Request
+    ) -> Tuple[Optional[Order], str]:
         """Reads are cheap and self-describing (the reply names the order),
         so a wrong guess costs little: prefer an explicit reference, then
         the order under discussion, then the one still in transit.
@@ -244,7 +367,9 @@ class Agent:
             "most_recently_ordered",
         )
 
-    def _note_read(self, order: Optional[Order], rule: str) -> Optional[Order]:
+    def _note_read(
+        self, order: Optional[Order], rule: str
+    ) -> Tuple[Optional[Order], str]:
         self.recorder.note(
             "lookup",
             {
@@ -255,7 +380,7 @@ class Agent:
                 "status": order.status if order else None,
             },
         )
-        return order
+        return order, rule
 
     # -- writes: the return procedure --------------------------------------
 
@@ -291,11 +416,20 @@ class Agent:
                             "more than one asks",
                 },
             )
-        if len(by_title) == 1:
-            self._finish_return(by_title[0], turn)
-        elif len(by_title) > 1:
-            self._defer_which_order(by_title, turn)
+        # A title only counts as a reference if the customer actually named
+        # the book. Ordinary words that happen to sit inside a title —
+        # "book", "cover", "light" — neither identify one nor nominate it as
+        # a candidate: "the Escher book" names Godel, Escher, Bach, and must
+        # not drag in every title containing the word "book".
+        named = [o for o in by_title if self._names_the_order(o, request)]
+        if len(named) == 1:
+            self._finish_return(named[0], turn)
+        elif len(named) > 1:
+            self._defer_which_order(named, turn)
         else:
+            # Nothing matched, or everything that matched was coincidence.
+            # Both end in the same place: ask the question we would have asked
+            # if they had said nothing, because that is how much they said.
             self._start_return(turn)
 
     def _start_return(self, turn: _Turn) -> None:
@@ -305,21 +439,43 @@ class Agent:
         if self.focus_order_id and self.denials.get(self.focus_order_id):
             self._finish_return(tools.get_order(self.focus_order_id), turn)
             return
-        candidates = tools.delivered_orders(self.customer_id)
+        # What the agent volunteers is what policy would actually grant. A
+        # customer with thirty-four delivered books does not want thirty-four
+        # of them read back, and being offered a book only to be refused it
+        # costs them a turn to be told no.
+        delivered = tools.delivered_orders(self.customer_id)
+        candidates = [
+            order
+            for order in policy.returnable_now(
+                delivered, self.customer_id, TODAY
+            )
+            # Policy still says these are returnable, and it is right: it
+            # judges the record, and the record has not changed. This is the
+            # agent declining to offer a book it refunded four turns ago.
+            if order.order_id not in self.refunds
+        ]
         needs_choice = policy.should_clarify(len(candidates))
         self.recorder.note(
             "candidates",
             {
-                "source": "delivered_orders",
+                "source": "returnable_now",
+                "delivered_count": len(delivered),
                 "candidate_ids": [o.order_id for o in candidates],
                 "count": len(candidates),
                 "should_clarify": needs_choice,
-                "rule": "ask only when more than one order could take the "
-                        "write",
+                "rule": "offer what policy would approve, then ask only when "
+                        "more than one of those could take the write",
             },
         )
         if not candidates:
-            self._narrate("no_returnable_orders", {}, turn)
+            self._narrate(
+                "no_returnable_orders",
+                {
+                    "delivered_count": len(delivered),
+                    "window_days": policy.RETURN_WINDOW_DAYS,
+                },
+                turn,
+            )
         elif needs_choice:
             self._defer_which_order(candidates, turn)
         else:
@@ -374,6 +530,15 @@ class Agent:
         if order is not None:
             if order.order_id in turn.finished_orders:
                 return  # one decision per order per turn, however often named
+            if order.order_id in self.refunds:
+                # Already refunded in this conversation. Deciding it again
+                # emits a second envelope — deduplicated downstream by the
+                # idempotency key, but an agent that says "Done, I've issued a
+                # refund" for something it did three turns ago is reporting an
+                # action rather than taking one.
+                turn.return_handled = True
+                self._answer_refund_status(turn, asked_to_return=True)
+                return
             turn.finished_orders.add(order.order_id)
         turn.return_handled = True
         verdict = policy.decide_return(order, self.customer_id, TODAY)
@@ -422,9 +587,19 @@ class Agent:
         turn.envelopes.append(emitted)
         self._note_envelope(emitted)
         self.focus_order_id = order.order_id
+        self.refunds[order.order_id] = {
+            "order_id": order.order_id,
+            "title": order.title,
+            "amount": verdict.refund_amount,
+        }
         facts = _order_facts(order)
         facts["amount"] = verdict.refund_amount
         facts["window_days"] = policy.RETURN_WINDOW_DAYS
+        # When the money lands is a published commitment, looked up from the
+        # profile's service levels — not a number a template asserts. That is
+        # what lets a hosted narrator, forbidden from inventing timeframes,
+        # state the same one: it is stating a fact it was handed.
+        facts["posting_target"] = SERVICE_LEVELS.get("refund_posting")
         self._narrate("refund_approved", facts, turn)
 
     def _emit_escalation(
@@ -521,9 +696,48 @@ class Agent:
                     return tools.get_order(order_id), request
             if request.title_words:
                 matches = self._orders_by_title_words(request.title_words)
-                if len(matches) == 1:
-                    return matches[0], request
+                # The same bar as an unprompted return. Answering "which
+                # book?" with a word that only coincidentally sits in a title
+                # has not answered it, and counts as a failed attempt rather
+                # than a resolution.
+                named = [
+                    o for o in matches if self._names_the_order(o, request)
+                ]
+                if len(named) == 1:
+                    return named[0], request
         return None, None
+
+    def _names_the_order(self, order: Order, request: Request) -> bool:
+        """Did the customer name this book, or merely use words that are in
+        its title?
+
+        Which words are generic is catalog data; how many are enough is
+        policy. Neither judgement is made here — this counts, and records the
+        count, so a weak reference is visible in the trace rather than being a
+        thing that silently did not happen.
+        """
+        words = {word.lower() for word in request.title_words}
+        in_title = words & tools.title_tokens(order.title)
+        distinctive = in_title - GENERIC_TITLE_WORDS
+        strong = policy.title_reference_is_strong(
+            len(in_title), len(distinctive)
+        )
+        self.recorder.note(
+            "candidates",
+            {
+                "source": "title_reference",
+                "order_id": order.order_id,
+                "title": order.title,
+                "matched_words": sorted(in_title),
+                "distinctive_words": sorted(distinctive),
+                "strong_enough_to_act": strong,
+                "constant": "MIN_TITLE_WORDS_FOR_WRITE",
+                "limit": policy.MIN_TITLE_WORDS_FOR_WRITE,
+                "rule": "a write acts on a title only when the customer named "
+                        "it; generic words never identify one",
+            },
+        )
+        return strong
 
     def _narrate(self, kind: str, facts: dict, turn: _Turn) -> None:
         text = self.provider.narrate(NarrationEvent(kind=kind, facts=facts))

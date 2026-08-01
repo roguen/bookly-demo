@@ -33,6 +33,12 @@ a different intent is a topic change; asking about an order is never choosing
 it. Clarification is economic — ask only when more than one order could take
 the write — and bounded, two failed attempts then a human.
 
+An intent surface is a boundary too. A question with no intent to land in
+does not fail loudly — a hosted model maps it to the nearest one it has, and
+the answer comes back fluent and wrong. `order_history` and `agent_identity`
+exist because "how many books have I ordered" and "what is your name" were
+being answered as if they were "where is my order".
+
 **4. `tools.py` — facts and records out, never prose.**
 Order lookups scoped to the signed-in customer, and retrieval with a hard
 floor: fewer than two whole-word keyword matches, or a tie, returns nothing.
@@ -50,14 +56,44 @@ mock data). `app.py` is presentation only. `stub_receiver.py` is the
 orchestration layer's end of the webhook, demonstrating duplicate suppression.
 
 **7. `tests.py` — the claims, executable.**
-Fifty dependency-free checks, runnable from a terminal or from inside the
+68 dependency-free checks, runnable from a terminal or from inside the
 console. The ones to point at under questioning: `injection_changes_nothing`
 (the thesis, tested), `web_layer_emits_identical_envelopes` (the same
 scenarios through HTTP and through `Agent`, every decision field compared —
 the answer to "did you just bolt a UI onto it"), `queue_resolution_is_append_only`
 (a human may override an outcome and may not rewrite the record), and
-`golden_transcript_return_flow` (exact strings on purpose — the seed of the
-golden-transcript harness proposed as future work).
+`transcript_return_with_clarification` (exact strings on purpose — a golden
+transcript under `transcripts/`, generated from the file rather than written
+as a function, so adding a scenario is adding a file).
+
+**7a. `harness.py`, `transcripts/*.json` — a scenario is a file.**
+The harness replays a fixture through the same `handle_turn` the CLI calls and
+compares the reply verbatim, the envelope's decision fields including the
+literal idempotency key, and the sequence of recorder stages. That last one is
+the architectural claim as a regression test: a change that moved a decision
+to the model side of the boundary fails here. Which side each stage sits on is
+deliberately *not* in the fixture — it is read from `recorder.STAGE_SIDES`, so
+there is no second copy to drift.
+
+**7b. `rubric.py` — prose is graded, and grading decides nothing.**
+Decisions are pinned; prose is what the customer actually reads, and it was
+unpinned. The rubric is handed exactly three things per narration — the event
+kind, the facts the agent already gave the narrator, and the text that came
+back. No `policy`, no `store`, no order record. It cannot judge whether a
+refund was correct because it is never told what the refund was, and
+`the_rubric_cannot_reach_a_decision` asserts that by grep, the same way the
+back-office check does. Rules are mechanical: a fact the event carried must
+survive, `kb_miss` must still offer a human, no number may appear that no fact
+supports, and no sentence may be said twice in one conversation.
+
+Findings a fixture still produces are listed in its `known_gaps` with the
+issue that will close them. An unacknowledged finding fails, and so does an
+acknowledgement the rubric no longer reports — the fix has to delete its own
+excuse, which is what keeps that list from becoming where failures go to be
+forgotten. A rule that is simply wrong for a case is `accept`ed instead, with
+an argument rather than an issue number: `repeated-question-same-answer` is
+the one that exists, because two identical questions have one identical
+answer and varying it would be the worse reply.
 
 **8. The console layer — the claim, made visible.**
 Phase 2 adds no decision logic; it makes the existing boundary legible in a

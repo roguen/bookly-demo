@@ -68,7 +68,15 @@ class NarrationEvent:
 
 
 VALID_INTENTS = frozenset(
-    ["order_status", "return_request", "policy_question", "human_handoff"]
+    [
+        "order_status",
+        "order_history",
+        "refund_status",
+        "agent_identity",
+        "return_request",
+        "policy_question",
+        "human_handoff",
+    ]
 )
 
 
@@ -100,6 +108,20 @@ SEGMENT_SPLIT_RE = re.compile(r"\s+\band\b\s+|;\s*|\.\s+")
 # Catches order ids and nothing else. The format is fixed by the store.
 ORDER_ID_RE = re.compile(r"\bBK-\d{4}\b", re.IGNORECASE)
 
+# Catches asking *about* a refund rather than asking for one. Checked before
+# RETURN_REQUEST_RE, because "when will the refund show up?" contains the word
+# "refund" and is emphatically not a request to start another one — which is
+# exactly what it used to be read as, moments after the agent had issued the
+# refund being asked about.
+REFUND_STATUS_RE = re.compile(
+    r"\b(when (?:will|does|do|is|should)|where(?:'s| is)?|how long"
+    r"|has|have|did|is)\b[^.?!]{0,40}?\brefunds?\b"
+    r"|\brefunds?\b[^.?!]{0,40}?\b(show up|come through|go through|arrive"
+    r"|land|post|posted|take|taken|processed|issued yet)\b"
+    r"|\bmoney back\b[^.?!]{0,30}?\b(when|yet|arrive|show)\b",
+    re.IGNORECASE,
+)
+
 # Catches asking to send something back. Deliberately does not catch
 # "return policy" / "refund policy" — those are questions, not requests.
 RETURN_REQUEST_RE = re.compile(
@@ -116,6 +138,35 @@ STATUS_SIGNAL_RE = re.compile(
 )
 STATUS_OBJECT_RE = re.compile(
     r"\b(order|package|delivery|it|book|copy)\b", re.IGNORECASE
+)
+
+# Catches a question about the account as a whole rather than one order —
+# "what have I ordered", "how many books". This needed an intent of its own
+# rather than a knowledge-base article: with no home, a hosted model maps the
+# question onto order_status, the read falls back to the likeliest single
+# order, and the customer gets a fluent answer to a question they did not ask.
+# Deliberately checked before order_status, because "what have I ordered" and
+# "where is my order" share vocabulary and only one of them is about one book.
+ORDER_HISTORY_RE = re.compile(
+    r"\b(how many|order history|purchase history|total number"
+    r"|(?:all|every|each) (?:of )?(?:my|the) (?:orders|books|purchases)"
+    r"|(?:list|show me|see) (?:all )?(?:my|the) (?:orders|books|purchases)"
+    r"|(?:everything|all) (?:i|we)(?:'ve| have)? (?:ever )?"
+    r"(?:ordered|bought|purchased)"
+    r"|what (?:\w+ ){0,3}have i (?:ever )?(?:ordered|bought|purchased))\b",
+    re.IGNORECASE,
+)
+
+# Catches being asked who the agent is. Its own intent for the same reason:
+# routing it through retrieval would need "you" and "your" as article
+# keywords, and that makes "how long do you keep your records?" retrieve the
+# identity article — the confident-wrong-article failure the floor exists to
+# prevent. An honest answer to "what is your name" is not worth reopening it.
+IDENTITY_RE = re.compile(
+    r"\b(what(?:'s| is| was)? your name|who are you|who am i (?:talking|"
+    r"speaking|chatting) (?:to|with)|are you (?:a |an )?"
+    r"(?:bot|robot|human|person|real|machine|ai)|your name)\b",
+    re.IGNORECASE,
 )
 
 # Catches general questions the knowledge base might answer. Retrieval makes
@@ -196,12 +247,22 @@ class RulesProvider:
         )
 
     def _intent_of(self, segment: str, has_reference: bool) -> Optional[str]:
+        # Asking *about* a refund beats asking to do something, and has to be
+        # tested first: every phrasing of it contains the word "refund".
+        if REFUND_STATUS_RE.search(segment):
+            return "refund_status"
         # Asking to do something beats asking about something: a segment that
         # requests a return wins even if it also mentions the policy.
         if RETURN_REQUEST_RE.search(segment):
             return "return_request"
         if HUMAN_HANDOFF_RE.search(segment):
             return "human_handoff"
+        if IDENTITY_RE.search(segment):
+            return "agent_identity"
+        # Before order_status: "what have I ordered" and "where is my order"
+        # share vocabulary, and only one of them is about a single book.
+        if ORDER_HISTORY_RE.search(segment):
+            return "order_history"
         # An explicit order reference — an id or a title — counts as the
         # object: "what's the status of Dune" is a status question even
         # without the word "order".
@@ -260,29 +321,23 @@ def _fmt_money(amount: float) -> str:
     return "$%.2f" % amount
 
 
-def _refuse(body: str) -> str:
-    """Open a refusal in the agent's own voice, then say why plainly.
-
-    Applied to genuine refusals only — an out-of-window return, an order that
-    is not there, a knowledge-base miss — and never to a neutral outcome like
-    a successful refund or a status report. An agent that apologises for
-    doing what you asked reads as broken.
-
-    With no `agent.refusal_line` in the profile the wording is unchanged, so
-    the persona is a data choice rather than a fork in the code.
-    """
-    line = AGENT.get("refusal_line")
-    return "%s %s" % (line, body) if line else body
-
-
-def _agent_name() -> str:
-    return AGENT.get("name") or BRAND.get("agent_name") or "support"
-
-
 def _status_report(f: dict) -> str:
+    again = f.get("already_discussed")
     if f["status"] == "delivered":
+        if again:
+            return "That one — %s (%s) — was delivered on %s." % (
+                f["title"], f["order_id"], _fmt_date(f["delivered_on"])
+            )
         return "Your order %s (%s) was delivered on %s." % (
             f["order_id"], f["title"], _fmt_date(f["delivered_on"])
+        )
+    if again:
+        # Same facts, said as a continuation. The customer already knows which
+        # book it is; repeating the whole sentence back reads as not having
+        # listened, even when the answer is genuinely unchanged.
+        return (
+            "Still on track — %s (%s) is with %s and is expected by %s."
+            % (f["title"], f["order_id"], f["carrier"], _fmt_date(f["eta"]))
         )
     return (
         "Your order %s (%s) shipped with %s and is expected by %s."
@@ -312,36 +367,41 @@ def _reask_which_order(f: dict) -> str:
 
 
 def _refund_approved(f: dict) -> str:
+    # The posting time is a published service level carried on the event, not
+    # a number written here. Without one the reply simply stops after the
+    # refund rather than inventing a timeframe.
+    posting = f.get("posting_target")
     return (
         "Done — %s (%s) was delivered on %s, inside the %d-day return "
         "window, so I've issued a refund of %s to your original payment "
-        "method. It should post within 5 business days."
+        "method.%s"
         % (
             f["title"], f["order_id"], _fmt_date(f["delivered_on"]),
             f["window_days"], _fmt_money(f["amount"]),
+            " It should post %s." % posting if posting else "",
         )
     )
 
 
 def _return_denied(f: dict) -> str:
     if f["reason_code"] == "ORDER_NOT_DELIVERED":
-        return _refuse(
+        return (
             "%s (%s) hasn't been delivered yet, so I can't start a return "
             "for it. Once it arrives, I'd be happy to."
             % (f["title"], f["order_id"])
         )
     if f["reason_code"] == "ORDER_ALREADY_RETURNED":
-        return _refuse(
+        return (
             "It looks like %s (%s) was already returned on %s, so there's "
             "nothing further to send back on that order."
             % (f["title"], f["order_id"], _fmt_date(f["returned_on"]))
         )
     if f["reason_code"] == "ORDER_CANCELLED":
-        return _refuse(
+        return (
             "%s (%s) was cancelled before it shipped, so there's no delivery "
             "to return." % (f["title"], f["order_id"])
         )
-    return _refuse(
+    return (
         "%s (%s) was delivered on %s, which is outside the %d-day return "
         "window, so I can't issue a refund for it."
         % (
@@ -352,7 +412,7 @@ def _return_denied(f: dict) -> str:
 
 
 def _order_not_found(f: dict) -> str:
-    return _refuse(
+    return (
         "I can't find that order on your account. Could you double-check "
         "the order number?"
     )
@@ -368,7 +428,7 @@ def _escalation(f: dict) -> str:
         "shortly."
     )
     if f["reason_code"] == "ESCALATED_POLICY_DISPUTE":
-        return _refuse(
+        return (
             "I understand that's not the answer you wanted, and I can't "
             "change the policy outcome. I've escalated this to a human agent "
             "who can review it with you. %s" % promise
@@ -383,7 +443,7 @@ def _escalation(f: dict) -> str:
             "Of course — I've flagged this conversation for a human agent "
             "to pick up. %s" % promise
         )
-    return _refuse(
+    return (
         "I don't want to guess with a refund, so I've handed this to a "
         "human agent who can look at your account with you. %s" % promise
     )
@@ -401,7 +461,7 @@ def _kb_answer(f: dict) -> str:
 
 
 def _kb_miss(f: dict) -> str:
-    return _refuse(
+    return (
         "I don't have reliable information on that, and I'd rather say so "
         "than guess. I can connect you with a human agent if that would "
         "help."
@@ -409,16 +469,87 @@ def _kb_miss(f: dict) -> str:
 
 
 def _no_returnable_orders(f: dict) -> str:
-    return _refuse(
-        "I don't see any delivered orders on your account to return."
+    # "No delivered orders" would be false for a customer with thirty-four of
+    # them and simply none still inside the window. Say the true thing.
+    if f.get("delivered_count"):
+        return (
+            "None of your delivered orders are still inside the %d-day return "
+            "window, so there's nothing I can start a return on. If you think "
+            "one should qualify, tell me which and I'll take a look."
+            % f["window_days"]
+        )
+    return "I don't see any delivered orders on your account to return."
+
+
+def _refund_status(f: dict) -> str:
+    refund, posting = f.get("refund"), f.get("posting_target")
+    if refund:
+        when = " It should post %s." % posting if posting else ""
+        if f.get("asked_to_return"):
+            return (
+                "That one's already taken care of — I refunded %s (%s) for %s "
+                "earlier in this conversation.%s"
+                % (
+                    refund["title"], refund["order_id"],
+                    _fmt_money(refund["amount"]), when,
+                )
+            )
+        return (
+            "Your refund of %s for %s (%s) is on its way to your original "
+            "payment method.%s"
+            % (
+                _fmt_money(refund["amount"]), refund["title"],
+                refund["order_id"], when,
+            )
+        )
+    # Nothing was issued here, so do not imply one exists. State the published
+    # commitment and offer a person, which is what the customer needs if they
+    # are chasing a refund from an earlier conversation.
+    if posting:
+        return (
+            "I haven't issued a refund on this conversation. Refunds post %s "
+            "once they're approved — if you're waiting on one from earlier, I "
+            "can put you through to a human who can look it up." % posting
+        )
+    return (
+        "I haven't issued a refund on this conversation. I can put you "
+        "through to a human who can look up an earlier one."
+    )
+
+
+def _order_history(f: dict) -> str:
+    total, recent, more = f["total"], f["recent"], f["more"]
+    if not total:
+        return "I don't see any orders on your account yet."
+    listed = ", ".join("%s (%s)" % (o["title"], o["order_id"]) for o in recent)
+    tail = (
+        " There are %d more — ask me about any of them by title." % more
+        if more
+        else ""
+    )
+    return (
+        "You've placed %d order%s with us. The most recent %s: %s.%s"
+        % (
+            total, "" if total == 1 else "s",
+            "is" if len(recent) == 1 else "are", listed, tail,
+        )
+    )
+
+
+def _agent_identity(f: dict) -> str:
+    name = f.get("name") or "the support agent here"
+    return (
+        "My name is %s. I can check an order's status, start a return or "
+        "refund, and answer questions about shipping, returns and your "
+        "account — anything I can't settle goes to a human colleague." % name
     )
 
 
 def _help(f: dict) -> str:
     return (
-        "I'm %s. I can check an order's status, start a return or refund, or "
-        "answer questions about shipping, returns, and your account. What "
-        "can I do for you?" % _agent_name()
+        "Happy to help. I can check an order's status, start a return or "
+        "refund, or answer questions about shipping, returns, and your "
+        "account. What would you like to do?"
     )
 
 
@@ -434,6 +565,9 @@ _TEMPLATES = {
     "kb_answer": _kb_answer,
     "kb_miss": _kb_miss,
     "no_returnable_orders": _no_returnable_orders,
+    "refund_status": _refund_status,
+    "order_history": _order_history,
+    "agent_identity": _agent_identity,
     "help": _help,
 }
 
@@ -445,7 +579,11 @@ _TEMPLATES = {
 EXTRACTION_SYSTEM_PROMPT = """\
 You extract structured slots from one customer-support turn for an online
 bookstore. Split the turn into requests at conjunctions and sentence breaks.
-For each request report: intent (one of "order_status", "return_request",
+For each request report: intent (one of "order_status" for one specific
+order, "order_history" for a question about the account as a whole — how many
+orders, what they have bought, their order history — "agent_identity" for who
+or what you are, "refund_status" for a question about a refund that already
+exists rather than a request for a new one, "return_request",
 "policy_question", "human_handoff", or null), order_id (format BK-0000, or
 null), title_words
 (words from the customer's own order titles listed below that the request
@@ -477,8 +615,9 @@ def _narration_system_prompt() -> str:
         "that has already been made. Phrase it for the customer in one to "
         "three sentences. You must not add facts, amounts, dates, or "
         "promises that are not in the event — if the event carries a "
-        "response time, state it; if it does not, do not invent one. You "
-        "must not change or soften the decision." % who
+        "response time, state it; if it does not, do not invent one. Write "
+        "dates the way a person says them — \"July 18\", not "
+        "\"2026-07-18\". You must not change or soften the decision." % who
     )
 
 

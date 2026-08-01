@@ -83,11 +83,15 @@ does not participate in it.
 
 > I'd like to return a book.
 
-The agent asks which one. Two rows in the trace matter, and they are
+The agent asks which one — and asks about two books, not the thirty-four this
+customer has had delivered. Two rows in the trace matter, and they are
 deliberately not one row:
 
-- `candidates` — 2 candidates, clarify: yes. **Purple.** Deciding to ask is
-  `policy.should_clarify`.
+- `candidates` — 34 delivered, 2 of them returnable, clarify: yes. **Purple.**
+  The customer has thirty-seven orders and thirty-four delivered books; the
+  agent offers the two a return could actually be granted on, because being
+  offered a book and then refused it costs the customer a turn to be told no.
+  Both decisions are `policy` — `returnable_now`, then `should_clarify`.
 - `narrate` — `clarify_which_order`. **Grey.** Phrasing the question is the
   model.
 
@@ -243,7 +247,7 @@ written to disk, not logged, not put in a URL, and specifically not exported
 to the environment — because the next thing you are about to do spawns a
 subprocess.
 
-Press **Run the check suite**. It streams. Forty-five checks, in the app, on
+Press **Run the check suite**. It streams. 68 checks, in the app, on
 the machine in front of you.
 
 Point at four of them:

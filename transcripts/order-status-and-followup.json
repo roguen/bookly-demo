@@ -1,0 +1,36 @@
+{
+  "id": "order-status-and-followup",
+  "title": "A lookup, then a follow-up resolved from conversation memory",
+  "why": "The second turn names no order at all. It resolves because the first turn put one under discussion — conversation-tier memory doing the work, and the trace naming which rule got there.",
+  "conversation_id": "conv-status",
+  "turns": [
+    {
+      "customer": "Where's my Dune order?",
+      "reply": "Your order BK-1041 (Dune) shipped with Bookly Express and is expected by August 1.",
+      "stages": [
+        "extract",
+        "route",
+        "lookup",
+        "narrate"
+      ],
+      "narrations": [
+        "status_report"
+      ],
+      "envelopes": []
+    },
+    {
+      "customer": "When will it arrive?",
+      "reply": "Still on track — Dune (BK-1041) is with Bookly Express and is expected by August 1.",
+      "stages": [
+        "extract",
+        "route",
+        "lookup",
+        "narrate"
+      ],
+      "narrations": [
+        "status_report"
+      ],
+      "envelopes": []
+    }
+  ]
+}

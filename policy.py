@@ -95,6 +95,30 @@ def escalate_if_disputed(verdict: Verdict, prior_denials: int) -> Verdict:
     return verdict
 
 
+def returnable_now(
+    orders: list, customer_id: str, today: date
+) -> list:
+    """The orders a return could actually be granted on.
+
+    Offering a customer a book and then refusing it is the confidently
+    unhelpful move: it costs them a turn to be told no. So the clarifying
+    question asks about what this module would say yes to, which is why this
+    filters through `decide_return` rather than applying a rule of its own.
+    There is no new threshold here and there must not be one — a second
+    definition of "returnable" would be a second place the answer could
+    change.
+
+    An order outside the window is still perfectly reachable: the customer
+    names it, and gets a denial with a reason code, exactly as before. What
+    changes is only what the agent volunteers.
+    """
+    return [
+        order
+        for order in orders
+        if decide_return(order, customer_id, today).decision == "approve_refund"
+    ]
+
+
 def can_view(order: Optional[Order], customer_id: str) -> bool:
     """A customer may see only their own orders. Applies to reads too."""
     return order is not None and order.customer_id == customer_id
@@ -104,6 +128,37 @@ def should_clarify(candidate_count: int) -> bool:
     """Ask only when there is a real choice. One candidate proceeds; zero is
     the nothing-to-return path, which the caller handles."""
     return candidate_count > 1
+
+
+# A write may resolve on a title the customer typed, but only when the words
+# they used actually identify a book. One ordinary word that happens to sit in
+# a title is a coincidence, and acting on a coincidence refunds a book nobody
+# named — "I'd like to return a book" once resolved to The Book of the New Sun
+# and issued $31.50 against it, with no clarifying question asked.
+#
+# Two words is the fallback bound. It is the weaker of the two branches below,
+# and a catalog whose titles are built out of ordinary words should say so in
+# its generic word list rather than lean on it.
+MIN_TITLE_WORDS_FOR_WRITE = 2
+
+
+def title_reference_is_strong(matched: int, distinctive: int) -> bool:
+    """Is a title match a reference a write may act on?
+
+    Distinctive words identify a book. Generic ones do not, however many
+    titles they happen to appear in — which is why this takes two counts
+    rather than a list of words. Deciding *which* words are generic is a
+    property of a catalog and lives in the profile; deciding *how much* is
+    enough to move money is disambiguation, and disambiguation lives here
+    beside `should_clarify`.
+
+    A weak reference is not an error and not an ambiguity. The caller asks the
+    clarifying question it would have asked if the customer had said nothing
+    at all, because that is exactly how much they have said.
+    """
+    if distinctive >= 1:
+        return True
+    return matched >= MIN_TITLE_WORDS_FOR_WRITE
 
 
 def clarify_limit_reached(attempts: int) -> bool:
