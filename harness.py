@@ -65,6 +65,13 @@ ENVELOPE_FIELDS = (
 
 WEBHOOK_ENV_VAR = "BOOKLY_WEBHOOK_URL"
 
+# Golden transcripts decide on the historical policy, never on a document a demo
+# authored — the same hermeticity the webhook gets below. Every harness run,
+# replay or bless, is pointed at an absent policy document.
+os.environ["BOOKLY_POLICY_PATH"] = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "policy.checks.json"
+)
+
 
 # ---------------------------------------------------------------------------
 # What a fixture is.

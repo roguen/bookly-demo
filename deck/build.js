@@ -138,7 +138,7 @@ TALKING POINTS
 - policy.py does not import an LLM. That's a structural property you can grep for, not a promise.
 - The whole thing runs with no API key and no dependencies — there's a rules-based stand-in for both model jobs.
 - Verified, not assumed: same script through the regex stand-in and through gpt-5.4-mini, all eight replies worded differently, every decision field identical down to the idempotency key.
-- 69 checks, all dependency-free, and the decision tests never touch a model at all. They run from a terminal, from inside the console, and in CI on 3.9, 3.13 and 3.14.
+- 75 checks, all dependency-free, and the decision tests never touch a model at all. They run from a terminal, from inside the console, and in CI on 3.9, 3.13 and 3.14.
 
 IF ASKED
 
@@ -675,14 +675,14 @@ Third, the orchestration layer becoming real — retries, dead letters, durable 
 
 TALKING POINTS
 
-- 69 checks today, dependency-free, no pytest — running in CI on 3.9, 3.13 and 3.14, with no pip install anywhere in the workflow file.
+- 75 checks today, dependency-free, no pytest — running in CI on 3.9, 3.13 and 3.14, with no pip install anywhere in the workflow file.
 - A scenario is a file. Adding one is adding a fixture and running one command.
 - The rubric grades prose and cannot reach a decision, and that's asserted structurally — the same grep-for-it discipline as "policy.py does not import an LLM".
 - Open defects are listed in the fixture that produces them, with the issue number that will close them. A fix has to delete its own excuse, or the suite fails on the stale acknowledgement.
 
 IF ASKED
 
-- This looks a lot like Decagon's Agent Operating Procedures — did you know that?: Yes, and the convergence is real. I got here from first principles, because letting the model decide loses in production. Decagon describes AOPs as combining the flexibility of natural language with the reliability of code, and the published examples are order tracking and refunds — which are exactly this repo's two use cases. The honest gap is authorship. My procedures live in policy.py, so changing one takes an engineer. Yours are written by the CX teams who own the policy. Making them authorable by non-engineers is the next order of problem, and it's harder than what I built.
+- This looks a lot like Decagon's Agent Operating Procedures — did you know that?: Yes, and the convergence is real. I got here from first principles, because letting the model decide loses in production. Decagon describes AOPs as combining the flexibility of natural language with the reliability of code, and the published examples are order tracking and refunds — which are exactly this repo's two use cases. The gap was authorship, and I've half-closed it. As of v3.2.0 the CX thresholds are authorable for real — a non-engineer edits the return window from the back office, each change validated against its bounds, attributed, and appended to a log the console reads live, while the model still never decides and the verdict is still computed only in policy.py. What's deliberately still an engineer's job is the two floors that stop a confidently wrong answer, and authoring new rules rather than tuning numbers — a procedure DSL, which is the harder step and the honest thing still ahead.
 - Why not have a model grade the prose?: Because then a language model is in the grading seat, and the harness stops being deterministic and starts needing a network and a bill to tell you whether you regressed. Every rule in the rubric is mechanical. That's also why I can run it in CI on three interpreters for free.
 - Aren't those four findings just nitpicks?: Two are cosmetic and two are not. A template promising a refund posts in five business days when the hosted narrator is forbidden to say so means half your customers get a commitment and half don't, depending on a provider setting. And an agent that answers a question you didn't ask, confidently, is the exact failure this whole architecture exists to prevent — it just arrived through the prose rather than the decision.
 - What would you cut if you had to ship tomorrow?: Nothing in the decision layer, and not the harness — it's the cheapest thing here and it's the reason I'd trust anyone else to touch a prompt.`);

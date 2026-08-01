@@ -26,7 +26,7 @@ No dependencies. No API key. Python 3.9 or later.
 
 ```bash
 python3 app.py --script demo.txt   # four scripted scenarios, in a terminal
-python3 tests.py                   # 69 checks, no pytest
+python3 tests.py                   # 75 checks, no pytest
 python3 harness.py                 # the golden transcripts, and the rubric
 python3 web.py                     # the console, 127.0.0.1:8000
 python3 backoffice.py              # the executing side, 127.0.0.1:8787
@@ -79,7 +79,7 @@ browser to someone who will never read `policy.py`.
 Verified for the phase-2 release: the CLI byte-identical to `v1.0.0`; a clean
 clone makes zero external requests; `stub_receiver.py` untouched and its
 evidence procedure reproduced key for key. Since phase 3 the check count is
-enforced rather than repeated — 69 checks green on 3.9, 3.13 and 3.14, in CI
+enforced rather than repeated — 75 checks green on 3.9, 3.13 and 3.14, in CI
 on every push, and any document that cites a different number fails the
 suite.
 
@@ -164,10 +164,13 @@ job.
 
 ### Deliberately out of scope
 
-- **No editable policy-authoring surface.** Making procedures authorable by
-  non-engineers is the next order of problem. The policy viewer is read-only
-  and names who can change a threshold and where; mocking an editor would be
-  the one dishonest thing on screen.
+- **No authorable *rules* — yet.** As of v3.2.0 the three CX thresholds are
+  authorable for real: a non-engineer edits them from the back office, each
+  change validated against its bounds, attributed, and appended to a log the
+  console reads live, while the decision structure and the two floors that stop
+  a confidently wrong answer stay in `policy.py`. What is still out of scope is
+  authoring new *rules* — a procedure DSL, not just tuning numbers — which is
+  the harder next step and is not smuggled into a parameter-editing branch.
 - **No supervisor agent or tool-calling loop.** Orchestration here is a state
   machine on purpose. A supervisor is one more component that can be
   confidently wrong, placed exactly where being wrong is expensive.
@@ -180,7 +183,7 @@ job.
 
 | File | What it exists to prove |
 | --- | --- |
-| `policy.py` | decisions are pure functions with reason codes |
+| `policy.py` + `policy.json` | decisions are pure functions with reason codes; the CX thresholds are authorable through a validated, append-only document |
 | `llm.py` | the model's two jobs, and nothing else |
 | `agent.py` | the state machine, memory tiers, when it asks |
 | `tools.py` | facts and records out — never prose |

@@ -19,12 +19,14 @@ Three surfaces, one screen each:
   Agent desk      the human review queue, rendered as a support console. The
                   queue file is the shared state between the two processes.
 
-  Policy viewer   read only. Every constant and every reason code from
-                  policy.py, with an explicit line naming who can change them
-                  today. There is deliberately no editing surface: making
-                  procedures authorable by non-engineers is a harder problem
-                  than this repo solves, and mocking it would be the one
-                  dishonest thing in the build.
+  Policy viewer   the CX policy the agent enforces, and — new in v3.2.0 — an
+                  editor for it. The three thresholds are authored here: each
+                  change is validated against its bounds, carries who changed it
+                  and why, is appended to a log that is never overwritten, and
+                  is read live by the console. The decision structure and the
+                  two floors that stop a confidently wrong answer stay in
+                  policy.py and still take an engineer. This is the surface
+                  earlier builds deliberately refused to mock; it is now real.
 
 Nothing here flows back. These systems receive and display; nothing returns a
 value that reaches a verdict. `stub_receiver.py` is untouched and still works
@@ -45,6 +47,7 @@ from typing import Callable, Dict, List, Optional
 REPO = Path(__file__).resolve().parent
 os.environ.setdefault("BOOKLY_AUDIT_PATH", str(REPO / "audit.log"))
 os.environ.setdefault("BOOKLY_QUEUE_PATH", str(REPO / "queue.json"))
+os.environ.setdefault("BOOKLY_POLICY_PATH", str(REPO / "policy.json"))
 
 import covers  # noqa: E402
 import policy  # noqa: E402
@@ -295,6 +298,8 @@ class BackOfficeHandler(BaseHTTPRequestHandler):
             )
             if resolve:
                 return lambda: self._resolve(office, resolve.group(1))
+            if path == "/api/policy/change":
+                return lambda: self._policy_change()
         return None
 
     # -- handlers ----------------------------------------------------------
@@ -325,6 +330,24 @@ class BackOfficeHandler(BaseHTTPRequestHandler):
             justification=payload.get("justification") or "",
         )
         self._json(result)
+
+    def _policy_change(self) -> None:
+        """Author one policy parameter change. Validation — bounds, type, and a
+        required actor and justification — is enforced in policy.change_parameter
+        and comes back as a 400, the same discipline queue.resolve uses. Only
+        this operator surface writes policy: the customer console has no such
+        route. The response is the fresh policy surface, so the editor re-renders
+        with the new value and its history."""
+        payload = self._body()
+        change = policy.change_parameter(
+            payload.get("field") or "",
+            payload.get("value"),
+            payload.get("actor") or "",
+            payload.get("justification") or "",
+        )
+        self._json(
+            dict(web.policy_json(), stand_in=STAND_IN_NOTICE, change=change)
+        )
 
     def _cover(self, order_id: str) -> None:
         order = tools.get_order(order_id)

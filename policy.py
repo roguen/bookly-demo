@@ -4,11 +4,21 @@ Every eligibility, escalation, and disambiguation rule the agent enforces is
 computed here, in pure functions over order records. This module never imports
 an LLM, never reads free text, and never sees a customer turn. If the language
 model disappeared entirely, every function here would return the same answers.
+
+The three CX thresholds are authorable (v3.2.0): their values are read from an
+append-only policy document a non-engineer edits, and the defaults are the
+historical policy. That is still not a place the model reaches, and the verdict
+is still computed only here — a decision reads a number from a validated
+document instead of a literal, which is a change of storage, not of authority.
 """
 from __future__ import annotations
 
+import json
+import os
+import threading
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import Literal, Optional
 
 from store import Order
@@ -16,19 +26,213 @@ from store import Order
 Decision = Literal["approve_refund", "deny", "escalate", "not_found"]
 
 # Thresholds live here, together, because they are policy — not code detail.
+#
+# As of v3.2.0 these three are *authorable*: their values come from an active
+# policy document (resolved through the module `__getattr__` at the foot of this
+# file), and a non-engineer edits them from the back office. The defaults below
+# are the historical policy, so an un-edited build decides exactly as it always
+# did — authoring changes where a number comes from, never where a verdict is
+# computed, and the document holds only numbers this module already understood.
+#
+# Two floors are deliberately NOT here and NOT authorable: MIN_KEYWORD_MATCHES
+# (tools.py) and MIN_TITLE_WORDS_FOR_WRITE (below). Both exist to stop a
+# confidently wrong answer reaching a customer, and the whole point of a floor
+# is that it does not get lowered — handing that dial to a non-engineer would
+# re-open the exact failures they were added to close.
 
-# Mirrors Bookly's published 30-day return policy. Day 30 itself is still
-# eligible; the strict comparison in decide_return makes the bound inclusive.
-RETURN_WINDOW_DAYS = 30
 
-# Asking a clarifying question costs one turn. Guessing on a write path costs
-# a wrong refund. We pay the turn — but not forever: after this many failed
-# clarification attempts, a human takes over.
-MAX_CLARIFY_ATTEMPTS = 2
+@dataclass(frozen=True)
+class Parameter:
+    """One authorable policy number: the name a decision reads it by, the key it
+    is stored under in the document, its historical default, why it exists, and
+    the inclusive bounds a non-engineer's edit is validated against before it can
+    ever go active."""
 
-# A customer repeating a request the policy already denied is a dispute, and
-# disputes are for humans. One denial is enough to trigger the handoff.
-DENIALS_BEFORE_ESCALATION = 1
+    name: str
+    key: str
+    default: int
+    why: str
+    minimum: int
+    maximum: int
+
+
+PARAMETERS = (
+    Parameter(
+        "RETURN_WINDOW_DAYS", "return_window_days", 30,
+        "Mirrors the published 30-day return policy. Day 30 itself is still "
+        "eligible; the strict comparison in decide_return makes it inclusive.",
+        0, 365,
+    ),
+    Parameter(
+        "MAX_CLARIFY_ATTEMPTS", "max_clarify_attempts", 2,
+        "Asking costs a turn; guessing on a write path costs a wrong refund. "
+        "We pay the turn, but not forever — then a human takes over.",
+        1, 5,
+    ),
+    Parameter(
+        "DENIALS_BEFORE_ESCALATION", "denials_before_escalation", 1,
+        "A customer repeating a request the policy already denied is a "
+        "dispute, and disputes are for humans. One denial is enough.",
+        1, 5,
+    ),
+)
+
+_PARAMS_BY_NAME = {parameter.name: parameter for parameter in PARAMETERS}
+POLICY_DEFAULTS = {parameter.name: parameter.default for parameter in PARAMETERS}
+
+
+# ---------------------------------------------------------------------------
+# The authored policy document.
+#
+# policy.json is an append-only change log — the same shape and the same ethos
+# as the review queue: every edit carries who, what, why and when, and nothing
+# is ever overwritten (a revert is another append). The active policy is the
+# defaults with the log replayed in order, so an absent file is the historical
+# policy exactly, and a clean clone decides as it always did. The file is read
+# through an mtime cache, so an edit made in the back office is seen by the
+# console on its next decision without a restart — the two processes share this
+# file the way they already share the queue.
+# ---------------------------------------------------------------------------
+
+POLICY_PATH_ENV_VAR = "BOOKLY_POLICY_PATH"
+_DEFAULT_POLICY_PATH = str(Path(__file__).resolve().parent / "policy.json")
+_doc_lock = threading.RLock()
+_doc_cache = {"key": None, "changes": []}
+
+
+def policy_path() -> Path:
+    return Path(os.environ.get(POLICY_PATH_ENV_VAR) or _DEFAULT_POLICY_PATH)
+
+
+def _param_by_key(key) -> Optional[Parameter]:
+    for parameter in PARAMETERS:
+        if parameter.key == key:
+            return parameter
+    return None
+
+
+def _load_changes() -> list:
+    """The append-only change log, reloaded only when the file changes on disk.
+
+    Keyed on (path, mtime) so pointing the env var at a different document — as
+    the checks do — always reloads rather than trusting a stale cache.
+    """
+    path = policy_path()
+    with _doc_lock:
+        try:
+            key = (str(path), path.stat().st_mtime_ns)
+        except OSError:
+            # Absent file is the historical policy, not an error.
+            _doc_cache["key"] = None
+            _doc_cache["changes"] = []
+            return []
+        if key != _doc_cache["key"]:
+            try:
+                raw = json.loads(path.read_text(encoding="utf-8"))
+                changes = raw.get("changes", []) if isinstance(raw, dict) else []
+            except (OSError, ValueError):
+                changes = []
+            _doc_cache["key"] = key
+            _doc_cache["changes"] = changes if isinstance(changes, list) else []
+        return list(_doc_cache["changes"])
+
+
+def _valid_value(parameter: Parameter, value) -> bool:
+    return (
+        isinstance(value, int)
+        and not isinstance(value, bool)
+        and parameter.minimum <= value <= parameter.maximum
+    )
+
+
+def active_policy() -> dict:
+    """The policy numbers in force right now, keyed by their constant name.
+
+    The historical defaults with the authored change log replayed over them. An
+    absent or empty document is exactly the historical policy — nothing here
+    reasons, and the language model is nowhere near it. A stored value is
+    re-checked against the parameter's bounds on the way out too, so a document
+    hand-edited past a bound cannot push a threshold out of range: the bounds
+    hold on read, not only on write.
+    """
+    values = dict(POLICY_DEFAULTS)
+    for change in _load_changes():
+        parameter = _param_by_key(change.get("field")) if isinstance(
+            change, dict
+        ) else None
+        if parameter is not None and _valid_value(parameter, change.get("to")):
+            values[parameter.name] = change["to"]
+    return values
+
+
+def policy_changes(field: Optional[str] = None) -> list:
+    """The append-only change log, in the order it was written. Optionally for
+    one field, so the surface can show a value's history beside it."""
+    changes = [c for c in _load_changes() if isinstance(c, dict)]
+    if field is not None:
+        changes = [c for c in changes if c.get("field") == field]
+    return changes
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def change_parameter(
+    field: str, to_value, actor: str, justification: str,
+    at: Optional[str] = None,
+) -> dict:
+    """Author one parameter change: validated, then appended — never overwritten.
+
+    The same discipline the review queue applies to a human resolution — an
+    actor and a justification are required, enforced here once rather than in
+    the browser — and the same append-only shape, so a change is a new event
+    that supersedes, and a revert is another event rather than an erasure. A
+    change that fails validation never becomes active, and a value outside the
+    parameter's declared bounds is refused: this is where "a non-engineer can
+    tune the policy but cannot break it" actually lives.
+    """
+    parameter = _param_by_key(field)
+    if parameter is None:
+        raise ValueError("%r is not an authorable policy parameter" % (field,))
+    if isinstance(to_value, bool) or not isinstance(to_value, int):
+        raise ValueError("%s must be a whole number" % parameter.key)
+    if not (parameter.minimum <= to_value <= parameter.maximum):
+        raise ValueError(
+            "%s must be between %d and %d"
+            % (parameter.key, parameter.minimum, parameter.maximum)
+        )
+    actor = (actor or "").strip()
+    justification = (justification or "").strip()
+    if not actor:
+        raise ValueError("an actor is required to change policy")
+    if not justification:
+        raise ValueError("a justification is required to change policy")
+    with _doc_lock:
+        event = {
+            "field": parameter.key,
+            "from": active_policy()[parameter.name],
+            "to": to_value,
+            "actor": actor,
+            "justification": justification,
+            "at": at or _utc_now(),
+        }
+        changes = _load_changes()
+        changes.append(event)
+        _write_changes(changes)
+    return dict(event)
+
+
+def _write_changes(changes: list) -> None:
+    """Persist the log atomically, then refresh the cache to what was written."""
+    path = policy_path()
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(
+        json.dumps({"changes": changes}, indent=2), encoding="utf-8"
+    )
+    tmp.replace(path)  # atomic on the same filesystem
+    _doc_cache["key"] = (str(path), path.stat().st_mtime_ns)
+    _doc_cache["changes"] = list(changes)
 
 # Reason codes. Machine-readable, stable, and the only vocabulary in which
 # the policy engine explains itself.
@@ -78,7 +282,7 @@ def decide_return(
         return Verdict("deny", ORDER_CANCELLED, order.order_id)
     if order.status != "delivered" or order.delivered_on is None:
         return Verdict("deny", ORDER_NOT_DELIVERED, order.order_id)
-    if (today - order.delivered_on).days > RETURN_WINDOW_DAYS:
+    if (today - order.delivered_on).days > active_policy()["RETURN_WINDOW_DAYS"]:
         return Verdict("deny", RETURN_WINDOW_EXPIRED, order.order_id)
     return Verdict(
         "approve_refund",
@@ -90,7 +294,9 @@ def decide_return(
 
 def escalate_if_disputed(verdict: Verdict, prior_denials: int) -> Verdict:
     """Repeating a denied request escalates it; the verdict never flips."""
-    if verdict.decision == "deny" and prior_denials >= DENIALS_BEFORE_ESCALATION:
+    if verdict.decision == "deny" and prior_denials >= active_policy()[
+        "DENIALS_BEFORE_ESCALATION"
+    ]:
         return Verdict("escalate", ESCALATED_POLICY_DISPUTE, verdict.order_id)
     return verdict
 
@@ -164,7 +370,7 @@ def title_reference_is_strong(matched: int, distinctive: int) -> bool:
 def clarify_limit_reached(attempts: int) -> bool:
     """The clarification budget is spent: the next step is a human, not a
     guess."""
-    return attempts >= MAX_CLARIFY_ATTEMPTS
+    return attempts >= active_policy()["MAX_CLARIFY_ATTEMPTS"]
 
 
 # ---------------------------------------------------------------------------
@@ -197,26 +403,15 @@ class ReasonCode:
     gloss: str  # what it means, in one sentence a non-engineer can read
 
 
-CONSTANTS = (
-    Constant(
-        "RETURN_WINDOW_DAYS",
-        RETURN_WINDOW_DAYS,
-        "Mirrors the published 30-day return policy. Day 30 itself is still "
-        "eligible; the strict comparison in decide_return makes it inclusive.",
-    ),
-    Constant(
-        "MAX_CLARIFY_ATTEMPTS",
-        MAX_CLARIFY_ATTEMPTS,
-        "Asking costs a turn; guessing on a write path costs a wrong refund. "
-        "We pay the turn, but not forever — then a human takes over.",
-    ),
-    Constant(
-        "DENIALS_BEFORE_ESCALATION",
-        DENIALS_BEFORE_ESCALATION,
-        "A customer repeating a request the policy already denied is a "
-        "dispute, and disputes are for humans. One denial is enough.",
-    ),
-)
+def _constants() -> tuple:
+    """The descriptive constant surface, built live from the active policy so
+    the interface shows the value in force now rather than an import-time copy.
+    Exposed as `policy.CONSTANTS` through the module `__getattr__`."""
+    now = active_policy()
+    return tuple(
+        Constant(parameter.name, now[parameter.name], parameter.why)
+        for parameter in PARAMETERS
+    )
 
 REASON_CODES = (
     ReasonCode(
@@ -266,22 +461,19 @@ REASON_CODES = (
     ),
 )
 
-_CONSTANTS_BY_NAME = {constant.name: constant for constant in CONSTANTS}
 _REASON_CODES_BY_CODE = {entry.code: entry for entry in REASON_CODES}
 
 
 def constants_for(reason_code: str) -> list:
     """The named constants a verdict's reason code rests on, so a decision on
-    screen can be traced to the line of policy that produced it."""
+    screen can be traced to the line of policy that produced it — at the value
+    in force now, read from the active policy rather than an import-time copy."""
     entry = _REASON_CODES_BY_CODE.get(reason_code)
     if entry is None:
         return []
+    now = active_policy()
     return [
-        {
-            "name": name,
-            "value": _CONSTANTS_BY_NAME[name].value,
-            "why": _CONSTANTS_BY_NAME[name].why,
-        }
+        {"name": name, "value": now[name], "why": _PARAMS_BY_NAME[name].why}
         for name in entry.depends_on
     ]
 
@@ -297,3 +489,21 @@ def describe(reason_code: str) -> Optional[dict]:
         "gloss": entry.gloss,
         "constants": constants_for(entry.code),
     }
+
+
+def __getattr__(name: str):  # PEP 562, supported on 3.7+
+    """Resolve the authorable thresholds and the CONSTANTS surface from the
+    active policy document.
+
+    `policy.RETURN_WINDOW_DAYS` and the other two names are no longer literals
+    on this module; they are read here from whatever the active document says,
+    so every reader — agent.py, web.py, the checks — sees the value in force now,
+    and a decision reads a threshold exactly as it always did. The number moved
+    into a document; the place a verdict is computed did not. Anything else falls
+    through to the normal AttributeError.
+    """
+    if name in POLICY_DEFAULTS:
+        return active_policy()[name]
+    if name == "CONSTANTS":
+        return _constants()
+    raise AttributeError("module %r has no attribute %r" % (__name__, name))
