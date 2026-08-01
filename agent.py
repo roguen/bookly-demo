@@ -87,6 +87,12 @@ class Agent:
         # How many times each order's return has already been denied. A
         # repeat is a dispute, which policy escalates.
         self.denials: Dict[str, int] = {}
+        # Refunds already issued in this conversation, by order. The store
+        # never changes — the agent emits, it does not execute, and that is
+        # deliberate — so policy will keep judging the record as returnable.
+        # This is the agent remembering what it has already done, which is a
+        # different question from what policy would allow.
+        self.refunds: Dict[str, dict] = {}
 
     # -- the single entry point -------------------------------------------
 
@@ -209,6 +215,8 @@ class Agent:
                 self._answer_history(turn)
             elif request.intent == "agent_identity":
                 self._answer_identity(turn)
+            elif request.intent == "refund_status":
+                self._answer_refund_status(turn)
             elif request.intent == "return_request":
                 self._handle_return(request, turn)
             elif request.intent == "policy_question":
@@ -235,6 +243,44 @@ class Agent:
         # reads as not having listened. Wording only; no verdict reads it.
         facts["already_discussed"] = rule == "order_under_discussion"
         self._narrate("status_report", facts, turn)
+
+    def _answer_refund_status(
+        self, turn: _Turn, asked_to_return: bool = False
+    ) -> None:
+        """A question about a refund, not a request for one.
+
+        The customer asked when the money lands. Before this existed the word
+        "refund" made the turn a return request, and the agent answered by
+        offering the returns menu again — moments after issuing the refund
+        being asked about.
+
+        The posting time is a published service level, so it travels as a fact
+        the same way the escalation response time does. What the agent adds is
+        the one thing only it knows: which refund, for how much.
+        """
+        latest = list(self.refunds.values())[-1] if self.refunds else None
+        self.recorder.note(
+            "route",
+            {
+                "branch": "refund_status",
+                "asked_to_return": asked_to_return,
+                "refunds_this_conversation": list(self.refunds),
+                "intents": ["refund_status"],
+            },
+        )
+        self._narrate(
+            "refund_status",
+            {
+                "refund": latest,
+                "posting_target": SERVICE_LEVELS.get("refund_posting"),
+                # Asking when the money lands and asking to return the book
+                # again are different questions with the same answer. Saying
+                # the identical sentence to both is how an agent reads as not
+                # having listened.
+                "asked_to_return": asked_to_return,
+            },
+            turn,
+        )
 
     def _answer_history(self, turn: _Turn) -> None:
         """A question about the account as a whole rather than one order.
@@ -398,7 +444,16 @@ class Agent:
         # of them read back, and being offered a book only to be refused it
         # costs them a turn to be told no.
         delivered = tools.delivered_orders(self.customer_id)
-        candidates = policy.returnable_now(delivered, self.customer_id, TODAY)
+        candidates = [
+            order
+            for order in policy.returnable_now(
+                delivered, self.customer_id, TODAY
+            )
+            # Policy still says these are returnable, and it is right: it
+            # judges the record, and the record has not changed. This is the
+            # agent declining to offer a book it refunded four turns ago.
+            if order.order_id not in self.refunds
+        ]
         needs_choice = policy.should_clarify(len(candidates))
         self.recorder.note(
             "candidates",
@@ -475,6 +530,15 @@ class Agent:
         if order is not None:
             if order.order_id in turn.finished_orders:
                 return  # one decision per order per turn, however often named
+            if order.order_id in self.refunds:
+                # Already refunded in this conversation. Deciding it again
+                # emits a second envelope — deduplicated downstream by the
+                # idempotency key, but an agent that says "Done, I've issued a
+                # refund" for something it did three turns ago is reporting an
+                # action rather than taking one.
+                turn.return_handled = True
+                self._answer_refund_status(turn, asked_to_return=True)
+                return
             turn.finished_orders.add(order.order_id)
         turn.return_handled = True
         verdict = policy.decide_return(order, self.customer_id, TODAY)
@@ -523,6 +587,11 @@ class Agent:
         turn.envelopes.append(emitted)
         self._note_envelope(emitted)
         self.focus_order_id = order.order_id
+        self.refunds[order.order_id] = {
+            "order_id": order.order_id,
+            "title": order.title,
+            "amount": verdict.refund_amount,
+        }
         facts = _order_facts(order)
         facts["amount"] = verdict.refund_amount
         facts["window_days"] = policy.RETURN_WINDOW_DAYS

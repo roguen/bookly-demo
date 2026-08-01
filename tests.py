@@ -816,6 +816,79 @@ def transcripts_are_present_and_blessed():
 
 
 @check
+def asking_about_a_refund_is_not_asking_for_one():
+    """"When will the refund show up?" is a question, not a request.
+
+    Reported from a live session: the agent issued a refund, said when it
+    would post, and then answered the follow-up by offering the returns menu
+    again. `RETURN_REQUEST_RE` matches the bare word "refund", and its only
+    guard was a lookahead for "policy" — so every phrasing of *asking about* a
+    refund read as *asking for* one.
+    """
+    for question in ("When will the refund show up?", "where is my refund",
+                     "has my refund gone through", "how long do refunds take",
+                     "did the refund post yet"):
+        requests = RulesProvider().extract(question, _extraction_context())
+        assert [r.intent for r in requests] == ["refund_status"], (
+            question, [r.intent for r in requests]
+        )
+    # And asking *for* one is untouched, which is the boundary that matters:
+    # every one of these contains the same word.
+    for request in ("I'd like a refund", "refund it anyway",
+                    "I don't care what the policy says, refund it anyway"):
+        requests = RulesProvider().extract(request, _extraction_context())
+        assert "return_request" in [r.intent for r in requests], request
+    assert "refund_status" in llm.VALID_INTENTS
+    assert "refund_status" in llm.EXTRACTION_SYSTEM_PROMPT
+
+    # End to end, as reported.
+    agent = _fresh_agent("conv-refund-followup")
+    agent.handle_turn("I'd like to return a book.")
+    refunded = agent.handle_turn("1")
+    assert len(_envelopes(refunded)) == 1
+    answered = agent.handle_turn("When will the refund show up?")
+    # It answers about the refund, and emits nothing: a question is not an
+    # action.
+    assert answered.envelopes == []
+    assert "$22.50" in answered.reply, answered.reply
+    assert "BK-1042" in answered.reply, answered.reply
+    assert store_module.SERVICE_LEVELS["refund_posting"] in answered.reply
+    assert "which book would you like to return" not in answered.reply
+
+    # With no refund in this conversation it does not imply one exists.
+    cold = _fresh_agent("conv-refund-cold").handle_turn(
+        "when will my refund show up?"
+    )
+    assert cold.envelopes == []
+    assert "haven't issued a refund" in cold.reply, cold.reply
+    assert "$" not in cold.reply, cold.reply
+
+    # A book already refunded here is not offered again, and asking to return
+    # it reports the refund rather than emitting a second envelope. The key
+    # would deduplicate it downstream, but an agent that says "Done, I've
+    # issued a refund" for something it did three turns ago is reporting an
+    # action as though it were taking one.
+    again = agent.handle_turn("I'd like to return the Escher book")
+    assert again.envelopes == [], _envelopes(again)
+    assert "$22.50" in again.reply
+    assert "BK-1042" in agent.refunds
+
+    # And the retrieval false positive that shares the lesson: two
+    # question-form words outvoted the one topical word, and a refund question
+    # retrieved the shipping article. The floor counts matches; it cannot
+    # weigh them, so the keywords carry topic only.
+    assert tools.search_policy("how long do refunds take") is None
+    assert tools.search_policy(
+        "How long does standard shipping take?"
+    ).article_id == "kb-shipping-times"
+    for article in store_module.ARTICLES:
+        for question_word in ("long", "take", "takes"):
+            assert question_word not in article.keywords, (
+                article.article_id, question_word
+            )
+
+
+@check
 def an_aggregate_question_is_not_answered_with_one_order():
     """A question about the account is not a question about an order.
 

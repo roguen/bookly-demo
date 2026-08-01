@@ -34,7 +34,7 @@ For a live session:
 python3 app.py
 ```
 
-Run the check suite (standard library only, no pytest) — 66 checks, and they
+Run the check suite (standard library only, no pytest) — 68 checks, and they
 also run from inside the console:
 
 ```bash
@@ -196,6 +196,16 @@ The agent can also explain itself. "What do you mean by limit?" after a
 clarify-limit handoff, and "how long until someone gets back to me?" after any
 escalation, are answered from the knowledge base like any other question. It
 answers to its name too — "what is your name?" — though it never volunteers it.
+
+**A question about a refund is not a request for one.** "When will the refund
+show up?" contains the word *refund*, and used to be read as asking to start
+another return — so the agent answered the most natural follow-up to a refund
+by offering the returns menu again. `refund_status` handles it, names the
+refund it is talking about from conversation memory, and states the posting
+service level. A book already refunded in this conversation is not offered as
+a candidate again either: `policy.returnable_now` judges the record and the
+record has not changed, so this is the agent declining to repeat work it just
+did, not policy changing its mind.
 
 **Questions about the account, not an order.** "How many books have I
 ordered?" is a different question from "where is my order", and it has an
@@ -375,6 +385,12 @@ to drift and no place for a vendor to introduce a decision.
 - The store and clock are mocked so every run is deterministic.
 - The knowledge base is deliberately small and deliberately has gaps —
   retrieval returning nothing on a gap is designed behavior, not a bug.
+- Article keywords carry topic only. "Long" and "take" are how English forms
+  a duration question and appear in questions about everything; with them in
+  the keyword sets, two question-form words outvoted the one topical word and
+  "how long do refunds take" retrieved the *shipping* article. The floor
+  counts matches and cannot weigh them, so the weighing is done by curating
+  what counts as a keyword.
 - Cases the policy engine does not model escalate to a human rather than
   resolve. That is the intended failure mode.
 - The `[envelope …]` lines in the CLI are back-office telemetry, shown for

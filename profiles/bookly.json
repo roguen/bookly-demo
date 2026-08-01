@@ -676,18 +676,15 @@
       "title": "Standard shipping times",
       "summary": "Standard shipping takes 3 to 5 business days within the continental US. Expedited shipping takes 1 to 2 business days.",
       "keywords": [
-        "shipping",
-        "ship",
-        "delivery",
-        "deliver",
         "arrive",
-        "long",
-        "take",
-        "takes",
-        "standard",
+        "days",
+        "deliver",
+        "delivery",
         "expedited",
         "fast",
-        "days"
+        "ship",
+        "shipping",
+        "standard"
       ]
     },
     {
@@ -695,16 +692,16 @@
       "title": "Return policy",
       "summary": "Books can be returned within 30 days of delivery for a full refund to the original payment method. Refunds post within 5 business days of approval.",
       "keywords": [
-        "return",
-        "returns",
-        "refund",
-        "refunds",
-        "policy",
-        "window",
+        "back",
         "days",
         "exchange",
         "money",
-        "back"
+        "policy",
+        "refund",
+        "refunds",
+        "return",
+        "returns",
+        "window"
       ]
     },
     {
@@ -712,14 +709,14 @@
       "title": "Password reset",
       "summary": "To reset your password, use the 'Forgot password' link on the sign-in page. A reset email arrives within a few minutes; check spam if it does not.",
       "keywords": [
+        "account",
+        "email",
+        "forgot",
+        "log",
+        "login",
         "password",
         "reset",
-        "login",
-        "log",
-        "sign",
-        "account",
-        "forgot",
-        "email"
+        "sign"
       ]
     },
     {
@@ -727,21 +724,21 @@
       "title": "When Hal asks which order, and when it stops asking",
       "summary": "When more than one order could take a refund, Hal asks which one rather than guessing, because a refund posted to the wrong order is harder to undo than a question. It will ask twice. If it still cannot tell which order you mean, it hands the conversation to a human agent instead of choosing for you.",
       "keywords": [
-        "limit",
-        "limits",
-        "clarify",
-        "clarifying",
-        "clarification",
-        "mean",
-        "guess",
-        "guessing",
-        "twice",
-        "attempts",
-        "attempt",
         "ask",
         "asking",
+        "attempt",
+        "attempts",
         "choosing",
-        "confused"
+        "clarification",
+        "clarify",
+        "clarifying",
+        "confused",
+        "guess",
+        "guessing",
+        "limit",
+        "limits",
+        "mean",
+        "twice"
       ]
     },
     {
@@ -749,24 +746,23 @@
       "title": "How quickly a human replies to an escalated case",
       "summary": "When a case goes to a human, a member of the support team picks it up within 4 business hours, and by the next business morning if it was raised overnight. You keep the case reference, and the original decision stays on the record alongside whatever the reviewer decides.",
       "keywords": [
-        "escalation",
+        "back",
         "escalated",
-        "review",
-        "reviewer",
-        "someone",
-        "somebody",
+        "escalation",
         "hear",
-        "until",
-        "wait",
-        "waiting",
+        "hours",
+        "reply",
         "respond",
         "response",
-        "reply",
-        "long",
-        "back",
-        "team",
+        "review",
+        "reviewer",
         "sla",
-        "hours"
+        "somebody",
+        "someone",
+        "team",
+        "until",
+        "wait",
+        "waiting"
       ]
     }
   ],
@@ -864,5 +860,6 @@
     "escalation_first_response_hours": 4,
     "escalation_first_response": "within 4 business hours, and by the next business morning if it is raised overnight",
     "refund_posting": "within 5 business days"
-  }
+  },
+  "articles_note": "Keywords are topical words only. Question-form words like 'long' and 'take' appear in questions about everything, and the retrieval floor counts matches without weighing them — so two of those outvoted the one word carrying the subject, and 'how long do refunds take' retrieved the shipping article. A count of matches is not a measure of relevance."
 }

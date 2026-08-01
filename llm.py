@@ -71,6 +71,7 @@ VALID_INTENTS = frozenset(
     [
         "order_status",
         "order_history",
+        "refund_status",
         "agent_identity",
         "return_request",
         "policy_question",
@@ -106,6 +107,20 @@ SEGMENT_SPLIT_RE = re.compile(r"\s+\band\b\s+|;\s*|\.\s+")
 
 # Catches order ids and nothing else. The format is fixed by the store.
 ORDER_ID_RE = re.compile(r"\bBK-\d{4}\b", re.IGNORECASE)
+
+# Catches asking *about* a refund rather than asking for one. Checked before
+# RETURN_REQUEST_RE, because "when will the refund show up?" contains the word
+# "refund" and is emphatically not a request to start another one — which is
+# exactly what it used to be read as, moments after the agent had issued the
+# refund being asked about.
+REFUND_STATUS_RE = re.compile(
+    r"\b(when (?:will|does|do|is|should)|where(?:'s| is)?|how long"
+    r"|has|have|did|is)\b[^.?!]{0,40}?\brefunds?\b"
+    r"|\brefunds?\b[^.?!]{0,40}?\b(show up|come through|go through|arrive"
+    r"|land|post|posted|take|taken|processed|issued yet)\b"
+    r"|\bmoney back\b[^.?!]{0,30}?\b(when|yet|arrive|show)\b",
+    re.IGNORECASE,
+)
 
 # Catches asking to send something back. Deliberately does not catch
 # "return policy" / "refund policy" — those are questions, not requests.
@@ -232,6 +247,10 @@ class RulesProvider:
         )
 
     def _intent_of(self, segment: str, has_reference: bool) -> Optional[str]:
+        # Asking *about* a refund beats asking to do something, and has to be
+        # tested first: every phrasing of it contains the word "refund".
+        if REFUND_STATUS_RE.search(segment):
+            return "refund_status"
         # Asking to do something beats asking about something: a segment that
         # requests a return wins even if it also mentions the policy.
         if RETURN_REQUEST_RE.search(segment):
@@ -462,6 +481,42 @@ def _no_returnable_orders(f: dict) -> str:
     return "I don't see any delivered orders on your account to return."
 
 
+def _refund_status(f: dict) -> str:
+    refund, posting = f.get("refund"), f.get("posting_target")
+    if refund:
+        when = " It should post %s." % posting if posting else ""
+        if f.get("asked_to_return"):
+            return (
+                "That one's already taken care of — I refunded %s (%s) for %s "
+                "earlier in this conversation.%s"
+                % (
+                    refund["title"], refund["order_id"],
+                    _fmt_money(refund["amount"]), when,
+                )
+            )
+        return (
+            "Your refund of %s for %s (%s) is on its way to your original "
+            "payment method.%s"
+            % (
+                _fmt_money(refund["amount"]), refund["title"],
+                refund["order_id"], when,
+            )
+        )
+    # Nothing was issued here, so do not imply one exists. State the published
+    # commitment and offer a person, which is what the customer needs if they
+    # are chasing a refund from an earlier conversation.
+    if posting:
+        return (
+            "I haven't issued a refund on this conversation. Refunds post %s "
+            "once they're approved — if you're waiting on one from earlier, I "
+            "can put you through to a human who can look it up." % posting
+        )
+    return (
+        "I haven't issued a refund on this conversation. I can put you "
+        "through to a human who can look up an earlier one."
+    )
+
+
 def _order_history(f: dict) -> str:
     total, recent, more = f["total"], f["recent"], f["more"]
     if not total:
@@ -510,6 +565,7 @@ _TEMPLATES = {
     "kb_answer": _kb_answer,
     "kb_miss": _kb_miss,
     "no_returnable_orders": _no_returnable_orders,
+    "refund_status": _refund_status,
     "order_history": _order_history,
     "agent_identity": _agent_identity,
     "help": _help,
@@ -526,8 +582,9 @@ bookstore. Split the turn into requests at conjunctions and sentence breaks.
 For each request report: intent (one of "order_status" for one specific
 order, "order_history" for a question about the account as a whole — how many
 orders, what they have bought, their order history — "agent_identity" for who
-or what you are, "return_request", "policy_question", "human_handoff", or
-null), order_id (format BK-0000, or
+or what you are, "refund_status" for a question about a refund that already
+exists rather than a request for a new one, "return_request",
+"policy_question", "human_handoff", or null), order_id (format BK-0000, or
 null), title_words
 (words from the customer's own order titles listed below that the request
 refers to), option_number (if the request answers a numbered choice, else

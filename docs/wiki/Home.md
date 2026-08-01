@@ -26,7 +26,7 @@ No dependencies. No API key. Python 3.9 or later.
 
 ```bash
 python3 app.py --script demo.txt   # four scripted scenarios, in a terminal
-python3 tests.py                   # 66 checks, no pytest
+python3 tests.py                   # 68 checks, no pytest
 python3 harness.py                 # the golden transcripts, and the rubric
 python3 web.py                     # the console, 127.0.0.1:8000
 python3 backoffice.py              # the executing side, 127.0.0.1:8787
@@ -79,7 +79,7 @@ browser to someone who will never read `policy.py`.
 Verified for the phase-2 release: the CLI byte-identical to `v1.0.0`; a clean
 clone makes zero external requests; `stub_receiver.py` untouched and its
 evidence procedure reproduced key for key. Since phase 3 the check count is
-enforced rather than repeated — 66 checks green on 3.9, 3.13 and 3.14, in CI
+enforced rather than repeated — 68 checks green on 3.9, 3.13 and 3.14, in CI
 on every push, and any document that cites a different number fails the
 suite.
 
