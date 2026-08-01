@@ -34,12 +34,45 @@ For a live session:
 python3 app.py
 ```
 
-Run the check suite (standard library only, no pytest) — 58 checks, and they
+Run the check suite (standard library only, no pytest) — 59 checks, and they
 also run from inside the console:
 
 ```bash
 python3 tests.py
 ```
+
+### Golden transcripts and the narration rubric
+
+A scenario is a file. `transcripts/*.json` holds one conversation each,
+replayed by `harness.py` through the same `handle_turn` the CLI and the
+console call, with the reply compared verbatim, the envelope's decision fields
+compared including the literal idempotency key, and the sequence of recorder
+stages compared — so a change that moved a decision to the model side of the
+boundary fails a test rather than a review.
+
+```bash
+python3 harness.py
+```
+
+`rubric.py` grades the prose, because the decisions were pinned and the prose
+was not. It is handed the event kind, the facts the agent gave the narrator,
+and the text that came back — and nothing else, which is why grading cannot
+become deciding. Findings a fixture still produces are listed in its
+`known_gaps` with the issue number that will close them; an unacknowledged
+finding fails, and so does an acknowledgement the rubric no longer reports.
+
+To run the whole thing through a hosted narrator, which is **not** the default
+path and is never what `tests.py` does:
+
+```bash
+OPENAI_API_KEY=your-key python3 harness.py --provider openai --out evidence/narration_rubric_openai.txt
+```
+
+The decision layer is compared exactly on every provider. The verbatim reply
+comparison is skipped on a hosted run on purpose — a hosted model is expected
+to word things differently, and that is the parity claim rather than a defect
+— so the prose is graded by the rubric instead and the report says which mode
+it ran in.
 
 ## The console
 

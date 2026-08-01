@@ -760,6 +760,36 @@ def the_rubric_catches_the_recorded_hosted_drift():
 
 
 @check
+def the_suite_never_reaches_a_hosted_provider():
+    """A hosted run is something a person asks for at a terminal. It costs
+    money and needs a network, and neither belongs in `python3 tests.py` —
+    which is also what lets the same command run in CI on a clean checkout
+    with no secrets configured."""
+    assert harness.DEFAULT_PROVIDER == "rules"
+    # The default is the stand-in, not merely named after it: a replayed reply
+    # is byte-identical to what the template produces directly.
+    transcript = [
+        t for t in harness.load_all() if t.id == "policy-answered-then-missed"
+    ][0]
+    observed = harness.replay(transcript)
+    assert observed[1].reply == llm.RulesProvider().narrate(
+        llm.NarrationEvent("kb_miss", {})
+    )
+    # And no check hands replay a provider of its own, so none of them can
+    # reach a vendor however the environment is configured.
+    source = pathlib.Path("tests.py").read_text(encoding="utf-8")
+    assert "harness.replay(transcript)" in source
+    assert not re.search(r"harness\.replay\([^)]*,", source), (
+        "a check is passing replay a provider"
+    )
+    # Blessing from a hosted narrator is refused: a fixture blessed that way
+    # would pin one sampling of one model's prose as the repo's expected text.
+    assert "refusing to bless from" in pathlib.Path("harness.py").read_text(
+        encoding="utf-8"
+    )
+
+
+@check
 def the_rubric_cannot_reach_a_decision():
     """Grading prose must never become a second place that decides.
 

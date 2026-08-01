@@ -250,6 +250,7 @@ def compare(
     transcript: Transcript,
     observed: Sequence[Observed],
     prose: bool = True,
+    gate_rubric: bool = True,
 ) -> List[str]:
     """Every way the run differs from the fixture, as readable lines.
 
@@ -261,6 +262,12 @@ def compare(
     provider-parity claim — so on a hosted run the decisions are still pinned
     exactly and the prose is graded by the rubric instead. Skipping it is a
     decision, not an omission, and the caller has to ask for it.
+
+    `gate_rubric=False` reports rubric findings rather than failing on them.
+    A fixture's `known_gaps` are statements about what the *stand-in* still
+    gets wrong; holding a different narrator to them would be comparing a
+    hosted model against a list of somebody else's defects. On a hosted run
+    the findings are the report, and only the decisions are a gate.
     """
     failures: List[str] = []
     if len(observed) != len(transcript.turns):
@@ -306,8 +313,17 @@ def compare(
                     "%s customer_note:\n    expected: %r\n    actual:   %r"
                     % (where, expected.customer, note)
                 )
-    failures.extend(_compare_rubric(transcript, observed))
+    if gate_rubric:
+        failures.extend(_compare_rubric(transcript, observed))
     return failures
+
+
+def findings_for(observed: Sequence[Observed]) -> List[rubric.Finding]:
+    """The rubric's read on a replayed conversation, ungated. What a hosted
+    run reports instead of gating on."""
+    return rubric.grade(
+        [(turn.reply, turn.narration_events) for turn in observed]
+    )
 
 
 def _compare_rubric(
@@ -441,6 +457,9 @@ def bless(transcript: Transcript, observed: Sequence[Observed]) -> None:
 class Result:
     transcript: Transcript
     failures: List[str] = field(default_factory=list)
+    # Every rubric finding, gated or not. On a stand-in run the gated ones are
+    # already in `failures`; on a hosted run this is the report itself.
+    findings: List[rubric.Finding] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -450,25 +469,53 @@ class Result:
 def run_all(
     provider: Optional[object] = None,
     prose: bool = True,
+    gate_rubric: bool = True,
     directory: Optional[pathlib.Path] = None,
-) -> List[Result]:
+) -> List["Result"]:
     results = []
     for transcript in load_all(directory):
         observed = replay(transcript, provider)
-        results.append(Result(transcript, compare(transcript, observed, prose)))
+        results.append(
+            Result(
+                transcript,
+                compare(transcript, observed, prose, gate_rubric),
+                findings_for(observed),
+            )
+        )
     return results
+
+
+# The default path is the stand-in, and stays the default path. A hosted run
+# is something a person asks for, at a terminal, once — it costs money and it
+# needs a network, and neither belongs in `python3 tests.py`.
+DEFAULT_PROVIDER = "rules"
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     import argparse
 
+    import llm
+
     parser = argparse.ArgumentParser(
-        description="Replay the golden transcripts under transcripts/."
+        description="Replay the golden transcripts under transcripts/.",
+        epilog="tests.py only ever runs the stand-in, so the suite stays "
+               "offline, dependency-free and free.",
     )
     parser.add_argument(
         "--bless",
         metavar="ID",
         help="rewrite one fixture (or 'all') from a real run",
+    )
+    parser.add_argument(
+        "--provider",
+        default=DEFAULT_PROVIDER,
+        choices=sorted(llm.PROVIDERS),
+        help="which narrator to replay through (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--out",
+        metavar="PATH",
+        help="also write the report here, for evidence/",
     )
     arguments = parser.parse_args(argv)
 
@@ -478,10 +525,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 1
 
     if arguments.bless:
-        wanted = [
-            t for t in transcripts
-            if arguments.bless in ("all", t.id)
-        ]
+        if arguments.provider != DEFAULT_PROVIDER:
+            # A fixture blessed from a hosted run would pin one sampling of
+            # one model's prose as the expected text of the repo, which is
+            # the opposite of what these files are for.
+            print("refusing to bless from %r: fixtures are blessed from the "
+                  "stand-in, which is the deterministic one."
+                  % arguments.provider)
+            return 1
+        wanted = [t for t in transcripts if arguments.bless in ("all", t.id)]
         if not wanted:
             print("no transcript with id %r" % arguments.bless)
             return 1
@@ -492,17 +544,88 @@ def main(argv: Optional[List[str]] = None) -> int:
               "looks exactly like a blessed fix.")
         return 0
 
-    failures = 0
-    for result in run_all():
+    hosted = arguments.provider != DEFAULT_PROVIDER
+    try:
+        provider = llm.build_provider(arguments.provider)
+        # Constructing a client is offline for both vendors, so a missing key,
+        # a renamed model and a missing network all look like success until
+        # the first turn — which here means a stack trace halfway through a
+        # replay. The console already solved this at its provider button;
+        # the same one small call solves it here.
+        if isinstance(provider, llm.HostedProvider):
+            provider.verify()
+    except Exception as error:
+        text = " ".join(str(error).split())
+        print("could not start %s: %s: %s"
+              % (arguments.provider, type(error).__name__, text[:240]))
+        print("set the vendor key in the environment and try again.")
+        return 1
+
+    results = run_all(provider, prose=not hosted, gate_rubric=not hosted)
+    report = _report(results, arguments.provider, hosted)
+    print(report)
+    if arguments.out:
+        pathlib.Path(arguments.out).write_text(report + "\n", encoding="utf-8")
+        print("\nwritten to %s" % arguments.out)
+    return 1 if any(not r.ok for r in results) else 0
+
+
+def _report(results: Sequence["Result"], provider: str, hosted: bool) -> str:
+    lines = [
+        "Golden transcripts, narrator: %s" % provider,
+        "",
+    ]
+    if hosted:
+        lines += [
+            "Hosted run. The decision layer is compared exactly — every",
+            "envelope field, every reason code, every idempotency key, the",
+            "same as on the stand-in. The verbatim reply comparison is",
+            "deliberately skipped: a hosted model is expected to word things",
+            "differently, and that is the parity claim rather than a defect.",
+            "The prose is graded by the rubric instead, and the findings",
+            "below are the report rather than a gate — a fixture's known_gaps",
+            "describe what the stand-in gets wrong, and holding another",
+            "narrator to that list would be comparing it against somebody",
+            "else's defects.",
+            "",
+        ]
+    else:
+        lines += [
+            "Stand-in run. Replies are compared verbatim and the rubric gates:",
+            "any finding a fixture has not acknowledged in known_gaps fails.",
+            "",
+        ]
+    failed = 0
+    for result in results:
         if result.ok:
-            print("ok    %s" % result.transcript.id)
+            lines.append("ok    %s" % result.transcript.id)
         else:
-            failures += 1
-            print("FAIL  %s" % result.transcript.id)
+            failed += 1
+            lines.append("FAIL  %s" % result.transcript.id)
             for line in result.failures:
-                print("      %s" % line.replace("\n", "\n      "))
-    print("\n%d passed, %d failed" % (len(transcripts) - failures, failures))
-    return 1 if failures else 0
+                lines.append("      %s" % line.replace("\n", "\n      "))
+    lines.append("")
+    lines.append("%d passed, %d failed" % (len(results) - failed, failed))
+
+    lines.append("")
+    lines.append("NARRATION RUBRIC")
+    total = 0
+    for result in results:
+        # Which findings this fixture already admits to, so the report
+        # distinguishes a known open defect from a new one rather than
+        # printing a wall of undifferentiated lines.
+        acknowledged = {
+            gap.get("rule"): gap.get("issue")
+            for gap in result.transcript.known_gaps
+        }
+        for finding in result.findings:
+            total += 1
+            issue = acknowledged.get(finding.rule)
+            mark = " (known, #%s)" % issue if issue else ""
+            lines.append("  %s%s %s" % (result.transcript.id, mark, finding))
+    if not total:
+        lines.append("  no findings.")
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":
