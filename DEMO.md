@@ -83,12 +83,12 @@ does not participate in it.
 
 > I'd like to return a book.
 
-The agent asks which one — and asks about two books, not the thirty-four this
+The agent asks which one — and asks about two books, not the thirty-five this
 customer has had delivered. Two rows in the trace matter, and they are
 deliberately not one row:
 
-- `candidates` — 34 delivered, 2 of them returnable, clarify: yes. **Purple.**
-  The customer has thirty-seven orders and thirty-four delivered books; the
+- `candidates` — 35 delivered, 2 of them returnable, clarify: yes. **Purple.**
+  The customer has thirty-eight orders and thirty-five delivered books; the
   agent offers the two a return could actually be granted on, because being
   offered a book and then refused it costs the customer a turn to be told no.
   Both decisions are `policy` — `returnable_now`, then `should_clarify`.

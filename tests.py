@@ -159,12 +159,12 @@ def profile_load_preserves_the_fixtures():
     # can only discuss five of the thirty-seven it claims is the same
     # confidently-wrong sentence one level up.
     orders = tools.orders_for_customer(CURRENT_CUSTOMER_ID)
-    assert len(orders) == store_module.CUSTOMER.orders_placed == 37
+    assert len(orders) == store_module.CUSTOMER.orders_placed == 38
     # A history that size is the point: it is what makes offering every
     # delivered order as a choice absurd, and what the returnable_now filter
     # exists to answer.
     delivered = tools.delivered_orders(CURRENT_CUSTOMER_ID)
-    assert len(delivered) == 34
+    assert len(delivered) == 35
     # The clarifying question numbers its options in store order, so the
     # order the profile lists them in is load bearing, not incidental — and
     # what it offers is what policy would actually approve, not everything
@@ -919,7 +919,7 @@ def an_aggregate_question_is_not_answered_with_one_order():
     assert str(len(tools.orders_for_customer(CURRENT_CUSTOMER_ID))) in (
         result.reply
     ), result.reply
-    assert "37 orders" in result.reply, result.reply
+    assert "38 orders" in result.reply, result.reply
     assert result.envelopes == []
     # And it does not read as a report on one order.
     assert "is expected by" not in result.reply, result.reply
@@ -929,7 +929,7 @@ def an_aggregate_question_is_not_answered_with_one_order():
     # arriving as an order_read that fell back.
     lookups = [n for n in watched.notes if n.stage == "lookup"]
     assert [n.payload["kind"] for n in lookups] == ["order_history"], lookups
-    assert lookups[0].payload["total"] == 37
+    assert lookups[0].payload["total"] == 38
 
     # Scoped like every other read: another customer's order is not in it.
     assert "BK-2077" not in result.reply
@@ -943,11 +943,11 @@ def an_aggregate_question_is_not_answered_with_one_order():
         "everything I've bought",
     ):
         reply = _fresh_agent("conv-agg").handle_turn(question).reply
-        assert "37 orders" in reply, (question, reply)
+        assert "38 orders" in reply, (question, reply)
 
     # Asking one order's status still resolves to one order.
     single = _fresh_agent("conv-single").handle_turn("Where's my Dune order?")
-    assert "BK-1041" in single.reply and "37 orders" not in single.reply
+    assert "BK-1041" in single.reply and "38 orders" not in single.reply
 
     # And the agent answers to its name, which needed an intent for the same
     # reason: routing it through retrieval would have meant matching on "you"

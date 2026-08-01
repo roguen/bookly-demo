@@ -1451,3 +1451,45 @@ you know that?
 **Lives in.** `README.md 'Assumptions and limits', docs/wiki/Home.md 'Deliberately out of scope' and 'Known future phases', queue.py, backoffice.py, deck/build.js slide 5, PR #12 body`
 
 ---
+
+## 42. The catalog grew to 38 for a book the demo wanted, and the count moved with it
+
+*v3.1.0*
+
+**Decision.** *2001: A Space Odyssey* (Arthur C. Clarke) was added as a 38th order
+(BK-2132) for the demo customer, dated a 2025 purchase — **delivered, but well
+outside the return window**. `customer.orders_placed` moved 37 → 38 in the same
+edit, the title joined `catalog.titles`, and the one count-bearing golden
+transcript (`order-history-and-identity`) was re-blessed 37 → 38 / 34 → 35. The
+earlier entries in this file that cite 37 orders, 34 delivered, or "1 of 37
+titles" are left exactly as written: they record the state at the time those
+decisions were made, the same way the dated provenance notes in entry 40 do.
+
+**Why.** The status and date were the load-bearing choice, not the title. Dated
+inside the return window, 2001 would have become a third option in the
+"I'd like to return a book" clarifying menu, changing Scenario 2's reply and
+re-blessing three more golden transcripts; dated as a recent order it would
+have displaced a title in the order-history preview. Delivered-out-of-window
+keeps it name-addressable — "2001", "Space" and "Odyssey" are all non-generic,
+so it clears the write-path title guard without a `generic_words` collision —
+and gives an honest out-of-window denial with the same reason code any other
+old order gets, while touching **no demo envelope**: every idempotency key and
+amount is byte-identical to v3.0.0, and only the two history counts moved. This
+is the same move entry 37 made when it dated Exhalation *inside* the window on
+purpose, run in reverse. Leaving `orders_placed` at 37 was not an option — it
+would have reintroduced the exact record/store mismatch entry 37 exists to
+close, one order larger. And because the count is pinned in code and prose, the
+edit was deliberately a coordinated one: the profile, three assertions in
+tests.py, the re-blessed transcript, README and DEMO.md all moved together, the
+way entry 33 requires.
+
+**Rejected.** Dating 2001 inside the return window or as a recent order (more of the demo
+re-blesses for no gain); leaving `orders_placed` at 37; rewriting the historical
+count citations in this file rather than adding this entry.
+
+**Answers the question.** You added a book — did that change any decision the demo makes? Why is *that*
+one not in the returnable menu?
+
+**Lives in.** `profiles/bookly.json (orders BK-2132, catalog.titles, customer.orders_placed), transcripts/order-history-and-identity.json, tests.py (profile_load_preserves_the_fixtures, an_aggregate_question_is_not_answered_with_one_order), README.md, DEMO.md, issue #32`
+
+---

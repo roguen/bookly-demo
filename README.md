@@ -372,7 +372,7 @@ to drift and no place for a vendor to introduce a decision.
 ## Assumptions and limits
 
 - One demo customer is signed in (`C-1001`); authentication is out of scope.
-- The customer has 37 orders, 34 of them delivered, and the clarifying
+- The customer has 38 orders, 35 of them delivered, and the clarifying
   question offers the two a return could actually be granted on. Offering a
   book and then refusing it costs the customer a turn to be told no, so
   `policy.returnable_now` filters candidates through `decide_return` rather
