@@ -1623,6 +1623,66 @@ def the_stub_receiver_is_untouched():
     }, sorted(emitted)
 
 
+# --- what this suite says about itself ------------------------------------
+
+
+# Every document that tells a reader how many checks this suite has. The
+# count is a fact about this file, and a document holding its own copy of it
+# is a document that will eventually disagree with the suite — the same
+# argument `policy_constants_surface_matches_policy` makes about thresholds,
+# with a slower fuse. DEMO.md drifted to forty-five while the suite ran fifty,
+# and nothing caught it because nothing was looking.
+#
+# This tuple is the centralisation. The number itself lives in exactly one
+# place — len(CHECKS) — and every claim about it is checked against that.
+# Citing the count in a new document means adding a line here.
+DOCUMENTS_CITING_THE_COUNT = (
+    "README.md",
+    "READING_GUIDE.md",
+    "DEMO.md",
+    "docs/wiki/Home.md",
+    "deck/build.js",
+)
+
+# Claims are written as numerals on purpose. "Fifty", "fifty" and "forty-five"
+# are three spellings of one fact, and standardising on one form is what makes
+# drift mechanically detectable rather than a thing you have to notice. The
+# numeral must sit immediately before "check"/"checks", with at most one
+# adjective between them, so a version string like "3.9.6" in the same
+# sentence is not mistaken for a count.
+COUNT_CLAIM_RE = re.compile(r"\b(\d+)\s+(?:[a-z][a-z-]*\s+)?checks?\b")
+
+
+@check
+def documents_state_the_actual_check_count():
+    """Every document that cites the number of checks cites the real one.
+
+    Failure names the file, the line and the stale number, because the point
+    of this check is to be actionable at 2am on a Thursday rather than merely
+    correct.
+    """
+    actual = len(CHECKS)
+    stale = []
+    for name in DOCUMENTS_CITING_THE_COUNT:
+        path = pathlib.Path(name)
+        assert path.exists(), name
+        claims = 0
+        for number, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), start=1
+        ):
+            for claimed in COUNT_CLAIM_RE.findall(line):
+                claims += 1
+                if int(claimed) != actual:
+                    stale.append(
+                        "%s:%d says %s, the suite has %d"
+                        % (name, number, claimed, actual)
+                    )
+        # A document that stopped citing the number would make this check
+        # quietly vacuous, so an absent claim is a failure too.
+        assert claims, "%s no longer states the check count" % name
+    assert not stale, "; ".join(stale)
+
+
 def _audit_size() -> int:
     path = pathlib.Path(envelope_module.audit_path())
     return path.stat().st_size if path.exists() else 0
@@ -1638,6 +1698,11 @@ def _audit_since(offset: int) -> str:
 
 
 def main() -> int:
+    # `--count` prints the number and runs nothing, so a document, a script or
+    # a person can ask how many checks there are without paying for the suite.
+    if "--count" in sys.argv[1:]:
+        print(len(CHECKS))
+        return 0
     failures = 0
     for fn in CHECKS:
         try:
