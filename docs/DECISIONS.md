@@ -1,0 +1,1453 @@
+# Decision record
+
+Why this repo is the way it is.
+
+Every entry is a decision where a competent engineer could reasonably have
+chosen otherwise, together with the reasoning, the alternative that was
+rejected, and where the decision is enforced. Several entries record a
+diagnosis that turned out to be **wrong** and was corrected — those are kept
+deliberately, because "we thought X, it was actually Y" is worth more than Y
+on its own.
+
+This file is generated from the sources that already carried the rationale:
+the commit history, the closed issues, the code comments, the deck's speaker
+notes, and the documentation. It exists so that none of that has to be
+reconstructed from memory — in a later phase, by a new reader, or under
+questioning in a presentation.
+
+Ordered by how load-bearing the decision is. The claim the whole repo rests
+on is first.
+
+---
+
+## 1. The model never decides — it only converses
+
+*Phase 1*
+
+**Decision.** The LLM is given exactly two jobs: extraction (customer turn → structured
+slots) and narration (structured event → English). Eligibility, escalation,
+disambiguation and amounts are computed by ordinary code in policy.py, which
+the model layer never imports.
+
+**Why.** The failure that costs real money is not a clumsy sentence — it is a confident
+wrong decision. So the one component that can be confidently wrong is confined
+to where being wrong is merely cosmetic. This makes the correctness guarantee
+structural rather than empirical: no provider, prompt, or injected string can
+move a verdict, because the code path that produces verdicts never consults the
+model. It is also falsifiable in one line — if the language model disappeared
+entirely, every function in policy.py would return the same answers — and every
+later commit in the repo is measured against it. The narrowness is what makes
+the rest possible: the regex stand-in is serviceable and a mini-tier hosted
+model sufficient precisely because neither job requires reasoning about
+eligibility.
+
+**Rejected.** An agent that reasons about eligibility in the prompt — the conventional shape,
+which puts a refund decision inside sampled text. Also rejected: a supervisor
+agent or free-running tool-calling loop, which is one more component that can
+be confidently wrong placed exactly where being wrong is expensive;
+orchestration is a state machine on purpose, and a state machine can answer
+'what is it waiting on right now' where a loop cannot.
+
+**Answers the question.** What actually stops the model from approving a refund it shouldn't? / Isn't
+this just a chatbot with extra steps?
+
+**Lives in.** `policy.py, llm.py, agent.py, README.md, READING_GUIDE.md, docs/wiki/Home.md, deck/build.js slide 1`
+
+---
+
+## 2. policy.py is pure, imports no LLM, and holds every threshold as a named constant
+
+*Phase 1*
+
+**Decision.** Every eligibility, escalation and disambiguation rule is a pure function over
+order records taking `today` as a parameter. RETURN_WINDOW_DAYS,
+MAX_CLARIFY_ATTEMPTS, DENIALS_BEFORE_ESCALATION and MIN_TITLE_WORDS_FOR_WRITE
+are declared together, each with its reasoning attached. The window bound is
+inclusive by strict comparison (`> 30`, not `>=`).
+
+**Why.** Purity is the enforcement mechanism, not a style preference: 'policy.py does
+not import an LLM' is a structural property you can grep for, not a promise
+about discipline, and discipline decays. Naming the thresholds in one place
+makes each a reviewable line of policy that a verdict can be traced back to;
+scattering them at their use sites would make policy an emergent property of
+code. Taking `today` as an argument rather than calling date.today() is what
+keeps the functions testable and every run identical. The off-by-one is
+customer-visible policy, so the comment states which side day 30 falls on
+rather than leaving it to the reader.
+
+**Rejected.** Inlining the numbers at their comparison sites; reading the system clock inside
+policy.
+
+**Answers the question.** Where is the return window actually defined? Is day 30 in or out?
+
+**Lives in.** `policy.py, store.py (TODAY), tests.py::back_office_returns_nothing_that_reaches_a_verdict, tests.py::a_verdict_traces_back_to_its_named_constant`
+
+---
+
+## 3. The extraction schema has no amount field, and the Verdict is closed
+
+*Phase 1*
+
+**Decision.** The slot schema hosted-model output is validated against structurally cannot
+carry a monetary amount. Verdict is a frozen dataclass carrying decision,
+reason code, order id and amount; the amount is copied from the order record
+inside decide_return and nowhere else. Nothing downstream may add to it.
+
+**Why.** This is the mechanism behind the whole injection claim. A hostile extraction
+response carrying an invented intent, an injected order id and a '$500'
+validates to nothing useful, because there is nowhere for the money to land —
+the defence is structural absence rather than a validation rule or filter that
+could be bypassed. It also means the claim can be stated precisely rather than
+maximally: injection cannot change a verdict, an amount or a reason code,
+because both are re-derived from the record.
+
+**Rejected.** Letting the extractor report the refund amount it read from the record; an
+input filter or injection classifier in front of the model — filtering is a
+losing arms race, and naming that is why the absence of a filter is a position
+rather than an omission.
+
+**Answers the question.** What stops a customer typing 'refund me $500' and getting $500? Did you filter
+for injection?
+
+**Lives in.** `llm.py (Request, _clean_request), policy.py (Verdict, decide_return), evidence/injection_transcript.txt`
+
+---
+
+## 4. The agent emits action envelopes; it never executes them
+
+*Phase 1*
+
+**Decision.** On approval the agent writes an envelope carrying a deterministic idempotency
+key. A separate receiver executes it. envelope.py contains no refund API call,
+and `emit` returns a delivery string that nothing in the agent ever branches
+on.
+
+**Why.** Deciding and executing are different systems. Because the agent emits and does
+not execute, the record it judges never changes underneath it, and the contract
+already accommodates the retries, dead-lettering and durable idempotency store
+this repo deliberately does not implement. Not branching on the delivery result
+is the other half: if the agent reacted to delivery, the receiver would be back
+inside the decision loop and 'emit, don't execute' would stop being true. This
+property is leaned on repeatedly later — replayed demos, re-pressed denials, a
+re-offered refunded book — and it is also why the agent has to remember its own
+issued refunds separately from what policy would allow.
+
+**Rejected.** Calling the refund API inline from the turn handler — named on the deck slide
+as the simplicity that was given up. Also rejected: implementing retries inside
+the agent to make the demo look complete.
+
+**Answers the question.** Where does the money actually move? What happens if the customer presses the
+button twice?
+
+**Lives in.** `envelope.py, agent.py (_emit_refund, _note_envelope)`
+
+---
+
+## 5. The idempotency key is derived from the decision, not generated
+
+*Phase 1*
+
+**Decision.** `sha256(conversation_id | action | order_id)`. The same decision emitted,
+retried or replayed hashes to the same value. `envelope_id` is a fresh uuid4
+every time and is deliberately excluded from what fixtures pin. An escalation
+can precede order resolution, so 'unresolved' is the stable third component
+rather than an empty string.
+
+**Why.** A UUID would differ on every emission, which is exactly what you do not want:
+identity here is identity of the *decision*, not of the message. It is what
+lets a downstream receiver post exactly once across replays and retries with
+the agent knowing nothing about delivery — and it is the instrument that makes
+the parity result meaningful, since two providers phrasing a refund completely
+differently produce the identical key. Replaying the hero sequence twice
+therefore lands downstream as suppressed duplicates, demonstrating the contract
+by repeating yourself.
+
+**Rejected.** A random per-emission id as the dedup key; keying on the conversation text.
+
+**Answers the question.** Isn't the idempotency key just a UUID with extra steps?
+
+**Lives in.** `envelope.py (idempotency_key), evidence/duplicate_receipt.txt, transcripts/hero-sequence.json`
+
+---
+
+## 6. The audit line is written before the network hop
+
+*Phase 1*
+
+**Decision.** `_audit` records the emitted envelope, then delivery is attempted, then the
+delivery result is audited as a second line. An unreachable receiver normalises
+to the single string `failed_unreachable`, with the platform errno text
+stripped; an HTTP error keeps its status because the receiver answered.
+
+**Why.** A failed delivery can lose the delivery. It can never lose the decision. That
+is the difference between a system you can reconcile and one you cannot, and it
+is the fact the whole failure demo rests on: kill the receiver mid-conversation
+and the refund still decides at $22.50 and still writes its audit line.
+Normalising the error string matters because it is read off a screen — '[Errno
+61] Connection refused' is platform noise where 'failed_unreachable' is the
+point.
+
+**Rejected.** Auditing only on successful delivery.
+
+**Answers the question.** What happens if the downstream system is down?
+
+**Lives in.** `envelope.py (emit, _deliver), DEMO.md §7, tests.py::decision_survives_an_unreachable_receiver`
+
+---
+
+## 7. Ambiguity on a write path always asks — and asking is bounded
+
+*Phase 1*
+
+**Decision.** The agent asks only when more than one order could take the write, and asks at
+most twice (MAX_CLARIFY_ATTEMPTS = 2) before handing to a human; an unparseable
+answer consumes one of the attempts. Option parsing is deliberately tight: a
+bare digit must be the whole reply, cardinals only in replies of three words or
+fewer, and any deferral phrase ('just pick one', 'either one', 'whatever') is
+screened first and yields no choice at all.
+
+**Why.** Asking a clarifying question costs one turn; guessing on a write path costs a
+wrong refund — so we pay the turn, but not forever, because an unbounded loop
+traps the customer instead of getting them a person. The parsing rules are each
+bounded by how much confidence the form actually carries: a stray '2' inside a
+sentence is a quantity, not a choice, and a number word inside a delegating
+reply is the customer handing the choice back, not making it. Counting invalid
+answers toward the limit is what stops a customer who cannot express the choice
+looping forever against an agent that keeps asking the same question.
+
+**Rejected.** Letting the model pick the most likely order when candidates are ambiguous;
+matching any digit anywhere in the reply; asking indefinitely.
+
+**Answers the question.** Doesn't it ask more questions than a human agent would? What does it do when
+the customer says 'just pick one'?
+
+**Lives in.** `policy.py (MAX_CLARIFY_ATTEMPTS, clarify_limit_reached, should_clarify), agent.py (_reask_or_escalate), llm.py (OPTION_DIGIT_RE, ORDINAL_RE, CARDINAL_RE, DEFERRAL_RE)`
+
+---
+
+## 8. Repeated pressure escalates; it never flips the verdict
+
+*Phase 1*
+
+**Decision.** DENIALS_BEFORE_ESCALATION = 1. A second attempt at an already-denied request
+becomes an escalation layered over the denial, and the reason code underneath
+stays exactly what policy computed. Escalation can only turn a denial into
+human review — never into an approval.
+
+**Why.** A customer pressing a request policy denied is not new information; it is a
+dispute, and disputes belong with someone who has authority. Keeping the
+machine's answer intact means the record shows what policy computed rather than
+what pressure produced. Stating the ceiling out loud — escalation can never
+become approval — pre-empts the obvious follow-up that pressure eventually
+wins.
+
+**Rejected.** Softening or reversing the verdict under repetition.
+
+**Answers the question.** Can a customer argue the agent into a refund?
+
+**Lives in.** `policy.py (escalate_if_disputed), transcripts/denial-then-escalation.json, transcripts/hero-sequence.json turn 5, evidence/demo_transcript.txt scenario 4`
+
+---
+
+## 9. Retrieval fails closed, and article keywords carry topic only
+
+*Phase 1*
+
+**Decision.** MIN_KEYWORD_MATCHES = 2 distinct whole-word hits; below the floor, or on a tie
+for best, `search_policy` returns None rather than the nearest article.
+Matching is set intersection on tokens from a single `_tokenize`, not substring
+containment. Question-form words ('long', 'take') were later stripped from
+article keyword sets.
+
+**Why.** A wrong-but-plausible article that reaches the customer is worse than an honest
+miss — nothing is invented, something adjacent is retrieved and presented as
+responsive, which is the failure that actually reaches customers. The knowledge
+base is deliberately small with deliberate gaps, because the gaps are the test.
+Two corrections are recorded here. First: the floor was raised to two after
+'customs for Ireland' retrieved the domestic shipping article via 'ship'
+matching inside 'shipping' — the deck tells that story, and that fix was right
+but incomplete, because it addressed too *few* matches rather than *generic*
+ones. Second: 'how long do refunds take' scored 2 on the shipping article
+('long' + 'take') and beat the return-policy article 2-1. Those two words are
+not about shipping; they are how English forms a duration question. The floor
+counts matches and cannot weigh them, so the weighing is done by curating what
+counts as a keyword — the same lesson as the title-word guard, one subsystem
+over.
+
+**Rejected.** Returning the best-scoring article regardless of score; breaking ties by order;
+adding a term-weighting scheme or embeddings inside this repo (roadmap item 1 —
+and the floor does not move even then, because removing it would reintroduce
+the confident-wrong-article failure at higher fidelity).
+
+**Answers the question.** What does it do when the knowledge base doesn't cover the question? Why did it
+answer with the wrong article?
+
+**Lives in.** `tools.py (MIN_KEYWORD_MATCHES, search_policy, _tokenize), profiles/bookly.json (articles), transcripts/policy-answered-then-missed.json, deck/build.js slide 4`
+
+---
+
+## 10. Unified not-found wording — an order id must never become an oracle
+
+*Phase 1*
+
+**Decision.** An order that does not exist and an order that belongs to someone else produce
+a byte-identical reply. ORDER_NOT_OWNED_BY_CUSTOMER gets its own reason code
+and escalates internally on the back channel, and that branch deliberately does
+not offer a human agent.
+
+**Why.** Distinguishable replies would turn a guessed order id into an oracle for
+whether that order exists and who it belongs to. Internally the distinct code
+still routes it to a person in case it is a genuine account problem — the
+escalation travels on the back channel, never in the reply. This exception is
+later re-affirmed as the reason the narration rubric leaves escalation
+ungraded: encoding it there would mean the grader reading reason codes and
+holding opinions about what they imply.
+
+**Rejected.** A more helpful, more specific error message telling the customer the order
+belongs to another account.
+
+**Answers the question.** Why is that error message so vague? Can I enumerate order ids by watching the
+errors?
+
+**Lives in.** `policy.py (decide_return, REASON_CODES), llm.py (_escalation → _order_not_found), rubric.py (MUST_OFFER)`
+
+---
+
+## 11. Reads may fall back; writes never do
+
+*Phase 1*
+
+**Decision.** Reads resolve by explicit reference → unique title match → order under
+discussion → only one in transit → most recently ordered, and every read
+records which rule got there. Writes resolve only on an explicit id or a
+strongly-named title; no match asks, and more than one asks.
+
+**Why.** A wrong read is cheap and self-announcing, because the reply always names the
+order it describes. A wrong write moves money and announces nothing. The
+asymmetry is deliberate, and recording the resolving rule matters because 'it
+used the order already under discussion' and 'it fell back to the most recent
+one' look identical in the reply and are very different facts. A correction is
+recorded: the fallback argument holds for an *under-specified lookup* ('where
+is my order' with three open) and does not hold when the customer asked a
+*different question* that was silently coerced into a lookup — in that case
+nothing escalates, nothing declines, and no reason code is produced, because
+from the state machine's point of view nothing went wrong.
+
+**Rejected.** One shared resolution strategy for reads and writes; applying the write-
+strength rule to reads too, which would add clarifying turns for no safety
+gain; removing the read fallback, which remains correct for reads.
+
+**Answers the question.** Why is it willing to guess sometimes and not others?
+
+**Lives in.** `agent.py (_resolve_read_target, _note_read, _handle_return), README.md 'Assumptions and limits', transcripts/order-history-and-identity.json`
+
+---
+
+## 12. A write acts on a title only when the customer actually named the book
+
+*Phase 3*
+
+**Decision.** `policy.title_reference_is_strong(matched, distinctive)` gates title-resolved
+writes: one distinctive word suffices, otherwise at least
+MIN_TITLE_WORDS_FOR_WRITE = 2 matched words. Generic words also stop nominating
+candidates. The threshold lives in policy.py beside should_clarify;
+`catalog.generic_words` lives in the profile. A weak reference is neither an
+error nor an ambiguity — it asks exactly the question it would have asked if
+the customer had said nothing, and records the refusal on the deterministic
+side of the trace.
+
+**Why.** The pre-existing guard protected against *ambiguity* (no match asks, two
+matches ask). One match arrived at by coincidence is not ambiguous — at the
+point of decision it is indistinguishable from the customer having typed the
+title. It is a confidently wrong write, the failure this repository exists to
+prevent, and naming that distinction is what made the fix findable. Two
+corrections are on the record. The issue was originally filed as *latent*, safe
+until the catalog grew; it was not — on the shipped five-order v2.0.0 dataset,
+'return the left one' resolved The Left Hand of Darkness and 'the things I got'
+resolved The Design of Everyday Things. No money moved only because those two
+orders happened to be un-refundable: luck, not design. And the first cut of the
+fix stopped generic words *confirming* a write but still let them build the
+candidate set, so 'the Escher book' dragged in every title containing 'book'.
+Placement is the other half: the rule is the guarantee, the list is the
+readable knob — if the curated list is wrong the rule still holds, and a data
+file must not be able to reach a money threshold. Cost measured and documented
+rather than left to be discovered: 1 of 37 titles ('The Book of the New Sun')
+has no long word that is not generic and always needs the clarifying question —
+one extra turn, in the safe direction. That title was then deliberately
+excluded from the catalog, because shipping a book the agent cannot be told
+about would be a strange thing to do on purpose.
+
+**Rejected.** Relying on the existing count-based ambiguity guard; a generic-word list alone
+with no strength rule (the list is curated and therefore fallible, so the
+guarantee must not rest on it); putting the threshold in the extractor or the
+word list in code; special-casing the one unreachable title.
+
+**Answers the question.** Can a coincidental word match move money? Has a decision in this build ever
+been wrong?
+
+**Lives in.** `policy.py (MIN_TITLE_WORDS_FOR_WRITE, title_reference_is_strong), profiles/bookly.json (catalog.generic_words), agent.py (_names_the_order), llm.py (_title_words), tests.py::a_coincidental_title_word_never_moves_money, README.md, commit c2732ac`
+
+---
+
+## 13. 'Returnable' has exactly one definition, and the agent offers only what it would grant
+
+*Phase 3*
+
+**Decision.** `policy.returnable_now` filters candidates by running them through
+`decide_return` and keeping the approvals. The clarifying question offers only
+those (minus anything already refunded this conversation). An out-of-window
+order stays perfectly reachable by name and gets the same denial with the same
+reason code.
+
+**Why.** A second definition of 'returnable' would be a second place the answer could
+change, and the whole architecture is one place per answer. Offering a customer
+a book and then refusing it is the confidently unhelpful move: it costs them a
+turn to be told no. This was forced by data growth — with 34 delivered orders,
+'I'd like to return a book' produced a 1,070-character sentence listing thirty-
+four titles, and the old rule ('everything delivered') was only ever survivable
+because the dataset had two. The narrowing is presentation, not a new
+eligibility rule, which is why hiding an order was never an option: the
+customer must still be able to ask and get a reasoned no.
+
+**Rejected.** A cheaper local status/date filter or a separate 'is it worth offering'
+heuristic in the agent — a second source of truth.
+
+**Answers the question.** How do you know the menu it offers matches what it will actually approve? What
+does it do for a customer with 37 orders?
+
+**Lives in.** `policy.py (returnable_now), agent.py (_start_return), README.md 'Assumptions and limits'`
+
+---
+
+## 14. Questions with nowhere to land get their own intent — and the general class stays open
+
+*Phase 3*
+
+**Decision.** `order_history`, `agent_identity` and `refund_status` are first-class intents,
+added to both the regex stand-in and the hosted extraction prompt. Order
+history answers with the count, then three most recent by name, then an offer
+to name any of the rest; the preview count of three lives in agent.py,
+explicitly not among the policy constants.
+
+**Why.** With no home for 'how many books have I ordered', the two providers failed in
+opposite directions: the stand-in extracted no intent and fell to the generic
+help reply (clumsy but honest), while the hosted model mapped it onto
+order_status — the only order-shaped intent available — and the read resolver
+correctly fell back to the likeliest single order. The customer got a fluent,
+confident answer to a question they did not ask, and nothing escalated and
+nothing declined, because from the state machine's point of view nothing went
+wrong. The advertised escalate-on-uncovered failure mode could not fire — not
+because the guard was broken, but because the guard was never reached. An
+intent surface is a boundary too, and a door only helps if the model knows it
+is there, hence both extractors. The preview count is presentation because no
+decision reads it, and reading thirty-seven titles back would be the same
+mistake the clarifying question used to make with thirty-four. The record also
+keeps the limit: this closes two instances, not the class. The gap was never
+that the agent was wrong — it is that it could not tell it was out of scope,
+and you do not solve that by adding intents one at a time until you run out of
+customers. Deck slide 5 had to be corrected once the fix landed, because it was
+still arguing from a defect that no longer existed; the replacement claim (the
+door exists, the class does not) is the stronger one anyway.
+
+**Rejected.** A catch-all fallback intent or a lower confidence threshold — a fallback cannot
+fix an agent that cannot tell it is out of scope. Also rejected: answering
+identity with a knowledge-base article. That was tried, probed and reverted:
+the article needs 'you' and 'your' as keywords to clear the retrieval floor,
+and with those keywords 'how long do you keep your records?' retrieves the
+identity article — the confident-wrong-article failure the floor exists to
+prevent, reintroduced. No answer is worth reopening it.
+
+**Answers the question.** What happens when a customer asks something you didn't model? You said
+uncovered cases escalate — why didn't that happen here?
+
+**Lives in.** `agent.py (_answer_history, _answer_identity, HISTORY_PREVIEW), llm.py (VALID_INTENTS, extraction prompt), transcripts/order-history-and-identity.json, deck/build.js slide 5, docs/wiki/Home.md`
+
+---
+
+## 15. Asking about a refund is not asking for one, and the agent remembers what it already refunded
+
+*Phase 3*
+
+**Decision.** REFUND_STATUS_RE is tested before RETURN_REQUEST_RE. `self.refunds` sits
+alongside `self.denials` in the conversation tier: an order refunded this
+conversation is not offered as a candidate, and asking to return it again
+reports the existing refund — in different words from the timing question.
+
+**Why.** Every phrasing of asking *about* a refund contains the word the return regex
+looks for. RETURN_REQUEST_RE matched the bare word 'refund' behind a single
+negative lookahead for 'polic', so 'when will the refund show up?' routed to
+the return handler, found no order reference and re-offered the returns menu —
+moments after the agent had issued the very refund being asked about. Ordering
+resolves it structurally; a better lookahead would have been an arms race
+against phrasing. The double-refund framing was recorded precisely, because the
+imprecise version invites the wrong fix: no money moved twice, since both
+envelopes carry the same key and a receiver posts one write — the idempotency
+contract was doing its job. What was wrong was a second `emitted` line in the
+audit trail and an agent saying 'Done, I've issued a refund' for something it
+did three turns earlier. `policy.returnable_now` is right and unchanged: it
+judges the record, and the record has not changed because the agent emits and
+does not execute. `_Turn.finished_orders` already enforced one decision per
+order per *turn*; there was simply no conversation-tier equivalent. The
+differing wording applies the repeated-answer lesson: two different questions
+must not get one identical sentence.
+
+**Rejected.** Extending the negative lookahead to cover question forms; changing
+returnable_now to consider emitted-but-unexecuted refunds; mutating the order
+record to 'returned'.
+
+**Answers the question.** Why doesn't the policy engine know about the refund it just issued? Could a
+customer get refunded twice by asking twice?
+
+**Lives in.** `llm.py (REFUND_STATUS_RE, intent ordering), agent.py (Agent.refunds, _answer_refund_status), transcripts/refund-then-asking-about-it.json`
+
+---
+
+## 16. Three memory tiers, and an explicit intent-switching precedence rule
+
+*Phase 1*
+
+**Decision.** Turn memory is the `_Turn` dataclass; conversation memory is the Agent object
+(pending question, clarify attempts, focus order, denial counts, issued
+refunds); customer memory is the store. With a question pending: a turn that
+answers the asked-about slot is a continuation; a turn that answers nothing and
+names a different intent abandons the half-filled procedure and says so; a turn
+that does neither gets bounded re-asks. Asking about an order is never choosing
+it, the clarifying question is deferred to the end of the turn, and no order is
+decided twice in one turn.
+
+**Why.** Collapse the tiers and the second request of a conversation breaks — an earlier
+turn's slot survives into this turn's decision. The precedence rule is the
+state machine's heart: without it, 'Where's my Dune order?' spends one of the
+two bounded clarification attempts and pushes the conversation toward
+escalation, and worse, a question that happens to name a book reads as
+selecting it for a write. Abandoning a half-filled procedure beats trapping the
+customer in it; restating the intent later simply starts it again. Deferring
+the question matters because a later request in the same turn may answer it,
+and because if a later request completed the return the vague ask was the same
+request restated and the question would be stale. Every branch records which
+one it took, because they are invisible in the reply.
+
+**Rejected.** A single mutable state bag across turns; treating any request carrying an order
+reference as an answer; refusing to leave a procedure until it completes;
+asking the clarifying question immediately at the point ambiguity is found.
+
+**Answers the question.** Isn't three tiers of memory over-engineering? What if the customer changes the
+subject mid-return?
+
+**Lives in.** `agent.py (_Turn, _continue_or_switch, _is_answer, _defer_which_order, _ask_deferred_question, _finish_return), READING_GUIDE.md §3, deck/build.js slide 2 and slide 4`
+
+---
+
+## 17. Published commitments travel as facts on the event, never as strings in a template
+
+*Phase 3*
+
+**Decision.** `service_levels.refund_posting` and `service_levels.escalation_first_response`
+live in the profile and are attached as facts on the narration event. Templates
+render them conditionally; remove the service level and the reply stops rather
+than inventing a timeframe. Both are also published as knowledge-base articles
+so the question can be asked at any point.
+
+**Why.** The narration system prompt forbids a hosted model from adding facts, amounts,
+dates or promises the event does not carry. So a template literal works on the
+stand-in and silently fails on the hosted path — the two providers would tell a
+customer different things about when their money arrives, which also
+contradicted the README's claim that both providers decline in the same words.
+Carrying it as a fact means the hosted narrator is *looking it up* rather than
+producing it. The issue's own diagnosis is preserved as a correction: it was
+filed as a must-not-invent violation (the template asserts a number no fact
+carries), and that was not quite right — 'within 5 business days' is a
+published commitment the agent *should* state. But that is exactly why it could
+not remain a template literal. The principle: stating a fact you were handed is
+the right side of the line; asserting a number from a template is not.
+
+**Rejected.** Hardcoding 'within 5 business days' in the stand-in template (shipped first,
+then corrected); deleting the promise entirely, which loses a real commitment.
+
+**Answers the question.** Where did that promise come from? You say both providers say the same thing —
+do they?
+
+**Lives in.** `profiles/bookly.json (service_levels), agent.py (_emit_refund, _emit_escalation), llm.py, store.py (SERVICE_LEVELS)`
+
+---
+
+## 18. The persona lines were struck, not made conditional
+
+*Phase 3*
+
+**Decision.** Reversal. The agent's self-introduction and its 'I'm sorry Dave, I can't do
+that.' refusal catchphrase — both shipped deliberately in phase 2 — were
+removed, and `_refuse()` was deleted rather than left dormant. What remains is
+`agent.persona` in the profile, reaching only the narration prompt, which now
+explicitly instructs the model *not* to introduce itself or prefix a speaker
+label, and to write dates the way a person says them.
+
+**Why.** The interface already names the speaker, so an agent that announces itself
+every few turns reads as one with no memory — a claim this repo makes about
+*other* architectures. A line prefixed to every refusal reads as a template
+firing rather than an agent talking; the 2001 line is meant to land once, and
+told three times in four turns it is a loop. A persona that fires on a loop is
+not a persona, and dropping the catchphrase dropped no reason — a refusal now
+says plainly why. Removing the instruction was not enough on the hosted path:
+'you introduce yourself as Hal' is something a model does every turn, producing
+'Hal · model' in the interface followed by 'Hal:' in the prose — the name twice
+in two registers. The negative had to be stated. The stand-in could not exhibit
+this because `_kb_answer` has no persona hook, so it was a hosted-only defect.
+Dates likewise: the event carries `eta` as an ISO string because that is what
+JSON carries, and a customer should not be reading database values.
+
+**Rejected.** The proposed fix — conversation-tier `introduced`/`first_refusal` flags carried
+as narration facts so the line lands once — rejected as machinery to manage a
+line better removed. Leaving `_refuse()` dormant was also rejected: dead code
+that still looks live. Post-processing model output to strip speaker labels.
+
+**Answers the question.** Why does it keep saying its own name? Why does your agent sound like a loop?
+
+**Lives in.** `llm.py (_narration_system_prompt), profiles/bookly.json (agent.persona), agent.py, tests.py::the_agents_voice_is_data_and_never_reaches_a_decision`
+
+---
+
+## 19. A follow-up is answered as a follow-up — and the original diagnosis was corrected
+
+*Phase 3*
+
+**Decision.** `already_discussed` is set on status facts when the read resolved via order-
+under-discussion, and the templates phrase the same facts as a continuation
+('Still on track — …') rather than repeating the previous sentence verbatim.
+Wording only; no verdict reads it.
+
+**Why.** The issue framed byte-identical replies to 'Where's my Dune order?' and 'When
+will it arrive?' as a defect to be fixed by making the second reply
+*different*. That diagnosis was wrong and the correction is kept: two identical
+questions have one identical answer, and varying the content would be the worse
+reply. The machinery was working exactly as designed — the follow-up carries no
+order reference and still resolves to BK-1041 through conversation memory. The
+customer simply could not tell, which is a presentation problem rather than a
+correctness one, and generating variation would trade a legible defect for an
+illegible one. The resolution rule travelling to the narrator as a fact is the
+same shape as `response_target` on the escalation event: something the
+deterministic side already computed, handed over so both providers can use it.
+
+**Rejected.** Making the follow-up materially different in content ('lead with the answer'),
+as originally proposed; having the narrator infer conversational continuity
+from the transcript.
+
+**Answers the question.** Why did your agent give the same sentence twice?
+
+**Lives in.** `agent.py (_answer_status), llm.py (_status_report), transcripts/order-status-and-followup.json`
+
+---
+
+## 20. The rules-based stand-in is the default path, and the hosted default is a mini tier
+
+*Phase 1*
+
+**Decision.** With no vendor key set, `make_provider` returns RulesProvider; hosted models
+are opt-in. Hosted defaults are claude-sonnet-5 and gpt-5.4-mini (moved down
+from gpt-5.5), both overridable by BOOKLY_ANTHROPIC_MODEL /
+BOOKLY_OPENAI_MODEL.
+
+**Why.** The demo, the checks and CI must be runnable by a sceptic in ten seconds
+without a billed account, and a green run has to be a green run of the
+dependency-free path rather than of somebody's credits. It works on a plane.
+The stand-in is serviceable because both model jobs are narrow and structured —
+turn to slots, event to sentence — which is the same property that makes a mini
+tier sufficient: a model that had to reason about eligibility would need the
+frontier tier; one that only reads and phrases does not. The model choice is
+itself evidence for the architecture. Env-overridable model ids mean a renamed
+model is a one-line env fix rather than a code change. The stand-in's limit is
+stated rather than hidden: it has a fixed phrase vocabulary, and turns it
+cannot classify fall to a safe help reply rather than a guess.
+
+**Rejected.** Requiring an API key to run anything; defaulting to the strongest available
+model.
+
+**Answers the question.** Can I just clone this and run it? Isn't the rules stand-in just a fake demo?
+Which model does this need?
+
+**Lives in.** `llm.py (make_provider, ANTHROPIC_MODEL, OPENAI_MODEL), harness.py (DEFAULT_PROVIDER), README.md`
+
+---
+
+## 21. An ambiguous provider environment is refused, not resolved by precedence
+
+*Phase 1*
+
+**Decision.** Reversal. Provider selection originally fell back to a vendor precedence order
+when both keys were exported; now two keys set with no BOOKLY_PROVIDER raises.
+VENDOR_KEYS ordering is presentation only.
+
+**Why.** Silent precedence meant BOOKLY_OPENAI_MODEL was being set on a provider that
+never ran — a demo running on a provider nobody chose. Two keys set is a
+question, not a default: the same rule the agent applies to a customer turn it
+cannot resolve, and the reason precedence was the wrong call here. Refusing
+surfaces the ambiguity at startup rather than at the first turn.
+
+**Rejected.** Vendor-key precedence order — the original shipped behaviour, explicitly
+reversed.
+
+**Answers the question.** What happens if I have both keys set?
+
+**Lives in.** `llm.py (_provider_from_keys, VENDOR_KEYS)`
+
+---
+
+## 22. One hosted base class; a vendor supplies a name and a network call, and is verified before it becomes active
+
+*Phase 1*
+
+**Decision.** HostedProvider owns prompt construction, JSON parsing and untrusted-output
+validation; AnthropicProvider and OpenAIProvider differ only in `_complete`.
+`verify()` makes the smallest real completion through that same `_complete`
+path before a provider is accepted, and a provider that fails never becomes
+active. Both SDK clients carry an explicit 20-second timeout. The OpenAI
+provider probes `max_completion_tokens` once and remembers, with a 4000-token
+budget.
+
+**Why.** There is no per-vendor copy to drift and, more importantly, no seam where a
+vendor-specific code path could introduce a decision — that is the whole reason
+swapping providers cannot change a decision. Verification exists because
+constructing a client is entirely offline for both vendors, so a wrong key, a
+renamed model and a missing network all looked like a successful switch and
+only failed on the first customer turn, which on stage is the worst possible
+moment. Going through `_complete` exercises key, model name, parameter shape
+and network, not just whether credentials parse. The timeout is a stage-failure
+mitigation: vendor defaults are minutes long, and a hung call is
+indistinguishable from a broken one from the audience's seat. The parameter
+probe exists because the rename split the model line, so neither name is
+universally right; the larger output budget because on current models that
+allowance also covers reasoning tokens, and too small a cap spends the whole
+budget reasoning and returns empty content rather than an error — a failure
+that does not look like one.
+
+**Rejected.** Independent per-vendor provider classes; treating successful client
+construction as validation; vendor default timeouts; pinning one output-budget
+parameter name. Also corrected: the contract test originally counted class
+members and broke when an unrelated transport helper was added — it was
+rewritten to assert the invariant (a subclass never overrides prompt, parsing
+or validation) rather than the shape.
+
+**Answers the question.** Is this really provider-agnostic or just Anthropic with a wrapper? What happens
+on stage if the key is wrong?
+
+**Lives in.** `llm.py (HostedProvider, verify, HOSTED_TIMEOUT_SECONDS, OpenAIProvider._complete), web.py (set_provider), harness.py, app.py`
+
+---
+
+## 23. Model output is untrusted and validated down to the stand-in's exact shapes
+
+*Phase 1*
+
+**Decision.** `_clean_request` drops any intent not in VALID_INTENTS, any order id not
+matching the BK-0000 pattern, any non-int option number (explicitly excluding
+bool), and lowercases title words. Unparseable JSON yields one empty request.
+Extraction's title vocabulary is scoped to the signed-in customer's own orders.
+
+**Why.** An empty request means the agent asks rather than acting on a guess — failing
+toward the clarifying question is the safe direction. Validating to the stand-
+in's exact shapes is what makes provider parity a structural claim rather than
+a hope: there is one downstream contract, and everything must conform to it
+before it is seen. Scoping the title vocabulary to the current customer is why
+a question about someone else's book reads as title-less rather than resolving
+against another customer's record.
+
+**Rejected.** Trusting the model's JSON; falling back to a best-guess intent on unparseable
+output.
+
+**Answers the question.** What if the model returns garbage? Can one customer's question surface another
+customer's data?
+
+**Lives in.** `llm.py (_parse_requests, _clean_request), tools.py, tests.py::hostile_model_output_cannot_reach_a_decision`
+
+---
+
+## 24. The API key is passed explicitly and never exported to the environment
+
+*Phase 2*
+
+**Decision.** Hosted providers take an explicit `api_key` argument. The console holds it in
+one variable on one object — never on disk, never logged, never in a URL, never
+in os.environ — and shows only a four-character tail. The check-suite
+subprocess environment is built with every vendor key stripped out.
+
+**Why.** The console spawns a subprocess to run tests.py, and an exported key would ride
+into it. The explicit-argument design exists specifically so nothing has to be
+exported. Stated as the right shape for a demo and explicitly not a secrets
+manager.
+
+**Rejected.** `os.environ["ANTHROPIC_API_KEY"] = key` — the obvious way to make the SDKs pick
+it up.
+
+**Answers the question.** Where does the pasted key go?
+
+**Lives in.** `web.py (Console._api_key, checks_command, _mask), llm.py (build_provider), README.md 'Assumptions and limits'`
+
+---
+
+## 25. Parity proven by a real hosted run, the drift recorded, and later turned into a command
+
+*Phase 3*
+
+**Decision.** The same four-scenario script was run against the stand-in and gpt-5.4-mini.
+All eight replies were worded differently; every decision field matched,
+including the idempotency key and the $22.50. The hosted run also dropped the
+offer of a human agent on the knowledge-base miss, and that was published
+rather than omitted. `harness.py --provider` later made this reproducible:
+every envelope field, reason code and key compared exactly, the verbatim reply
+comparison skipped, and prose graded by the rubric instead.
+
+**Why.** It converts the central claim from an argument into a result, and the key is
+the instrument: an identical hash means the same action on the same order, so a
+deduping receiver cannot tell which model ran and does not need to. An earlier
+commit had honestly answered 'have you run this against a hosted model?' with
+'no' when credits were unavailable — an unverified claim left standing in a
+deck is worse than an admitted gap — and that honesty move is kept in the
+record even though it was superseded two commits later. The volunteered
+divergence is the load-bearing part: a reviewer who finds an unmentioned
+discrepancy discounts everything else, and the artifact itself closes with a
+named section stating what it does *not* prove — that the decisions are
+provider-independent and the prose is not. That single observation is the
+entire case for the graded rubric two phases later, and is the exact reply the
+rubric is required to fail. Skipping the verbatim comparison on a hosted run is
+a decision, not an omission: a hosted model wording things differently *is* the
+parity claim.
+
+**Rejected.** Publishing only the favourable half of the result; presenting the parity run as
+a clean sweep; byte-comparing hosted prose against the template; leaving parity
+as a hand-run artifact pasted into a file.
+
+**Answers the question.** Have you actually run it against a hosted model? Did anything differ besides
+wording? How do I reproduce your parity result?
+
+**Lives in.** `evidence/provider_parity.txt, evidence/hosted_openai_transcript.txt, harness.py, deck/build.js slide 2`
+
+---
+
+## 26. The agent talks to a recorder that does nothing, and each stage's side lives in one table
+
+*Phase 2*
+
+**Decision.** `NullRecorder.note` is an empty method and is the default; the CLI passes no
+recorder, the web layer passes a ListRecorder. `recorder.STAGE_SIDES` maps
+every stage to MODEL or DETERMINISTIC in one dict. The `extract` stage is
+tagged model-side regardless of which provider ran. Clarify is two notes on
+opposite sides — whether to ask is deterministic, the wording is narration —
+and must never render as one row. The customer's own words get no note at all.
+Notes are deep-copied on the way in; an unknown stage records 'unknown' rather
+than raising.
+
+**Why.** The obvious alternative — having handle_turn build a payload for the UI — puts
+presentation inside the orchestrator and makes the agent's behaviour depend on
+who is watching. With a null default there is no branch anywhere asking whether
+anyone is listening, which is why the CLI's output stayed byte-identical to
+v1.0.0 through every commit of phase 2. One table means one place to review and
+no way for a call site to mislabel itself; the interface colours by this tag,
+so getting it right is a design decision rather than a formatting one. Tagging
+the regex as model-side is the sharp case: the tag names the *seat*, not the
+implementation, and colouring the regex purple would quietly claim it is
+trustworthy in a way a hosted model is not — the opposite of the argument the
+repo makes. Collapsing the two clarify notes would show a policy decision and a
+piece of model prose as a single event, which is exactly the conflation the
+boundary exists to prevent. The agent mutates some noted dicts afterwards, and
+a trace that changes after the fact is not a trace. The recorder is a bystander
+and must never be able to break a turn, so a typo'd stage fails loudly in the
+suite instead of quietly on stage.
+
+**Rejected.** Returning a UI payload from handle_turn; an `if recorder is not None` branch;
+tagging each note at its call site; tagging by what actually ran; a third
+'customer' side; raising on an unknown stage.
+
+**Answers the question.** Did adding the GUI change the agent? The stand-in is deterministic — why is it
+on the model side?
+
+**Lives in.** `recorder.py (NullRecorder, STAGE_SIDES, side_of, ListRecorder._plain), agent.py, app.py`
+
+---
+
+## 27. The presentation layer computes nothing, and holds no copy of a threshold
+
+*Phase 2*
+
+**Decision.** web.py holds conversation state and serves records; turns go to the same
+`Agent.handle_turn` the CLI calls. It owns exactly two things — which provider
+is active and the session API key. policy.py publishes descriptive CONSTANTS
+and REASON_CODES registries that nothing above them reads and whose deletion
+would change no outcome; the interface and the back office both render
+thresholds from them. `web_layer_emits_identical_envelopes` drives all four
+scenarios through a real server on a real socket and through Agent directly,
+comparing every decision field including the key.
+
+**Why.** Answering 'did you just bolt a UI onto it' has to be mechanical rather than
+rhetorical, and the idempotency key is the sharpest available detector: it
+would diverge the moment the web layer started keeping its own conversation
+identity. Naming the complete list of what the presentation layer may own is
+what makes 'this layer decides nothing' checkable rather than aspirational. The
+registries exist because an interface allowed to hold its own copy of '30' is
+an interface that will eventually disagree with the engine — but they are
+descriptive and inert, so the presentation layer gains no path into the
+decision path. A check asserts every entry still equals the module attribute it
+names, so drift fails loudly. Serving both surfaces from one function means the
+two cannot disagree either.
+
+**Rejected.** A framework-based front end with its own logic; hardcoding the displayed
+thresholds in JavaScript; mocking the HTTP layer in the parity comparison.
+
+**Answers the question.** Did you bolt a UI onto it, or is the UI deciding things? How do I know the
+number on screen is the number the engine used?
+
+**Lives in.** `web.py (Console, policy_json), policy.py (CONSTANTS, REASON_CODES, describe), backoffice.py, tests.py::web_layer_emits_identical_envelopes, tests.py::policy_constants_surface_matches_policy`
+
+---
+
+## 28. Human resolution is append-only, and nothing flows back into a verdict
+
+*Phase 2*
+
+**Decision.** A reviewer's action becomes a separate later event pointing at the original
+with `supersedes`; the original verdict stays exactly as policy.py computed it.
+`emit_resolution` is its own function, not an `actor` argument on `emit`. Actor
+and justification are required, enforced once in queue.py. Both 'override' and
+'uphold' are recorded. Cases are keyed on the escalation's idempotency key, and
+snapshot their full context at open time. The agent is never told the queue
+exists — the web layer watches what was emitted and lands it.
+
+**Why.** If overriding rewrote the decision, the record would only ever show the last
+opinion — which is precisely what makes giving a reviewer override authority
+safe in the first place. The separate function is justified twice over: agent
+envelopes stay byte-identical so the existing duplicate-receipt evidence
+remains valid, and these are not the same kind of record — an agent envelope
+carries a reason code because a policy function produced it, a resolution
+carries a person and a sentence because a person did, and inventing a reason
+code for a human judgement would be the dishonest field on the screen. An
+override with nobody's name and no reason is exactly the artifact an auditor
+cannot use, and a second copy of that validation rule in the browser is a rule
+that can disagree with itself. Recording upholds too means the queue is a log
+of review rather than a log of exceptions. Keying on the escalation key means
+four pushes on one dispute make one case with four recorded events, keeping the
+same exactly-once promise the envelope already made. Snapshotting means a
+ticket read six weeks later shows what was true when it was raised rather than
+silently re-reading a world that moved. And nothing flows back: a check asserts
+by source inspection that the decision path imports none of the queue, then
+overrides a denial and shows the next verdict on that order is identical — if a
+human override could become an input to a later verdict, the engine would stop
+being the only thing deciding.
+
+**Rejected.** Mutating the case's verdict on override; an optional `actor` parameter on
+emit(); client-side required-field validation as the gate; logging only
+overrides; a new case per escalation envelope; live lookup at read time; giving
+the agent a queue client or feeding prior overrides back as precedent.
+
+**Answers the question.** Can a human quietly rewrite a verdict? Does a human override change what the
+agent decides next time?
+
+**Lives in.** `queue.py (resolve, ACTIONS, open_case, _case_id), envelope.py (emit_resolution), web.py (escalation_context, Console.turn), tests.py::queue_resolution_is_append_only, tests.py::back_office_returns_nothing_that_reaches_a_verdict`
+
+---
+
+## 29. The executing side runs in a second process, and every mock says it is one
+
+*Phase 2*
+
+**Decision.** backoffice.py runs on 127.0.0.1:8787, started separately, and is a drop-in for
+the untouched stub_receiver.py — you run one or the other. Its ledger
+deduplicates by idempotency key in memory, dying with the process, drawing a
+repeat against the line it duplicates rather than as a second line, and a
+permanent chip on screen states the durability limit. The policy viewer is
+read-only and names who can change a constant and where.
+
+**Why.** The separation is the architectural argument rather than packaging: if the
+thing receiving envelopes ran inside the agent's process, 'the agent emits
+rather than executes' would be a diagram instead of a fact you can check by
+killing something. Demonstrated by killing the receiver mid-conversation — the
+refund still decides at $22.50, still writes its audit line, and records
+failed_unreachable. Sharing the stub's port makes interchangeability the point:
+the same envelope contract serves both, so evidence captured against the stub
+reproduces key for key. A second ledger line would be a second refund on
+screen, which is the exact failure the key exists to prevent. Claiming durable
+dedup here would misrepresent what the demo proves, on the one screen whose
+whole job is the exactly-once claim — so every surface says what it is, on
+screen, permanently, rather than requiring anyone to read a docstring. And the
+read-only viewer is a refusal by design: making procedures authorable by non-
+engineers is the next order of problem, and mocking it would be the one
+dishonest thing on screen.
+
+**Rejected.** An in-process receiver; replacing stub_receiver.py; persisting the ledger to
+imply durability; a fake policy editor for demo effect. Also corrected:
+printing arriving envelopes was made a property of the program rather than the
+object, because a check that constructed a receiver was dumping envelope JSON
+into the middle of the Checks panel.
+
+**Answers the question.** What happens if the downstream system is down? Is that dedup durable? Can a
+non-engineer change the rules?
+
+**Lives in.** `backoffice.py (Ledger, STAND_IN_NOTICE, policy viewer), stub_receiver.py, DEMO.md §7, docs/wiki/Home.md`
+
+---
+
+## 30. A scenario is a file, not a function — and what the fixture pins is chosen carefully
+
+*Phase 3*
+
+**Decision.** `golden_transcript_return_flow` (one conversation with strings pasted into a
+function body) was replaced by `transcripts/*.json` replayed by harness.py
+through the same `handle_turn` the CLI and console call. Each fixture pins the
+reply verbatim, the envelope decision fields including the *literal*
+idempotency hex, the sequence of recorder stages, and which event kinds were
+narrated. The side of each stage is deliberately not stored; it is read from
+`recorder.STAGE_SIDES` at replay time. Replay is hermetic — BOOKLY_WEBHOOK_URL
+is unset for the duration. tests.py generates one named check per fixture, and
+the directory cannot be emptied.
+
+**Why.** The old form was the right idea in the wrong container: the cost of a second
+scenario was a second function, and nobody was ever going to pay it twice.
+Coverage that expensive to add does not get added — and the claim was spent
+immediately, with four more scenarios costing four files and no new test code.
+The stage sequence is the architectural claim turned into a regression test: a
+change that moved a decision to the model side of the boundary fails a test
+rather than a code review. The literal hex matters because re-deriving the key
+at check time passes even when the key material changes, since both sides of
+the comparison move together; a literal fails loudly, which is what a golden
+fixture is for. The side label is excluded so there is no second copy to drift
+— the same reasoning as asserting `customer_note` against the turn's own text
+rather than storing it twice. Hermetic replay because a golden transcript must
+not depend on whether a receiver happened to be running, and a check run must
+not post test envelopes into the ledger a demo is about to show — which, with
+the console spawning the suite as a subprocess, is not hypothetical. Named
+checks so the panel streams `transcript_return_with_clarification` rather than
+`check_7`, and the emptiness check so deleting the fixtures cannot delete the
+coverage and leave the suite just as green.
+
+**Rejected.** Adding a second golden-transcript function; a test-only fast path through the
+state machine; recomputing the key at check time; recording the side tag in
+each fixture; omitting the always-constant delivery field.
+
+**Answers the question.** How do you regression-test the conversation, not just the policy? What stops
+someone quietly moving a decision into the prompt?
+
+**Lives in.** `harness.py (replay, compare, ENVELOPE_FIELDS), transcripts/, tests.py, recorder.py (STAGE_SIDES)`
+
+---
+
+## 31. known_gaps and accepted are two lists, enforced in both directions, and blessing cannot launder either
+
+*Phase 3*
+
+**Decision.** A rubric finding must be acknowledged either as a `known_gap` carrying the
+issue number that will close it, or as `accepted` carrying a written argument.
+An unacknowledged finding fails; an acknowledgement the rubric no longer
+reports fails as stale; one with neither issue nor reason is refused outright.
+Acknowledgements carry an occurrence count. `--bless` regenerates turns from a
+real run but copies both lists through untouched, and refuses to run against a
+hosted provider.
+
+**Why.** One list is a debt and the other is a decision, and a defect allowed to sit in
+the wrong one never gets looked at again. The `accepted` path exists because
+the rubric's own rules can be wrong — the repeated-answer episode proved it,
+and an instrument with no way to record a reasoned disagreement either forces
+bad fixes or gets silently disabled. Two-directional enforcement is what stops
+the list becoming the place failures go to be forgotten: a fix has to delete
+its own excuse. Counts mean a new defect cannot hide behind an old one.
+Blessing not regenerating the lists matters because an acknowledgement is a
+human's statement about an open defect, and regenerating it from a run would
+let a re-bless quietly launder one. The residual hazard is stated rather than
+designed away: blessing a regression is one command and a wrong expectation
+looks exactly like a right one afterwards. There is no way to make that safe
+inside the tool, so the mitigation lives outside it — the diff is the review,
+which is one of the reasons the commit history is meant to be read. And a
+fixture blessed from a hosted run would pin one sampling of one model's prose
+as the repo's expected text, the opposite of what these files are for. By the
+end of the branch every known_gap had been closed and deleted by the fix that
+closed it.
+
+**Rejected.** One combined exemption list or a plain ignore flag; suppressing findings;
+fixing everything in the same commit as the fixture that found it; an
+interactive confirmation on bless; allowing hosted blessing with a warning.
+
+**Answers the question.** Isn't 'accepted' just a nicer word for suppressed? What stops that known-gaps
+list becoming a graveyard? What stops you blessing a bug?
+
+**Lives in.** `harness.py (_compare_rubric, bless, main), transcripts/repeat-question-same-answer.json, transcripts/refund-then-asking-about-it.json, transcripts/order-history-and-identity.json`
+
+---
+
+## 32. The rubric is handed exactly three things, grades mechanically, and had to catch something real
+
+*Phase 3*
+
+**Decision.** rubric.py receives per narration only the event kind, the facts the agent
+already gave the narrator, and the text that came back — no Order, no Verdict,
+no policy/store/tools import, asserted by grep in both directions. Four
+mechanical rule families: must_carry (matched on canonical tokens, so 'August
+1' satisfies '2026-07-18' and '$22.50' satisfies 22.5), must_offer (a phrase
+class, not an exact string), must_not_invent (no unsupported number, no ISO
+date, no speaker label — matched name-agnostically), repeated_sentence across a
+whole conversation. A check grades the recorded gpt-5.4-mini kb_miss reply —
+quoted verbatim and asserted still present in evidence/provider_parity.txt —
+and requires the rubric to fail it, while the template's own miss grades clean.
+
+**Why.** It cannot judge whether a refund was correct because it is never told what the
+refund was — starving it of decision inputs is what makes it structurally
+incapable of becoming a second decision-maker. The boundary is self-policing:
+if a rule here ever needed a record or a threshold to do its job, that would be
+the signal grading had turned into deciding, and the rule would be wrong rather
+than the boundary. Findings are inert and travel outward exactly like a queue
+resolution, demonstrated behaviourally — the same conversation replayed with
+and without a grading pass returns identical replies and envelopes. Rules are
+mechanical because an LLM judge would put a model back in the seat this whole
+repo exists to keep it out of, make the harness nondeterministic and network-
+dependent, and mean a regression check that costs money and needs a network —
+which is a check that gets turned off. Token and phrase-class matching lets a
+hosted narrator pass in its own words while still failing on a dropped fact:
+the failure being graded is the dropped commitment, not the wording. Two
+scoping decisions are named rather than left as oversights. `kb_answer` is
+excluded from must_carry because its whole fact is a paragraph of article copy,
+and requiring a paraphrase to contain it would be an exact-string test wearing
+a rubric's clothes. And `escalation` is deliberately ungraded by must_offer,
+because the ORDER_NOT_OWNED_BY_CUSTOMER branch must *not* offer a human or a
+guessed order id becomes an oracle — encoding that exception would mean reading
+reason codes and holding opinions about what they imply. A rubric that has
+never caught anything is a proposal, so it had to fail a real recorded hosted
+reply, offline and unbilled, before being trusted; grading the clean miss too
+proves it is not simply failing everything. The drift it catches moved no
+verdict, no reason code and no envelope field — prose is the only place that
+failure exists and the only thing the customer reads. A known limit is stated
+rather than papered over: the refund promise was caught because a number is
+easy to trace, and a commitment phrased without a number would slip past.
+
+**Rejected.** An LLM-as-judge grader; giving the rubric the order record so it could grade
+correctness; exact-string matching for must_offer; adding escalation to
+MUST_OFFER with a reason-code exception; a general 'detect any promise' or 'is
+this well-phrased?' rule, which would require semantic judgement and turn the
+grader into a style checker for one provider's phrasing.
+
+**Answers the question.** Isn't the grader just another model making decisions? Why not use a model to
+grade the model? Has your rubric ever actually found anything?
+
+**Lives in.** `rubric.py (MUST_CARRY, MUST_OFFER, _must_not_invent, grade_transcript, SPEAKER_LABEL_RE), tests.py::the_rubric_cannot_reach_a_decision, tests.py::the_rubric_catches_the_recorded_hosted_drift, evidence/provider_parity.txt`
+
+---
+
+## 33. The documented check count and the CI workflow's own constraints are asserted by the suite
+
+*Phase 3*
+
+**Decision.** The number is `len(CHECKS)`. `documents_state_the_actual_check_count` holds a
+registry of documents citing it, reads each, and fails by file, line and stale
+number — and a document that *stops* citing the count also fails. Claims are
+standardised to numerals with a tight pattern.
+`the_regression_run_installs_nothing` asserts the workflow contains no pip
+install, no npm, no vendor key and no `secrets.` reference, and that the
+promised interpreters (3.9, 3.13, 3.14) are actually in the matrix, with fail-
+fast disabled. A second job boots a clean clone, reads /api/customer, and walks
+demo.txt through the CLI.
+
+**Why.** DEMO.md told the presenter to say 'forty-five checks' while fifty streamed past
+on screen; the number was hand-written into seven places across five files and
+kept honest by memory. It is the same argument the policy-constants check
+already makes about thresholds — a document holding its own copy is the same
+failure with a slower fuse — and generation was unavailable because the no-
+build-step constraint does not move, so the registry *is* the centralisation.
+Failing on a removed citation stops the check being made vacuous by deletion.
+The check earned its keep unprompted as the count moved 51 → 52 → 56 → 68,
+naming the files to update each time. CI matters because every claim about the
+suite being green was a claim about somebody's laptop, and slide 5 argues that
+agents die from silent regressions when somebody tweaks a prompt on a Thursday
+— a suite nobody runs on Thursday does not answer that. Dropping 3.9 from CI
+while the README promises it is the same class of drift as DEMO.md saying
+forty-five. And the absence of an install step is asserted rather than merely
+observed, so the dependency-free proof is not itself unguarded. One caveat is
+on the record: evidence/test_output.txt is a captured run listing 50 checks and
+is stale against the current count. It is a dated snapshot rather than a claim,
+and no check reads it — but a sceptic comparing it to the deck will notice.
+
+**Rejected.** Fixing the seven copies and remembering harder; a build step or doc generator;
+allowing spelled-out numbers; default fail-fast; a single-interpreter matrix; a
+requirements.txt for convenience.
+
+**Answers the question.** Your README claims fifty checks — who checks the README? Does this actually run
+in CI? How do I know it really has no dependencies?
+
+**Lives in.** `tests.py (DOCUMENTS_CITING_THE_COUNT, documents_state_the_actual_check_count, the_regression_run_installs_nothing), .github/workflows/checks.yml, DEMO.md, README.md, docs/wiki/Home.md, evidence/test_output.txt`
+
+---
+
+## 34. New checks are proven by breaking them
+
+*Phase cross-cutting*
+
+**Decision.** Each new instrument was demonstrated failing before it was trusted: the doc-
+count rule by setting DEMO.md back to 45; the transcript harness by changing
+'Done —' to 'All set!' in one template; the rubric by grading a real recorded
+hosted reply; the CI workflow by running it rather than merging and assuming.
+The suite itself asserts it never reaches a hosted provider — and asserts the
+default is the stand-in *and not merely named after it*, by checking a replayed
+reply is byte-identical to what the template produces directly.
+
+**Why.** A green check that has never gone red is an untested check — a proposal, not a
+guarantee. Each of these establishes that the instrument can actually fail
+before it is trusted to say something passed. The offline assertion is the same
+instinct pointed at the suite's own defaults: checking the name of the default
+would not catch a default that had been rewired underneath, and a green run
+must provably not be a billed one.
+
+**Rejected.** Asserting the instrument works because the suite is green; trusting the default
+flag value.
+
+**Answers the question.** Does that check actually catch anything? Does your test suite cost money to
+run?
+
+**Lives in.** `tests.py (the_suite_never_reaches_a_hosted_provider), harness.py, rubric.py, .github/workflows/checks.yml`
+
+---
+
+## 35. Envelope identity is the standing regression invariant
+
+*Phase cross-cutting*
+
+**Decision.** Nearly every commit ends by asserting the demo script's envelopes are byte-
+identical to the previous tagged release — field for field, both idempotency
+keys included — including across a dataset that grew seven times larger.
+
+**Why.** It is the one-line proof that a change was voice, presentation, or coverage and
+not a decision change. It is what lets a commit that rewrites the persona, adds
+32 orders, or adds two intents be reviewed as not touching money, and it is
+what turned the 7× data growth from a risk into a checked fact.
+
+**Answers the question.** How do I know this refactor didn't change a decision?
+
+**Lives in.** `commit messages across the branch; transcripts/hero-sequence.json; evidence/`
+
+---
+
+## 36. The dataset is a profile; thresholds and reason codes deliberately are not
+
+*Phase 2*
+
+**Decision.** Customer record, orders, knowledge base, catalog, frozen clock, scenarios,
+suggested prompts, agent voice and service levels live in
+`profiles/<name>.json`, selected by BOOKLY_PROFILE and loaded at import into
+the same frozen dataclasses. Policy thresholds, reason codes and the provenance
+palette stay in code. Suggested next prompts are keyed by the reason code the
+turn produced, and a check asserts each is a turn the agent actually handles.
+
+**Why.** Standing this up for another company must be a data edit measured in minutes
+rather than a code edit, and nothing downstream knows the data moved. But a
+profile may change what the agent *says* and never what it *decides* — that
+line is the whole test for whether something belongs in data, and a data file
+must not be able to reach a threshold or invent a reason code. The palette
+stays out for the same reason: purple/grey is the design system carrying
+provenance meaning, not a brand choice a re-skin gets to break. Suggestions
+live in the profile so re-skinning stays a data edit, and none of them carries
+a hint about the answer — a suggestion that dead-ends is worse than no
+suggestion, and one that staged the answer would be staging the demo. Order
+insertion order is load-bearing and preserved, because the clarifying question
+numbers its options in the profile's order.
+
+**Rejected.** Moving everything configurable, including thresholds and reason codes, into the
+profile; hardcoding the dataset in store.py; hardcoding suggestions in the
+front end.
+
+**Answers the question.** How long would it take to stand this up for our data? What can a non-engineer
+change without a code review?
+
+**Lives in.** `profiles/bookly.json, store.py (load_profile, build_orders, TODAY, AGENT, SERVICE_LEVELS), policy.py, tests.py, README.md 'Re-skinning'`
+
+---
+
+## 37. 37 vs 5 orders: the store was made to match the record, after weighing the alternative
+
+*Phase 3*
+
+**Decision.** `customer.orders_placed` said 37 while the store held 5, both on screen for the
+whole demo. Two coherent fixes were weighed: set the record to 5, or keep 37
+and make the excerpt explicit. Option 2 was preferred and shipped by populating
+the store with 32 more titles so record and store genuinely agree at 37, dated
+across two years. Exhalation was deliberately dated inside the return window so
+the clarifying question still presents a real choice.
+
+**Why.** Nothing decides on either number, so no verdict changed — it was a credibility
+bug. But it becomes a correctness problem the moment the agent can answer 'how
+many books have I ordered': the answer would have to come from one of two
+defensible, mutually exclusive numbers, and an agent that says 37 and can then
+only discuss five of them is the confidently-wrong-sentence failure one level
+up. Option 2 won because 'the store is an excerpt' is true and is the kind of
+limit this repo states out loud elsewhere, and because setting the record to 5
+discards the 'real customer with a real history' texture. The dataset content
+was then chosen to preserve the demo's decision points: without a second in-
+window candidate the clarifying question would resolve to one option and refund
+without asking. Sequencing was imposed explicitly — the write-path title guard
+had to land *before* the catalog grew, because populating the store is what
+surfaced that bug and shipping the data first would have put a money-moving
+defect into the demo dataset.
+
+**Rejected.** Option 1 — lowering the record card to 5 — defensible on the grounds that a
+demo dataset should not need a footnote, but it discards the texture. Landing
+the catalog before the write guard.
+
+**Answers the question.** Your customer card says 37 orders and I count five rows.
+
+**Lives in.** `profiles/bookly.json (customer.orders_placed, orders, catalog.titles), commits c2732ac → 4931f5d → 9dd8056`
+
+---
+
+## 38. The injection claim is bounded, and there is nowhere in the client for markup to be parsed
+
+*Phase 2*
+
+**Decision.** The stated claim: injection is inert on verdicts, amounts and reason codes, and
+*not* on which requests get considered — an injected order id is judged like
+any other request and may legitimately produce an escalation. Injected text
+rides the envelope verbatim as `customer_note` and reaches the audit log
+intact; nothing parses it. In the browser the markup-parsing APIs are absent
+from the client entirely, verified by grep and live: an `<img onerror>` turn
+produces zero img and zero script elements.
+
+**Why.** QA caught an overclaim in the deck and slide 4 was retitled — the narrower
+claim is the true one, and overclaiming a security property is the fastest way
+to lose the room when someone tests it. Its blast radius is exactly the blast
+radius of a normal customer request; that is the honest claim and it is the one
+worth having. Preserving the injected sentence verbatim is deliberate: the
+record of what the customer actually said is exactly what an investigator
+needs, and preserving it is *how* you prove it changed no verdict. On the
+client, 'escaped where needed' is a claim about vigilance that a new
+contributor can break; 'the sink does not exist' is a claim about structure.
+Reinforced later by the back office importing the console's element builder, so
+exactly one function in the build puts text on a page. The SVG cover generator
+escapes quotes as well as brackets uniformly for the same reason — the
+invariant becomes one sentence rather than a per-context judgement, and the
+check for it caught a real attribute break-out in aria-label.
+
+**Rejected.** The original broader 'injection is inert' framing; sanitising input on the way
+in; stripping injected text from the record to make a slide cleaner; escaping
+at each insertion point; context-sensitive SVG escaping.
+
+**Answers the question.** So injection can't do anything at all? What stops that injected string
+executing in the browser?
+
+**Lives in.** `static/app.js, backoffice.py, envelope.py (customer_note), covers.py, tests.py::injection_changes_nothing, evidence/injection_transcript.txt, deck/build.js slide 4`
+
+---
+
+## 39. Colour is provenance, and the console layout is the boundary diagram
+
+*Phase 2*
+
+**Decision.** Purple means the deterministic side, grey the model side, and the customer's
+own words are neither — neutral with an outline. Record left, conversation
+middle, a 3px full-height rule, decisions right: literally slide 1's drawing.
+The rule uses its own token and is deliberately *not* purple. Purple is never
+spent decoratively, which is why the deck's thesis headline and slide-1 divider
+are neutral. Customer view re-renders the record without lifetime value or CSAT
+rather than hiding them with CSS, and the console opens in customer view.
+Motion is spent in exactly one place — trace rows streaming in pipeline order —
+and prefers-reduced-motion turns it off.
+
+**Why.** The interface argues the architecture without a caption: say the rule once and
+no other colour needs explaining for the rest of the demo. Provenance colour is
+load-bearing information, not branding, so a line belonging to neither side
+must not be painted with the colour that means one side. Not rendering the
+operator fields is the difference between a data-exposure claim you can make
+and one you cannot — 'shows nothing a customer should not see' should be true
+of the document, not just the paint — and opening in customer view means it
+reads as a finished product before it gets peeled open. The one animated thing
+is the thing being argued: the order the pipeline ran in. Two accessibility
+failures were fixed at the ink level (grey at 3.69:1, purple at 4.30:1 on tint)
+by darkening rather than changing hue, leaving the provenance meaning
+untouched.
+
+**Rejected.** Brand purple for the divider and as a general accent; `display:none` on the
+sensitive fields; changing the hues to fix contrast.
+
+**Answers the question.** What would the customer actually see?
+
+**Lives in.** `static/, web.py, deck/build.js (PURPLE/GREY constants and MEANING comments), README.md 'The console', DEMO.md §2`
+
+---
+
+## 40. Evidence is run and captured with its method stated, and the deck argues by naming costs
+
+*Phase cross-cutting*
+
+**Decision.** Every empirical claim points at a file in evidence/ produced by an actual run,
+each opening with the exact commands and the controls that make the comparison
+valid. Deck transcript excerpts are copied verbatim with elisions marked and
+re-verified whenever the agent's wording changes. Slide 3 presents every key
+decision as CHOSE / GAVE UP / WORTH IT BECAUSE. A whole slide is spent on what
+broke. The .pptx is generated by deck/build.js, never hand-edited, and deck/
+declares itself build tooling that no Python module imports.
+
+**Why.** A deck that claims things a sceptic would reasonably doubt needs a filename
+rather than a reassurance, and an artifact whose method is not stated is
+indistinguishable from a screenshot of a hoped-for outcome — stating the
+controls pre-empts the smart objection in each case (that the keys matched
+because nothing changed, or that the duplicate was the same process replaying
+itself). A quoted transcript that drifts from the artifact is a fabricated
+quote, so marking elisions lets a slide be short without being edited-to-
+favour. A tradeoff you cannot name is not a tradeoff, it is a sales pitch — and
+naming the cost first takes the interviewer's best move away. Bugs found and
+fixed are the only credible evidence the system was exercised rather than
+demoed, and the bugs chosen have lessons that generalise, so the slide argues
+architecture while appearing to confess. Two evidence files captured before the
+persona landed carry a dated provenance note rather than being re-recorded: a
+reader comparing them to a live run would find wording that no longer matches
+and reasonably suspect editing, and the note turns the mismatch into a second
+demonstration of the thesis — the persona changed the prose and moved nothing
+on the decision side. Generating the deck also puts speaker notes, excerpts and
+layout arithmetic under review. A separate correction is recorded:
+deck/build.js initially required pptxgenjs with no manifest, so the preceding
+commit's claim that the .pptx is rebuildable was false from a fresh checkout; a
+package.json and README were added and verified from a git-archive copy to
+byte-identical slide XML. Layout defects were found twice by rendering and
+looking, not by arithmetic — neither was visible in the source.
+
+**Rejected.** Claiming parity and idempotency from the design without demonstrating them end
+to end; a tidied illustrative transcript; re-capturing runs so the wording
+matched; a benefits-only key-decisions slide; a polished deck with no failures
+in it; hand-editing slides in PowerPoint.
+
+**Answers the question.** Is that transcript real? What did this design cost you? What went wrong while
+you were building this?
+
+**Lives in.** `evidence/ (provider_parity.txt, duplicate_receipt.txt, injection_transcript.txt, audit_trail.txt, demo_transcript.txt, hosted_openai_transcript.txt), deck/build.js, deck/README.md, deck/package.json`
+
+---
+
+## 41. What is deliberately absent, each for a stated reason — and the authorship gap is conceded
+
+*Phase cross-cutting*
+
+**Decision.** No auth, no multi-tenancy, no database, loopback only. No supervisor agent. No
+durable dedup. No policy-authoring surface. The review queue is a JSON file
+both processes read, correct for one reviewer at one desk. The API key is
+session memory and not a secrets manager. queue.py knowingly shadows the stdlib
+and its docstring names what breaks. The console is deliberately kept off the
+roadmap slide, which argues embeddings behind the retrieval floor, the
+unmodelled-question class, and a real orchestration layer.
+
+**Why.** Naming what the demo does not do is the same instinct as the read-only policy
+viewer: state the limit rather than let it be discovered. Each omission is
+scoped rather than overlooked — the queue's correctness claim states its own
+concurrency, and a known hazard documented with its trigger and its remedy is
+safer than one silently worked around, which also stops a future contributor
+inventing a hack. The console is off the roadmap because that slide argues
+correctness and durability and a presentation-layer item would dilute it: the
+GUI is the medium, not the roadmap. And when asked about the resemblance to
+Decagon's Agent Operating Procedures, the prepared answer concedes the
+convergence rather than denying awareness or claiming equivalence, then names
+the real gap: these procedures live in policy.py, so changing one takes an
+engineer, where theirs are written by the CX teams who own the policy. Making
+them authorable by non-engineers is the next order of problem and is harder
+than what was built — which is exactly why mocking an editor here would have
+been the one dishonest thing on screen.
+
+**Rejected.** Shipping a mocked policy-authoring UI; renaming queue.py or working around the
+shadowing at import sites; listing console features as roadmap items; not
+mentioning the AOP resemblance and hoping it went unremarked.
+
+**Answers the question.** What's missing, and what would you build next? Could a non-engineer change the
+return window? This looks a lot like Decagon's Agent Operating Procedures — did
+you know that?
+
+**Lives in.** `README.md 'Assumptions and limits', docs/wiki/Home.md 'Deliberately out of scope' and 'Known future phases', queue.py, backoffice.py, deck/build.js slide 5, PR #12 body`
+
+---
