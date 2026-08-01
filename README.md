@@ -366,6 +366,7 @@ to drift and no place for a vendor to introduce a decision.
 | `transcripts/*.json`  | the golden transcripts, one per scenario            |
 | `demo.txt`            | the four scripted scenarios                         |
 | `profiles/bookly.json`| the dataset, so a re-skin is a data edit            |
+| `docs/DECISIONS.md`   | why the repo is the way it is, with what was rejected|
 | `DEMO.md`             | the run of show                                     |
 
 ## Assumptions and limits

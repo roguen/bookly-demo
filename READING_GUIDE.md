@@ -109,6 +109,19 @@ dataset, so re-skinning is a data edit.
 Read them in that order if you want the console; skip all of them if you only
 want the argument, because none of them can change an outcome.
 
+## If you want the reasoning
+
+`docs/DECISIONS.md` is the decision record: 41 entries, each with the
+reasoning, the alternative that was rejected, and where the decision is
+enforced. Several record a diagnosis that turned out to be wrong and was
+corrected — kept deliberately, because "we thought X, it was actually Y" is
+worth more than Y on its own.
+
+It is assembled from the sources that already carried the rationale — the
+commit messages, the closed issues, the code comments, the deck's speaker
+notes and the documentation — so that none of it has to be reconstructed from
+memory by a later reader, or under questioning.
+
 ## Glossary
 
 | Term | Meaning |
