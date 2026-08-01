@@ -1148,7 +1148,7 @@ already makes about thresholds — a document holding its own copy is the same
 failure with a slower fuse — and generation was unavailable because the no-
 build-step constraint does not move, so the registry *is* the centralisation.
 Failing on a removed citation stops the check being made vacuous by deletion.
-The check earned its keep unprompted as the count moved 51 → 52 → 56 → 68,
+The check earned its keep unprompted as the count moved 51 → 52 → 56 → 68 → 69,
 naming the files to update each time. CI matters because every claim about the
 suite being green was a claim about somebody's laptop, and slide 5 argues that
 agents die from silent regressions when somebody tweaks a prompt on a Thursday
@@ -1491,5 +1491,58 @@ count citations in this file rather than adding this entry.
 one not in the returnable menu?
 
 **Lives in.** `profiles/bookly.json (orders BK-2132, catalog.titles, customer.orders_placed), transcripts/order-history-and-identity.json, tests.py (profile_load_preserves_the_fixtures, an_aggregate_question_is_not_answered_with_one_order), README.md, DEMO.md, issue #32`
+
+---
+
+## 43. The catalog ships hand-drawn cover art, through the seam the generator already left for it
+
+*v3.1.0*
+
+**Decision.** Every catalog book gets a bespoke, hand-drawn cover — a scene, a
+concept, or an item distinctly associated with the book (Dune's sandworm, the
+impossible teapot, the rubber duck, a Penrose triangle, the Ubik spray can) —
+committed as a static `covers/<order_id>.svg` and served through
+`covers.override_for`, which already won over the generated jacket by design.
+The procedurally-generated jacket stays untouched as the fallback for anything
+without drawn art. A new check, `override_covers_carry_no_forbidden_sink`,
+holds every file in `covers/` to the *same* escaping guarantee the generator
+has — no `<image>`/`href`/`<script>`/`url(`/`@import`, exactly one `http` (the
+xmlns) — and asserts the signed-in customer's orders each resolve to their
+override rather than the stand-in.
+
+**Why.** The seam was built for exactly this a phase ago — "real art should always be
+able to beat generated art" — so the honest way to add art was to use it, not
+to teach the generator about specific books. The generator *can't* draw a scene
+from a book: its whole input is a hash of title and author, which cannot know
+Dune has a sandworm, so anything book-specific has to be authored. The
+definition was deliberately loosened from "a scene" to "a scene, concept, or
+item" because a third of the catalog has no single iconic scene — *The
+Pragmatic Programmer* has no image, but rubber-duck debugging is unmistakably
+its emblem — and a crude literal scene would read as generated, the one thing
+this art exists not to do. Flat fills only, no gradients: an SVG gradient is
+referenced as `fill="url(#id)"`, and `url(` is on the forbidden list the
+injection claim rests on, so the whole catalog is shaded with layered flat
+shapes instead. The new check exists because authored art is a second place a
+markup sink could enter the build, and "the sink cannot exist" has to stay a
+claim about structure rather than about who drew carefully — the same argument
+entry 38 makes about the client. Adding overrides also forced a correction to
+`covers_are_deterministic_and_need_no_network`: it compared `for_order` against
+`render`, which was only ever equal because no order had an override; now that
+every catalog order does, the check exercises `render` directly, which is what
+it was always really testing. Adding the check moved the count 68 → 69, so
+seven citations moved with it, the way entry 33 requires.
+
+**Rejected.** SVG gradients (the `url(` ban); teaching the generator about specific books
+(it has no book-specific input, by design); requiring a literal scene for every
+title (some have no iconic one, and a forced one reads as generated); leaving
+the determinism check comparing `for_order` to `render` once overrides made
+that false; committing the scratchpad authoring tool into the repo — the static
+SVGs are the source of truth, the way deck/ output is.
+
+**Answers the question.** Aren't these just the plain generated jackets with nicer colours? How do you
+know a hand-drawn cover can't smuggle in the markup sink you spent a phase
+proving doesn't exist?
+
+**Lives in.** `covers/ (39 files), covers.py (override_for, for_order, OVERRIDE_DIR), tests.py (override_covers_carry_no_forbidden_sink, covers_are_deterministic_and_need_no_network), issue #33`
 
 ---

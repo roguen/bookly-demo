@@ -214,9 +214,15 @@ def enriched_record_stays_off_the_write_path():
 
 @check
 def covers_are_deterministic_and_need_no_network():
-    """Same book, same jacket, every process — and no file or request."""
+    """Same book, same jacket, every process — and no file or request.
+
+    Every catalog order now ships hand-drawn art, so `for_order` returns an
+    override rather than the generated jacket; this exercises `render` directly,
+    which remains the fallback for anything without drawn art. The overrides
+    have their own guarantee in `override_covers_carry_no_forbidden_sink`.
+    """
     order = ORDERS["BK-1042"]
-    first = covers.for_order(order)
+    first = covers.render(order.title, order.author)
     again = covers.render(order.title, order.author)
     assert first == again
     assert first.startswith("<svg") and first.endswith("</svg>")
@@ -232,6 +238,27 @@ def covers_are_deterministic_and_need_no_network():
     # cannot open a tag.
     hostile = covers.render("<script>x</script>", '" onload="x')
     assert "<script>" not in hostile and 'onload="x' not in hostile
+
+
+@check
+def override_covers_carry_no_forbidden_sink():
+    """Hand-drawn art beats the generated jacket, and rides the same escaping
+    guarantee it does. Every file in covers/ is a lone SVG with no sink an
+    <img> could be talked into fetching — the same list the generator is held
+    to — and the signed-in customer's orders each resolve to their override
+    rather than the fallback, so the demo shows drawn art, not the stand-in."""
+    files = sorted(covers.OVERRIDE_DIR.glob("*.svg"))
+    assert files, "covers/ is empty"
+    for path in files:
+        svg = path.read_text(encoding="utf-8")
+        assert svg.startswith("<svg") and svg.rstrip().endswith("</svg>"), path.name
+        for forbidden in ("<image", "href", "<script", "url(", "@import"):
+            assert forbidden not in svg, (path.name, forbidden)
+        # The one http is the namespace, exactly as for the generated cover.
+        assert svg.count("http") == 1, (path.name, svg.count("http"))
+    for order in tools.orders_for_customer(CURRENT_CUSTOMER_ID):
+        assert covers.override_for(order.order_id) is not None, order.order_id
+        assert covers.for_order(order) == covers.override_for(order.order_id)
 
 
 @check
