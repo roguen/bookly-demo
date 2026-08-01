@@ -23,7 +23,7 @@
 
 /* --- the API client ---------------------------------------------------- */
 
-async function api(path, body) {
+export async function api(path, body) {
   const options = { headers: { "Content-Type": "application/json" } };
   if (body !== undefined) {
     options.method = "POST";
@@ -134,12 +134,12 @@ const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
 /* --- formatting --------------------------------------------------------- */
 
-const money = (amount) =>
+export const money = (amount) =>
   amount === null || amount === undefined
     ? "—"
     : `$${Number(amount).toFixed(2)}`;
 
-function day(iso) {
+export function day(iso) {
   if (!iso) return "—";
   const [y, m, d] = iso.split("-").map(Number);
   const months = [
@@ -161,7 +161,7 @@ const initials = (name) =>
 
 /* --- record column ------------------------------------------------------ */
 
-function fact(label, value, wide) {
+export function fact(label, value, wide) {
   return el("div", { class: wide ? "fact wide" : "fact" }, [
     el("dt", { text: label }),
     el("dd", { text: value }),
@@ -537,7 +537,7 @@ function ask(text) {
 /* An empty state that says what to do next is better than one that
    apologises — and one that will do it for you is better still. `action`,
    when given, is the turn that fills this surface. */
-function emptyState(title, hint, action) {
+export function emptyState(title, hint, action) {
   const panel = el("div", { class: "empty" }, [
     el("strong", { text: title }),
     el("span", { text: hint }),
@@ -756,12 +756,23 @@ function caseCard(kase, actions) {
   card.appendChild(history);
 
   if (kase.status === "open") {
-    card.appendChild(resolveForm(kase, actions));
+    card.appendChild(
+      resolveForm(kase, actions, async (caseId, payload) => {
+        await Api.resolve(caseId, payload);
+        await renderQueue();
+        if (state.tab === "audit") await renderAudit();
+      })
+    );
   }
   return card;
 }
 
-function resolveForm(kase, actions) {
+/* The resolve form is shared with the back office (imported from here). Only
+   the post-submit action differs — the console re-renders its own queue, the
+   back office its desk — so that is the one thing passed in. The requirement
+   is enforced once, in queue.py; the browser reports what the server said and
+   keeps no copy of the rule. */
+export function resolveForm(kase, actions, onSubmit) {
   const actor = el("input", {
     attrs: { type: "text", placeholder: "Your name (required)", required: "" },
   });
@@ -790,16 +801,12 @@ function resolveForm(kase, actions) {
     event.preventDefault();
     error.textContent = "";
     try {
-      await Api.resolve(kase.case_id, {
+      await onSubmit(kase.case_id, {
         action: choice.value,
         actor: actor.value,
         justification: justification.value,
       });
-      await renderQueue();
-      if (state.tab === "audit") await renderAudit();
     } catch (problem) {
-      /* The requirement is enforced once, in queue.py. The browser reports
-         what the server said rather than keeping its own copy of the rule. */
       error.textContent = String(problem).replace(/^Error:\s*/, "");
     }
   });
