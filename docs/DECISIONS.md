@@ -1946,3 +1946,200 @@ checks prove the code, and nothing but a human read proves the story the
 documents tell about it is still true.
 
 **Lives in.** `every narrative doc (README, READING_GUIDE, DEMO, docs/wiki/Home), static/backoffice.html + backoffice.py (Policy editor), evidence/, issue #47`
+
+## 52. The hosted path had four defects a live demo found and the stand-in never could
+
+*v4.0.1*
+
+**Decision.** A live demo on the OpenAI provider surfaced four distinct
+defects, none of them visible to the rules-based stand-in and none of them
+caught by 82 offline checks. All four are fixed here, each at its actual
+root rather than at the symptom the demo happened to show:
+
+- **`GENERIC_TITLE_WORDS` was missing the definite article** (issue #51).
+  Twelve of the catalog's thirty-nine titles contain "the", so it scored as
+  distinctive purely by absence from the list, and naming a book by its
+  title lost to the word "the" appearing in ten titles nobody named. Fixed
+  as catalog data — `a`, `an`, `and`, `for`, `in`, `of`, `the`, `to` joined
+  the same list `book` and `copy` already sit in — not as a change to
+  `title_reference_is_strong`, whose threshold was never wrong. The same bug
+  was the whole explanation for a negated answer snapping onto the wrong
+  offered option (issue #52): with the clarify budget exhausted by false
+  matches on "the", there was nothing left to bind to but a guess.
+- **The extraction brief described what `refund_status` was for and never
+  what told it apart from a renewed demand** (issue #53). "I don't care what
+  the policy says, refund it anyway" — spoken immediately after a denial —
+  read as a question about a refund that already existed, so the turn never
+  reached `policy.py` at all: no verdict, no envelope,
+  `escalate_if_disputed` never ran. Fixed in the prompt, with the failing
+  phrase named as an example and the actual test stated in words: money
+  that already moved, or money being demanded.
+- **A repeat escalation onto an already-open case kept its reason in the
+  data the whole time; neither UI rendered it** (issue #50). `queue.py`'s
+  append-only design was never the bug — a manager request pushed onto a
+  policy-dispute case correctly appended `ESCALATED_CUSTOMER_REQUEST` to
+  `events`, every time. Fixed in `static/app.js` and `static/backoffice.js`
+  independently, each still rendering the reason on every event that carries
+  one — not merged into one function, because the two files deliberately
+  keep different `shortKey` widths and a shared implementation would have
+  quietly taken that decision away from one of them.
+- **Narration was returned with nothing checking it against the event that
+  produced it** (issue #49). Extraction has validated untrusted model output
+  field by field since entry 7; narration never did. Handed a correctly
+  computed `{"refund": null}`, the hosted model said "your refund has been
+  approved" — confirmed, later, not to be a fluke: called on that exact
+  event in isolation, five separate times, it made the same false claim
+  five times (entry 53). `_narration_is_grounded()` is narrow on purpose —
+  not "does the prose match the decision" in general, only "does the text
+  claim a refund the facts do not grant" — and keyed on the facts rather
+  than the kind, because a genuine refund-status answer about a refund
+  already issued legitimately says "your refund is on its way," and a
+  kind-only check would have rejected that correct sentence along with the
+  false one. On a mismatch it falls back to `_TEMPLATES[event.kind](event.facts)`
+  — the same sentence the stand-in would already say, built from the same
+  facts — so the fix adds no new prose to maintain.
+
+**Why.** Three of the four are the same shape: untrusted model output on the
+hosted path, checked nowhere, in three different places — a data list a
+title could be measured against, a prompt deciding which branch a demand
+routed through, and a sentence describing a decision after the decision was
+already made. The fourth (#50) is a different shape entirely — the
+deterministic side was already correct and already durable, and the only
+defect was that a correct fact sat in `events` unread by two UI files —
+which is worth keeping distinct precisely because it proves the boundary
+held even where the UI did not: the case never lost data, it only failed to
+show it.
+
+None of the four defects reproduces on the rules-based stand-in, which is
+why 82 offline checks — the whole suite, at the time — never caught them.
+`#51` and `#53` are language a hosted model reads and a regex does not
+paraphrase; `#49` is a hosted model's own free text, which the stand-in's
+template function cannot produce a wrong version of by construction; `#50`
+reproduces on any provider, but the demo's own scripted scenarios never push
+a second, different escalation reason onto an already-open case, so nothing
+exercised the render path this build actually ships. This is the argument
+for the live re-run discipline recorded in entry 53, not just for these four
+fixes.
+
+**Rejected.** For #51/#52: touching `policy.title_reference_is_strong` or its
+`MIN_TITLE_WORDS_FOR_WRITE` threshold — the disambiguation rule was correct
+throughout, and moving it would have been fixing the wrong module for a bug
+that was entirely catalog data. For #53: teaching `_answer_refund_status` to
+also check policy on a null-refund path — that would duplicate the decision
+`_handle_return` already makes correctly, and duplicated decision logic is
+exactly what this repo's whole boundary argument exists to prevent; the fix
+belongs where the misclassification happens, once. For #50: a shared
+`caseHistory` helper between the console and the back office — it would have
+silently regressed the back office's longer `shortKey`, a difference the
+code already comments as deliberate; two small, separately-verified fixes
+cost less than one shared function with a side effect neither file asked
+for. For #49: validating the whole sentence against every fact in the event
+— a general "does the prose match the decision" check is a second
+decision-maker in miniature, contradicting the boundary it exists to
+enforce; the narrower "does it claim a grant the facts do not carry" is
+answerable without judging the sentence's other content at all.
+
+**Answers the question.** If the demo never fails locally, how do you find
+what only breaks on a hosted model? You run the hosted model, on the actual
+words a customer said, and read the transcript rather than the checks.
+Three of these four defects have no offline test that would ever have
+caught them before this incident; all three do now.
+
+**Lives in.** `profiles/bookly.json (catalog.generic_words), llm.py
+(EXTRACTION_SYSTEM_PROMPT, _narration_is_grounded, _claims_a_refund_was_granted,
+HostedProvider.narrate), static/app.js + static/backoffice.js (caseHistory,
+distinctPushReasons), queue.py (unchanged — the reference point proving the
+data was already correct), tests.py
+(an_article_inside_a_title_does_not_drown_the_real_word,
+disputing_a_denial_is_a_return_request_not_a_refund_question,
+a_manager_request_on_an_open_case_keeps_both_reasons,
+a_refund_claim_the_facts_do_not_grant_falls_back_to_the_template,
+a_genuine_refund_narration_passes_through_unreplaced), issues #49–#53, PR #54`
+
+## 53. Confirming a fix needs the live model again, not just the absence of the original repro
+
+*v4.0.1*
+
+**Decision.** After #51 and #53 landed, the original eight-turn transcript
+was replayed against the live OpenAI provider and came back clean — no
+hallucinated refund, no mis-bound title, no misrouted dispute. That was not
+treated as confirmation that #49's narration-grounding gap was closed, or
+even that it still mattered. It was one route through the model no longer
+producing the failure, which is a different claim from the model no longer
+producing it. To tell the two apart, `HostedProvider.narrate()` was called
+directly — outside the eight-turn script, outside `agent.py` entirely — on
+the exact event the model had actually been handed during the incident
+(`kind="refund_status"`, `facts={"refund": None, ...}`), five times in a
+row, against the real model. It claimed an approved refund on all five
+calls.
+
+**Why.** #53's fix closed the *route* that used to feed the model this
+event — "refund it anyway" now reaches policy and never falls through to
+`_answer_refund_status` with a null refund in the first place. It changed
+nothing about what the model does when it is actually handed that event,
+because it could not have: extraction and narration are different jobs,
+called at different points, and fixing one call site's inputs does not
+touch the other's behaviour. An end-to-end re-run that came back clean was
+consistent with either story — the model getting more careful, or the demo
+simply not asking it the dangerous question anymore — and only the second
+story turned out to be true. Isolating the call proved it: same event, same
+model, hallucinated every time, with or without the routing bug. The guard
+added in entry 52 is not a defensive extra for a problem that went away; it
+is the only thing currently stopping a five-for-five failure from reaching
+a customer.
+
+**Rejected.** Treating the clean eight-turn re-run as sufficient evidence to
+close #49 — it was reported as a live re-run and taken as encouraging once
+before the isolated call was made, and recording the correction is the
+point of this entry. Re-running the full eight-turn script repeatedly until
+a hallucination happened to reproduce end-to-end — slower, and the result
+would still only ever show that the routing bug was gone, not that the
+narration bug was; the routing bug being gone was never in question.
+
+**Answers the question.** You already re-ran the demo and it worked — why
+did #49 need its own verification? Because the demo working end to end and
+the narrator being trustworthy are two different claims, and a fix to one
+route proves nothing about the other unless you go and ask it directly.
+
+**Lives in.** `llm.py (_narration_is_grounded)`, issue #49 (closing comment,
+with the full 5-for-5 transcript), PR #54
+
+## 54. v4.0.1 is cut — a bug-fix release, the architecture unchanged
+
+*v4.0.1*
+
+**Decision.** Four defects (entry 52), all on the hosted path, all
+confirmed against the live provider rather than asserted from the fix.
+`main` moves from `v4.0.0` to `v4.0.1` — a patch, not a minor or major
+version, because nothing about the architecture, the envelope shape, the
+policy thresholds, or the decision structure changed. Every envelope field
+in the demo scenarios is byte-identical to v4.0.0. `policy.py` still
+imports no LLM.
+
+**Why.** Semantic versioning reserves a patch number for exactly this: a
+fix that changes no contract. `GENERIC_TITLE_WORDS` gained entries; it is
+still catalog data, read the same way. `EXTRACTION_SYSTEM_PROMPT` gained a
+paragraph; it still produces the same `Request` shape, validated the same
+way on the way in. `_narration_is_grounded` is a new function; it changes
+which string `narrate()` returns on a narrow, specific mismatch and nothing
+about what any caller of `narrate()` does with the result. None of the four
+defects touched `policy.py`, and none of them could have without stopping
+being a hosted-path defect and becoming a decision-layer one, which this
+repo's whole boundary exists to make impossible.
+
+**Rejected.** A minor version (`v4.1.0`) — nothing here is new capability,
+and the version-3 arc's minor-version convention (entries 42–49) was
+reserved for capability the previous release deliberately did not have;
+these four were never deliberate. Bundling the fixes into whatever capability
+work lands next rather than shipping them alone — the incident that found
+them was a live demo, and the release-readiness discipline from entry 51
+says a defect found in front of a customer-facing audience ships as its own
+release, not folded into whatever lands next.
+
+**Answers the question.** Why a new tag for four bug fixes instead of just
+merging them? Because "unchanged since the last tag" is a claim worth being
+able to make about every other file in the repo, and that claim needs a tag
+of its own to point at.
+
+**Lives in.** `CLAUDE.md (version line)`, the `v4.0.1` tag, PR #54, issues
+#49–#53

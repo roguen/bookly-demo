@@ -117,7 +117,7 @@ the suite, so a fix has to delete its own excuse.
 
 ---
 
-## The version-3 arc, and `v4.0.0`
+## The version-3 arc, `v4.0.0`, and `v4.0.1`
 
 Phase 3 shipped as `v3.0.0`, then was refined across five sub-versions — each its
 own branch, PR, and tag, and each holding the claim: the model never decides, and
@@ -138,6 +138,20 @@ every demo envelope stays byte-identical.
 earlier *deliberate refusal to mock* into the real thing — the policy editor, the
 durable receiver, the out-of-scope door — which is the arc in one sentence:
 refuse to fake it, then build it when it can be real.
+
+**`v4.0.1`** is a bug-fix patch, not a new capability. A live demo on the OpenAI
+provider found four defects in the hosted path, none of them visible to the
+rules-based stand-in and none caught by the offline suite at the time: a title
+reference losing to the word "the" (missing from the catalog's generic-word
+list); a disputed denial reading as a question about a refund instead of a
+renewed demand, so it never reached `policy.py`; a manager request onto an
+already-open case whose reason the data model kept but neither UI rendered;
+and hosted narration returned with nothing checking it against the event that
+produced it — confirmed, called on that exact event in isolation, to
+hallucinate an approved refund five times out of five. All four are fixed at
+their actual root, all four confirmed against the live model rather than
+asserted from the fix, and none of them touched `policy.py` or changed an
+envelope field.
 
 ---
 
