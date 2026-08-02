@@ -979,6 +979,119 @@ def hostile_model_output_cannot_reach_a_decision():
 
 
 @check
+def a_refund_claim_the_facts_do_not_grant_falls_back_to_the_template():
+    """Narration is untrusted the same way extraction is. Reported live: an
+    escalation was correctly recorded, the narrator was handed
+    {"refund": None}, and wrote "your refund has been approved" anyway.
+    Nothing downstream misbehaved — the sentence was simply never checked.
+
+    A hosted model that claims a refund the facts do not grant gets
+    overruled by the same sentence the stand-in would have said, built from
+    the same facts. This is the incident's actual text, replayed against
+    both the kind it originally hit and the kind it should have hit.
+    """
+    hallucination = (
+        "Your refund has been approved and is being processed. It should "
+        "post within 5 business days."
+    )
+
+    class Hallucinating(llm.HostedProvider):
+        name = "hallucinating"
+
+        def __init__(self, text):
+            self._text = text
+
+        def _complete(self, system, user):
+            return self._text
+
+    provider = Hallucinating(hallucination)
+
+    # The kind it actually hit: a misrouted refund_status question with no
+    # refund on record.
+    facts = {"refund": None, "posting_target": "within 5 business days",
+              "asked_to_return": False}
+    result = provider.narrate(llm.NarrationEvent("refund_status", facts))
+    assert result == llm._TEMPLATES["refund_status"](facts), result
+    # Not "approved" not in result — the template's own no-refund-on-record
+    # branch legitimately mentions refunds getting approved in general
+    # ("Refunds post ... once they're approved"). Equality with the
+    # template is the actual assertion; this kind's template text is not a
+    # clean string to grep.
+
+    # Defense in depth: the same hallucination against an escalation, which
+    # never carries a refund fact at all.
+    esc_facts = {"reason_code": "ESCALATED_POLICY_DISPUTE",
+                 "response_target": "within 4 business hours"}
+    result = provider.narrate(llm.NarrationEvent("escalation", esc_facts))
+    assert result == llm._TEMPLATES["escalation"](esc_facts), result
+    assert "approved" not in result.lower(), result
+
+
+@check
+def a_genuine_refund_narration_passes_through_unreplaced():
+    """The guard must not fire on the sentences it exists to let through —
+    a kind-only check would reject a true "your refund is on its way" along
+    with the false one; the check is keyed on the facts for exactly this
+    reason."""
+
+    class Fluent(llm.HostedProvider):
+        name = "fluent"
+
+        def __init__(self, text):
+            self._text = text
+
+        def _complete(self, system, user):
+            return self._text
+
+    # A genuine approval, in the hosted model's own words rather than the
+    # template's — proves this is a pass-through, not a silent
+    # always-fall-back.
+    approved = Fluent(
+        "All set — I've issued a $39.99 refund for The Pragmatic Programmer "
+        "to your original payment method. It should post within 5 business "
+        "days."
+    )
+    facts = {"title": "The Pragmatic Programmer", "order_id": "BK-0987",
+              "delivered_on": "2026-05-02", "window_days": 30,
+              "amount": 39.99, "posting_target": "within 5 business days"}
+    result = approved.narrate(llm.NarrationEvent("refund_approved", facts))
+    assert "issued" in result and "$39.99" in result, result
+    assert result != llm._TEMPLATES["refund_approved"](facts), (
+        "should pass the model's own phrasing through unchanged", result
+    )
+
+    # A genuine refund_status answer about a refund already issued earlier
+    # in the conversation — the exact shape a kind-only check would reject.
+    already_refunded = Fluent(
+        "You're already covered there — that refund for Godel, Escher, "
+        "Bach went out earlier in this chat and is on its way to your "
+        "card."
+    )
+    facts = {"refund": {"title": "Godel, Escher, Bach", "order_id": "BK-1042",
+                          "amount": 22.50},
+              "posting_target": "within 5 business days",
+              "asked_to_return": False}
+    result = already_refunded.narrate(
+        llm.NarrationEvent("refund_status", facts)
+    )
+    assert "on its way" in result, result
+    assert result != llm._TEMPLATES["refund_status"](facts)
+
+    # And an ordinary denial that happens to say "refund" — must not be
+    # mistaken for a claim just because the word appears.
+    denial = Fluent(
+        "That one's outside the 30-day window, so I'm not able to issue a "
+        "refund for it — sorry about that."
+    )
+    facts = {"title": "The Pragmatic Programmer", "order_id": "BK-0987",
+              "status": "delivered", "delivered_on": "2026-05-02",
+              "returned_on": None, "eta": None, "carrier": None,
+              "reason_code": "RETURN_WINDOW_EXPIRED", "window_days": 30}
+    result = denial.narrate(llm.NarrationEvent("return_denied", facts))
+    assert result == denial._text  # passed through, not replaced
+
+
+@check
 def openai_provider_adapts_to_the_renamed_token_parameter():
     """OpenAI renamed the output-budget parameter partway through its model
     line. The provider probes once and remembers, rather than pinning one
