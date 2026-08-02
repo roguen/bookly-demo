@@ -624,13 +624,25 @@ bookstore. Split the turn into requests at conjunctions and sentence breaks.
 For each request report: intent (one of "order_status" for one specific
 order, "order_history" for a question about the account as a whole — how many
 orders, what they have bought, their order history — "agent_identity" for who
-or what you are, "refund_status" for a question about a refund that already
-exists rather than a request for a new one, "return_request",
-"policy_question", "human_handoff", "out_of_scope", or null), order_id (format
-BK-0000, or null), title_words
-(words from the customer's own order titles listed below that the request
-refers to), option_number (if the request answers a numbered choice, else
-null), and text (the request verbatim).
+or what you are, "refund_status", "return_request", "policy_question",
+"human_handoff", "out_of_scope", or null), order_id (format BK-0000, or
+null), title_words (words from the customer's own order titles listed below
+that the request refers to), option_number (if the request answers a
+numbered choice, else null), and text (the request verbatim).
+
+"refund_status" and "return_request" are easy to cross because both mention
+money and both can contain the word "refund" — the test is whether the
+customer is asking about money that already moved or demanding money move.
+Use "refund_status" only for a question about a refund the agent already
+granted — "where's my refund", "has it come through yet", "how long does it
+take". Use "return_request" for anything that asks the agent to send a book
+back or issue a refund, including a customer disputing a denial they were
+just given: "refund it anyway", "I don't care what the policy says, just
+refund me", and "give me my money back" are all "return_request", never
+"refund_status" — nothing has been granted yet, so there is no status to ask
+about. If the turn follows a decision the agent just denied, read a renewed
+demand for money as "return_request", not as a question about one already
+issued.
 
 Use "out_of_scope" for a genuine request this bookstore's support does not
 cover — anything that is not about an order, a return, a refund, shipping or
@@ -673,6 +685,98 @@ def _narration_system_prompt() -> str:
 
 
 NARRATION_SYSTEM_PROMPT = _narration_system_prompt()
+
+
+# Narration is untrusted the same way extraction is, and the incident this
+# guards against is specific: an escalation was correctly recorded, the
+# narrator was handed {"refund": None}, and wrote "your refund has been
+# approved" anyway. The prompt above already says "you must not add facts
+# that are not in the event" — that sentence alone did not stop it.
+#
+# The check is deliberately narrow: not "does the prose match the decision"
+# in general, only "does the text claim a refund was granted, and if so, do
+# the facts actually grant one". Narrower checks are easier to get right and
+# this is the one claim that has already gone wrong once.
+_REFUND_GRANT_VERB_RE = re.compile(
+    r"\b(approved|issued|processed|posted|granted)\b", re.IGNORECASE
+)
+_REFUND_ON_ITS_WAY_RE = re.compile(r"\bon (?:its|the) way\b", re.IGNORECASE)
+
+# The same negation vocabulary a denial actually uses ("I can't issue a
+# refund", "hasn't been approved") — checked in the gap between the refund
+# noun and the grant verb, so a denial reads as a denial rather than tripping
+# the same detector that catches a claim.
+# "n't" is deliberately not inside the \b(...)\b group: a word boundary sits
+# between "e" and "n" in "haven't" only if something splits them, and nothing
+# does — \bn't\b never matches an embedded contraction. Left as a bare
+# substring, it catches every contraction in one alternative instead of
+# enumerating "haven't", "hasn't", "wasn't", "isn't"... one at a time.
+_NEGATION_RE = re.compile(
+    r"\b(not|never|unable|cannot|no)\b|n't", re.IGNORECASE
+)
+
+
+def _claims_a_refund_was_granted(text: str) -> bool:
+    """Does the sentence assert money already moved, or is about to?
+
+    A refund noun near a grant verb ("approved", "issued", "processed",
+    "posted", "granted") or "on its way" — backed off if a negation sits
+    between them. The gap is generous (order titles run long: "for Godel,
+    Escher, Bach (BK-1042) is on its way" has to still match) but stops at
+    sentence punctuation, same as the rules provider's own regexes.
+
+    "refunded" is checked on its own, not as "refund" plus a suffix: \\b does
+    not split "refund" from "ed" inside one word, so the noun-anchored scan
+    above never sees it, and "I've refunded you" would otherwise walk straight
+    past every check here.
+    """
+    for match in re.finditer(r"\brefunds?\b", text, re.IGNORECASE):
+        behind = text[max(0, match.start() - 40) : match.start()]
+        if _NEGATION_RE.search(behind):
+            # "No refund has been issued" — the noun itself is negated, so
+            # nothing that follows it can turn this into a claim.
+            continue
+        # Sentence-final punctuation only — a decimal amount like $22.50
+        # must not read as the end of the sentence.
+        ahead = re.split(
+            r"(?<!\d)[.?!](?!\d)", text[match.end() : match.end() + 120]
+        )[0]
+        verb = (
+            _REFUND_GRANT_VERB_RE.search(ahead)
+            or _REFUND_ON_ITS_WAY_RE.search(ahead)
+        )
+        if verb and not _NEGATION_RE.search(ahead[: verb.start()]):
+            return True
+        # "issued a refund" — the verb lands before the noun instead of after.
+        if re.search(r"\bissued\b", behind, re.IGNORECASE):
+            return True
+    for match in re.finditer(r"\brefunded\b", text, re.IGNORECASE):
+        behind = text[max(0, match.start() - 40) : match.start()]
+        if not _NEGATION_RE.search(behind):
+            return True
+    return False
+
+
+def _narration_is_grounded(kind: str, facts: dict, text: str) -> bool:
+    """A refund-granted claim is grounded only where the facts grant one.
+
+    `refund_approved` always carries a real `amount` — it exists to say
+    exactly this, so it is never checked further. `refund_status` is
+    grounded only when `facts["refund"]` names a refund already issued
+    earlier in this conversation — the exact fact that was `None` in the
+    incident. Every other kind never carries a refund fact at all, so a
+    claim there is false by construction, whatever the words.
+
+    Keyed on the facts, not the kind, on purpose: a genuine refund_status
+    narration with a real prior refund legitimately says "your refund is on
+    its way", and a kind-only check would reject that correct sentence along
+    with the false one.
+    """
+    if not _claims_a_refund_was_granted(text):
+        return True
+    if kind == "refund_approved":
+        return True
+    return kind == "refund_status" and bool(facts.get("refund"))
 
 
 # Models change names faster than this repo will; both are overridable so a
@@ -722,7 +826,14 @@ class HostedProvider:
 
     def narrate(self, event: NarrationEvent) -> str:
         payload = json.dumps({"kind": event.kind, "facts": event.facts})
-        return self._complete(NARRATION_SYSTEM_PROMPT, payload).strip()
+        text = self._complete(NARRATION_SYSTEM_PROMPT, payload).strip()
+        if _narration_is_grounded(event.kind, event.facts, text):
+            return text
+        # The model claimed a refund the facts do not grant. Same shape as
+        # untrusted extraction output: drop it and fall back — here, to the
+        # sentence the stand-in would have said, built from the same facts,
+        # rather than to an empty request.
+        return _TEMPLATES[event.kind](event.facts)
 
     def _complete(self, system: str, user: str) -> str:
         raise NotImplementedError  # the one thing a vendor subclass supplies

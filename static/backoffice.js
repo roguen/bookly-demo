@@ -165,6 +165,27 @@ async function renderDesk() {
 
 /* --- the queue list ------------------------------------------------------ */
 
+/* Reason codes carried by a repeat push, where they differ from the reason
+   the case opened for. A push is not always a repeat of the same ask —
+   `a_repeated_escalation_is_one_case_not_two` is right that it stays one
+   case, but "refund it anyway" and "I want to speak to a manager" landing on
+   the same case are two different things a human needs to know happened,
+   and the case list is where a reviewer decides which case to open. */
+function distinctPushReasons(kase) {
+  const opened = kase.reason_code;
+  const seen = new Set();
+  for (const event of kase.events) {
+    if (
+      event.kind === "escalation_repeated" &&
+      event.reason_code &&
+      event.reason_code !== opened
+    ) {
+      seen.add(event.reason_code);
+    }
+  }
+  return [...seen];
+}
+
 function caseRow(kase) {
   const context = kase.context || {};
   const customer = context.customer || {};
@@ -172,6 +193,7 @@ function caseRow(kase) {
   const pushes = kase.events.filter(
     (e) => e.kind === "escalation_repeated"
   ).length;
+  const otherReasons = distinctPushReasons(kase);
 
   return el(
     "button",
@@ -200,7 +222,7 @@ function caseRow(kase) {
           class: "order-id",
           text: `${kase.case_id} · opened ${kase.opened_at}${
             pushes ? ` · pushed ${pushes} more time${pushes === 1 ? "" : "s"}` : ""
-          }`,
+          }${otherReasons.length ? ` · also: ${otherReasons.join(", ")}` : ""}`,
         }),
       ]),
     ]
@@ -220,6 +242,7 @@ function caseTicket(kase, actions) {
   const pushes = kase.events.filter(
     (e) => e.kind === "escalation_repeated"
   ).length;
+  const otherReasons = distinctPushReasons(kase);
 
   const ticket = el("article", {
     class: "ticket",
@@ -262,7 +285,11 @@ function caseTicket(kase, actions) {
             class: "ticket-flag",
             text: `The customer pressed this ${pushes} more time${
               pushes === 1 ? "" : "s"
-            } after the handoff. One case, not ${pushes + 1}: the escalation carries a single idempotency key.`,
+            } after the handoff. One case, not ${pushes + 1}: the escalation carries a single idempotency key.${
+              otherReasons.length
+                ? ` At least one of those pushes was a different ask: ${otherReasons.join(", ")}.`
+                : ""
+            }`,
           })
         : null,
     ])
@@ -433,6 +460,13 @@ function caseTicket(kase, actions) {
   return ticket;
 }
 
+/* Every event that carries a reason code shows it, not just `resolution`. A
+   repeat push onto an already-open case stays one case, but the reason for
+   the push can differ from the reason the case opened for — "refund it
+   anyway" and "I want to speak to a manager" both land as
+   `escalation_repeated` here, and they are not the same ask. Without this,
+   the line read "escalation repeated · agent · <time>" either way, so a
+   reviewer had to already suspect a second reason existed to go find it. */
 function caseHistory(kase) {
   const history = el("ol", { class: "case-events" });
   for (const event of kase.events) {
@@ -440,6 +474,11 @@ function caseHistory(kase) {
       el("span", { class: "event-kind", text: event.kind.replace(/_/g, " ") }),
       el("span", { class: "event-actor", text: `${event.actor} · ${event.at}` }),
     ]);
+    if (event.reason_code) {
+      item.appendChild(
+        el("span", { class: "envelope-reason", text: event.reason_code })
+      );
+    }
     if (event.kind === "resolution") {
       item.appendChild(el("div", { class: "event-action", text: event.action }));
       item.appendChild(el("div", { text: event.justification }));

@@ -500,6 +500,39 @@ def extraction_finds_intent_and_order_id():
     )
 
 
+@check
+def disputing_a_denial_is_a_return_request_not_a_refund_question():
+    """"Refund" appears in both intents; the demand/question line is what
+    tells them apart, and it is easy to get backwards.
+
+    Reported live on the hosted path: after a return was correctly denied,
+    "I don't care what the policy says, refund it anyway" extracted as
+    refund_status — a question about a refund that already exists — so
+    policy was never consulted and the dispute-escalation branch
+    (`escalate_if_disputed`, DENIALS_BEFORE_ESCALATION) never ran. Nothing
+    downstream misbehaved; the turn just never reached it.
+
+    Nothing has been granted at the point any of these are said. Each is a
+    renewed demand, so each has to read as return_request — the rules
+    provider is the oracle EXTRACTION_SYSTEM_PROMPT is written to match, and
+    this pins its half of that contract, offline and every run.
+    """
+    for dispute in (
+        "I don't care what the policy says, refund it anyway.",
+        "I don't care, just refund me.",
+        "Give me my money back anyway.",
+    ):
+        requests = RulesProvider().extract(dispute, _extraction_context())
+        assert requests and requests[0].intent == "return_request", (
+            dispute, requests
+        )
+    # The genuine question this intent exists for still reads as one.
+    status = RulesProvider().extract(
+        "Has my refund come through yet?", _extraction_context()
+    )
+    assert status and status[0].intent == "refund_status", status
+
+
 # --- conversation-level checks -------------------------------------------
 
 
@@ -946,6 +979,119 @@ def hostile_model_output_cannot_reach_a_decision():
 
 
 @check
+def a_refund_claim_the_facts_do_not_grant_falls_back_to_the_template():
+    """Narration is untrusted the same way extraction is. Reported live: an
+    escalation was correctly recorded, the narrator was handed
+    {"refund": None}, and wrote "your refund has been approved" anyway.
+    Nothing downstream misbehaved — the sentence was simply never checked.
+
+    A hosted model that claims a refund the facts do not grant gets
+    overruled by the same sentence the stand-in would have said, built from
+    the same facts. This is the incident's actual text, replayed against
+    both the kind it originally hit and the kind it should have hit.
+    """
+    hallucination = (
+        "Your refund has been approved and is being processed. It should "
+        "post within 5 business days."
+    )
+
+    class Hallucinating(llm.HostedProvider):
+        name = "hallucinating"
+
+        def __init__(self, text):
+            self._text = text
+
+        def _complete(self, system, user):
+            return self._text
+
+    provider = Hallucinating(hallucination)
+
+    # The kind it actually hit: a misrouted refund_status question with no
+    # refund on record.
+    facts = {"refund": None, "posting_target": "within 5 business days",
+              "asked_to_return": False}
+    result = provider.narrate(llm.NarrationEvent("refund_status", facts))
+    assert result == llm._TEMPLATES["refund_status"](facts), result
+    # Not "approved" not in result — the template's own no-refund-on-record
+    # branch legitimately mentions refunds getting approved in general
+    # ("Refunds post ... once they're approved"). Equality with the
+    # template is the actual assertion; this kind's template text is not a
+    # clean string to grep.
+
+    # Defense in depth: the same hallucination against an escalation, which
+    # never carries a refund fact at all.
+    esc_facts = {"reason_code": "ESCALATED_POLICY_DISPUTE",
+                 "response_target": "within 4 business hours"}
+    result = provider.narrate(llm.NarrationEvent("escalation", esc_facts))
+    assert result == llm._TEMPLATES["escalation"](esc_facts), result
+    assert "approved" not in result.lower(), result
+
+
+@check
+def a_genuine_refund_narration_passes_through_unreplaced():
+    """The guard must not fire on the sentences it exists to let through —
+    a kind-only check would reject a true "your refund is on its way" along
+    with the false one; the check is keyed on the facts for exactly this
+    reason."""
+
+    class Fluent(llm.HostedProvider):
+        name = "fluent"
+
+        def __init__(self, text):
+            self._text = text
+
+        def _complete(self, system, user):
+            return self._text
+
+    # A genuine approval, in the hosted model's own words rather than the
+    # template's — proves this is a pass-through, not a silent
+    # always-fall-back.
+    approved = Fluent(
+        "All set — I've issued a $39.99 refund for The Pragmatic Programmer "
+        "to your original payment method. It should post within 5 business "
+        "days."
+    )
+    facts = {"title": "The Pragmatic Programmer", "order_id": "BK-0987",
+              "delivered_on": "2026-05-02", "window_days": 30,
+              "amount": 39.99, "posting_target": "within 5 business days"}
+    result = approved.narrate(llm.NarrationEvent("refund_approved", facts))
+    assert "issued" in result and "$39.99" in result, result
+    assert result != llm._TEMPLATES["refund_approved"](facts), (
+        "should pass the model's own phrasing through unchanged", result
+    )
+
+    # A genuine refund_status answer about a refund already issued earlier
+    # in the conversation — the exact shape a kind-only check would reject.
+    already_refunded = Fluent(
+        "You're already covered there — that refund for Godel, Escher, "
+        "Bach went out earlier in this chat and is on its way to your "
+        "card."
+    )
+    facts = {"refund": {"title": "Godel, Escher, Bach", "order_id": "BK-1042",
+                          "amount": 22.50},
+              "posting_target": "within 5 business days",
+              "asked_to_return": False}
+    result = already_refunded.narrate(
+        llm.NarrationEvent("refund_status", facts)
+    )
+    assert "on its way" in result, result
+    assert result != llm._TEMPLATES["refund_status"](facts)
+
+    # And an ordinary denial that happens to say "refund" — must not be
+    # mistaken for a claim just because the word appears.
+    denial = Fluent(
+        "That one's outside the 30-day window, so I'm not able to issue a "
+        "refund for it — sorry about that."
+    )
+    facts = {"title": "The Pragmatic Programmer", "order_id": "BK-0987",
+              "status": "delivered", "delivered_on": "2026-05-02",
+              "returned_on": None, "eta": None, "carrier": None,
+              "reason_code": "RETURN_WINDOW_EXPIRED", "window_days": 30}
+    result = denial.narrate(llm.NarrationEvent("return_denied", facts))
+    assert result == denial._text  # passed through, not replaced
+
+
+@check
 def openai_provider_adapts_to_the_renamed_token_parameter():
     """OpenAI renamed the output-budget parameter partway through its model
     line. The provider probes once and remembers, rather than pinning one
@@ -1340,6 +1486,58 @@ def a_coincidental_title_word_never_moves_money():
     assert payload["distinctive_words"] == []
     assert payload["limit"] == policy.MIN_TITLE_WORDS_FOR_WRITE
     assert judged[0].side == recorder.DETERMINISTIC
+
+
+@check
+def an_article_inside_a_title_does_not_drown_the_real_word():
+    """"The" is not a book title, but the customer still has to say it.
+
+    Before this guard, "the" scored as a distinctive word purely because it
+    was missing from the generic-word list. On this catalog 12 of 39 titles
+    contain "the", so naming a book by its title lost to the article: eleven
+    titles the customer never named scored `strong=True` right alongside the
+    one they did, the answer could never resolve to a single order, and the
+    customer's own title reference burned the clarify budget and escalated
+    instead of finding the book. Caught from a hosted-provider transcript
+    where "The Pragmatic Programmer" was said twice and never bound.
+    """
+    # The half that is data: "the" reads the same as "book" or "copy" now —
+    # present in a title, absent from what identifies one.
+    assert "the" in store_module.GENERIC_TITLE_WORDS
+
+    # And the behaviour, end to end: naming the book resolves in one turn
+    # instead of re-asking or escalating.
+    result = _fresh_agent("conv-article").handle_turn(
+        "I would like to return The Pragmatic Programmer"
+    )
+    assert (
+        "delivered on May 2, which is outside the 30-day return window"
+        in result.reply
+    ), result.reply
+    assert "which book" not in result.reply, result.reply
+    assert "escalated" not in result.reply, result.reply
+
+    # The trace shows why: BK-0987 is still judged strong on its own two
+    # distinctive words, with "the" contributing to the match but not to
+    # what makes it strong.
+    watched = ListRecorder()
+    Agent(RulesProvider(), "conv-article-trace", recorder=watched).handle_turn(
+        "I would like to return The Pragmatic Programmer"
+    )
+    judged = {
+        n.payload["order_id"]: n.payload
+        for n in watched.notes
+        if n.stage == "candidates" and n.payload.get("source") == "title_reference"
+    }
+    assert judged, [n.stage for n in watched.notes]
+    programmer = judged["BK-0987"]
+    assert "the" not in programmer["distinctive_words"], programmer
+    assert programmer["strong_enough_to_act"] is True
+    # No other order in the account should score strong on "the" alone.
+    for order_id, payload in judged.items():
+        if order_id == "BK-0987":
+            continue
+        assert payload["strong_enough_to_act"] is False, payload
 
 
 @check
@@ -2163,6 +2361,44 @@ def a_repeated_escalation_is_one_case_not_two():
     conversation = queue["cases"][0]["conversation"]
     assert conversation[0]["role"] == "customer"
     assert any("outside the 30-day" in m["text"] for m in conversation)
+
+
+@check
+def a_manager_request_on_an_open_case_keeps_both_reasons():
+    """Staying one case must not mean losing why the second push happened.
+
+    Reported live: a customer disputed a denial ("refund it anyway" —
+    ESCALATED_POLICY_DISPUTE), then asked for a manager
+    (ESCALATED_CUSTOMER_REQUEST). Both escalations share one idempotency key
+    — same conversation, same action, same order — so the case stays merged,
+    exactly as `a_repeated_escalation_is_one_case_not_two` says it should.
+    The bug was not the merge. It was that the second reason, though it was
+    always appended to `events` here, was never rendered — a reviewer
+    scanning the queue saw only the reason the case opened for and had no
+    way to learn a manager had been asked for at all.
+    """
+    with _Console() as console:
+        case = _escalated_console(console)
+        console.post(
+            "/api/turn",
+            {
+                "conversation_id": "conv-queue",
+                "text": "I want to speak to a manager.",
+            },
+        )
+        queue = console.get("/api/queue")
+    assert queue["counts"]["total"] == 1, queue["counts"]
+    merged = queue["cases"][0]
+    assert merged["case_id"] == case["case_id"]
+    # The case still opened for the dispute — that fact does not move.
+    assert merged["reason_code"] == "ESCALATED_POLICY_DISPUTE"
+    # And the manager ask is in the record as its own event, reason attached,
+    # not folded silently into a generic repeat.
+    reasons = [e.get("reason_code") for e in merged["events"]]
+    assert reasons == [
+        "ESCALATED_POLICY_DISPUTE",
+        "ESCALATED_CUSTOMER_REQUEST",
+    ], reasons
 
 
 @check

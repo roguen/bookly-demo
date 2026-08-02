@@ -227,8 +227,11 @@
         "pages": 296
       }
     },
-    "generic_words_note": "Words that can appear inside a book title and still be ordinary support English. A customer saying 'I'd like to return a book' is not naming The Book of the New Sun. Listing a word here means it can never identify a title on its own; policy.title_reference_is_strong decides how much is enough. Curate this per catalog — it is the readable half of the guard, and the rule in policy.py is the half that holds when this list is wrong.",
+    "generic_words_note": "Words that can appear inside a book title and still be ordinary support English. A customer saying 'I'd like to return a book' is not naming The Book of the New Sun. Listing a word here means it can never identify a title on its own; policy.title_reference_is_strong decides how much is enough. Curate this per catalog — it is the readable half of the guard, and the rule in policy.py is the half that holds when this list is wrong. Articles and connective words belong here too, on the same reasoning: this catalog has 39 titles and 12 of them contain \"the\" — naming a book by title necessarily says \"the\" without that word identifying anything, the same way \"book\" or \"copy\" does not.",
     "generic_words": [
+      "a",
+      "an",
+      "and",
       "back",
       "book",
       "books",
@@ -238,12 +241,15 @@
       "cover",
       "covers",
       "first",
+      "for",
+      "in",
       "item",
       "items",
       "last",
       "left",
       "light",
       "next",
+      "of",
       "order",
       "orders",
       "page",
@@ -252,10 +258,12 @@
       "season",
       "stories",
       "story",
+      "the",
       "thing",
       "things",
       "time",
-      "times"
+      "times",
+      "to"
     ]
   },
   "customer": {
