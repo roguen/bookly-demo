@@ -32,7 +32,7 @@ imports an LLM. Every file either enforces that boundary or demonstrates it.
 
 ## Where the reasoning lives
 
-**`docs/DECISIONS.md` first** — 54 entries: the decision, the reasoning, the
+**`docs/DECISIONS.md` first** — 56 entries: the decision, the reasoning, the
 alternative rejected, where it is enforced, and the sceptic's question it
 answers. Several record a diagnosis that was **wrong** and later corrected;
 those are the valuable ones. Do not re-litigate anything in that file without

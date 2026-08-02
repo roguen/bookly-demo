@@ -4,7 +4,8 @@
   "private": true,
   "description": "Generator for Bookly_Agent_Architecture.pptx. Build tooling only — the agent itself has no dependencies.",
   "scripts": {
-    "build": "node build.js ../Bookly_Agent_Architecture.pptx"
+    "build": "node build.js ../Bookly_Agent_Architecture.pptx",
+    "build:lean": "node build-lean.js ../Bookly_Customer_Deck.pptx"
   },
   "dependencies": {
     "pptxgenjs": "^4.0.1"
