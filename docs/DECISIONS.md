@@ -924,7 +924,8 @@ cannot use, and a second copy of that validation rule in the browser is a rule
 that can disagree with itself. Recording upholds too means the queue is a log
 of review rather than a log of exceptions. Keying on the escalation key means
 four pushes on one dispute make one case with four recorded events, keeping the
-same exactly-once promise the envelope already made. Snapshotting means a
+same guarantee the envelope already makes: delivery may repeat, but the key
+means it is recorded once. Snapshotting means a
 ticket read six weeks later shows what was true when it was raised rather than
 silently re-reading a world that moved. And nothing flows back: a check asserts
 by source inspection that the decision path imports none of the queue, then
@@ -1916,8 +1917,8 @@ the stand-in evidence (`demo_transcript.txt`, `audit_trail.txt`) was re-captured
 against v4.0.0 while the hosted evidence kept its dated provenance note rather
 than being re-billed (entry 40). DEMO.md gained the three beats the arc earned —
 authoring a threshold to flip a real verdict, declining then escalating an
-out-of-scope turn, and reconciling a failed delivery to exactly-once — and grew
-from twelve minutes to fifteen.
+out-of-scope turn, and reconciling a failed delivery until it posts exactly
+once — and grew from twelve minutes to fifteen.
 
 **Why.** On a multi-sub-version arc, per-branch doc edits are targeted at the
 branch, so each one leaves the surrounding prose describing the *old* world. The
@@ -2143,3 +2144,135 @@ of its own to point at.
 
 **Lives in.** `CLAUDE.md (version line)`, the `v4.0.1` tag, PR #54, issues
 #49–#53
+
+## 55. "Exactly once" was the wrong word for delivery, and the code already knew it
+
+**Decision.** `envelope.py`'s `reconcile()` docstring already stated this
+correctly: "Exactly-once is not this function's job — it may re-deliver an
+envelope the receiver already recorded — but the receiver dedups on the
+idempotency key, so a duplicate is suppressed rather than executed twice."
+That is at-least-once delivery with an idempotent consumer, which is the
+accurate name for what this system does. It is not exactly-once delivery,
+which this system does not attempt and does not need. The code was right.
+Three places in the surrounding prose overclaimed anyway, promoting the
+stronger-sounding term where the weaker, correct one was already sitting in
+the same file: `backoffice.py`'s `Ledger` docstring called it "the
+exactly-once contract," `docs/DECISIONS.md` entry 46 called it "the same
+exactly-once promise the envelope already made," and entry 51 described
+reconciliation itself as something that reconciles "a failed delivery to
+exactly-once" — as if delivery were the thing becoming exactly-once, rather
+than posting.
+
+A full repo grep for "exactly-once" / "exactly once" found eighteen hits.
+Fifteen describe the observable outcome — the refund posts once, the ledger
+line is written once, a repeated push lands as one case — and that
+framing is accurate: it is what durable dedup on the idempotency key
+actually guarantees, and it is what a check drives end to end
+(`a_reconciled_delivery_posts_exactly_once_across_a_failure`). Those fifteen,
+including that test's own name, are unchanged. Only the three that named
+delivery itself — a contract, a promise, a thing reconciliation produces —
+were reworded, each to name what is actually true: delivery may repeat,
+durable dedup on the key is what makes the posting land once regardless.
+
+**Why.** Distributed-systems vocabulary is precise enough to be wrong in a
+specific, checkable way. "Exactly-once delivery" is a real term of art for a
+guarantee this system does not make and was never designed to make — the
+outbox retries, the receiver may see the same envelope more than once, and
+nothing here prevents that. What this system guarantees is idempotent
+*consumption*: however many times the same decision is delivered, it is
+posted once, because the key is derived from the decision itself and the
+receiver's ledger persists and dedups on it durably, across a restart. That
+distinction is not pedantry reserved for a systems-design interview — it is
+exactly the question a technically literate skeptic asks first, and an
+answer that says "exactly-once" without qualification does not survive the
+follow-up. The fix costs nothing structurally: the accurate framing was
+already written, once, correctly, in the one docstring whose whole job is
+to say what `reconcile()` actually promises. Everywhere else just needed to
+agree with it.
+
+**Rejected.** Rewriting all eighteen hits uniformly to "effectively once" or
+similar — most of them are already correct, and editing accurate prose to
+avoid re-deriving the classification would have hidden the one real
+distinction this entry exists to draw, between what the demo claims about
+posting and what it does not claim about delivery. Renaming
+`a_reconciled_delivery_posts_exactly_once_across_a_failure` or its docstring
+— the test's own name is posting language, correctly used, and a test name
+is not prose to be tightened; renaming it for no behavioral reason is a
+diff with no reader benefit. Touching the captured evidence file
+(`evidence/audit_trail.txt`) — its "exactly once across a failure" line is
+also posting language, correctly used, and it is a captured transcript with
+its own provenance discipline (entry 40); prose above a captured run gets
+corrected for accuracy, not tightened for its own sake.
+
+**Answers the question.** You cannot have exactly-once delivery in a system
+with retries and an at-least-once outbox — so which is it? Delivery is
+at-least-once. Consumption is idempotent. The refund posts exactly once
+because of the second property, never the first, and every surface in this
+repo now says so the same way `reconcile()` always did.
+
+**Lives in.** `envelope.py (reconcile docstring, the canonical wording)`,
+`backoffice.py (Ledger docstring)`, `docs/DECISIONS.md (entries 46 and 51)`
+
+## 56. A second deck, for a different audience, not a replacement
+
+**Decision.** `deck/build.js` still generates the five-slide technical deck
+— depth, tradeoffs, what broke in the original build, argued to an engineer
+who will check the claims. `deck/build-lean.js` is new: a four-slide deck
+for a customer-facing audience, built to spend words on value rather than
+mechanism. Same thesis, same boundary diagram, same palette — purple still
+means only the deterministic side, never decoration — reached in four
+slides instead of five, and a different fourth act: not "what I'd do next
+architecturally" but "what's already production-shaped, and what a pilot
+needs first."
+
+The palette constants are a deliberate, exact duplicate between the two
+files rather than a shared module. `build.js` already ships a tested,
+working artifact; making `build-lean.js` depend on it — or refactoring both
+onto a shared constants file — is a change to `build.js`'s own risk surface
+for a benefit (twenty duplicated lines saved) smaller than the cost (one
+build target's edit can now silently move the other one's slides). Two
+small, independently correct files beat one shared one that makes both
+decks a single point of failure.
+
+The third slide of the lean deck tells the v4.0.1 story (entries 52-54) at
+value level rather than mechanism level: a live demo found a real gap, zero
+refunds ever moved, the guard that closes it was confirmed against the live
+model five times. That fact was available before this deck existed, and it
+is stronger material for a customer-facing slide than either of the
+original build's two bugs — it is current, it is about the same hosted path
+a customer would actually run, and it demonstrates the operating discipline
+(catch it live, fix the root, verify against the real model, ship it) rather
+than only the architecture.
+
+**Why.** A deck arguing "prove you can trust an agent with money" to an
+engineer and a deck arguing the same claim to a business audience are not
+the same deck with slides removed — the engineer wants the tradeoffs named
+and the failure modes catalogued; the business audience wants the claim,
+one concrete moment that proves it, and an honest scoping conversation. Five
+slides of the former shown to the latter reads as more technical depth than
+the room asked for, which is the opposite of "dig out of the technical
+deliverable." Forcing one build script to serve both audiences with a flag
+or a config would have coupled two decks that should be free to diverge —
+the customer deck should be free to change its emphasis without a technical
+reviewer noticing a slide moved out from under them, and vice versa.
+
+**Rejected.** Replacing `build.js` outright — the five-slide deck is tied to
+a real, tagged release and its own DECISIONS entries; deleting it discards
+that provenance for an audience it was never written for. Leaving the lean
+deck as an artifact built outside the repo — a reviewer cloning the repo
+and finding a deck that does not match the one they were sent is exactly
+the kind of inconsistency this repo has otherwise been rigorous about
+avoiding, and the whole point of `docs/DECISIONS.md` is that nothing
+load-bearing lives outside it. A single parameterized build script
+generating both — more code, one shared risk surface, and a flag
+(`--lean`) standing in for what is actually two different arguments to two
+different audiences, which deserve to read as two files, not one file with
+a branch in it.
+
+**Answers the question.** Why do the deck and the demo not match what's
+being presented? They will now — the deck a customer-facing reviewer is
+sent matches a deck this repo can regenerate byte-for-byte from source, the
+same discipline `build.js` already held itself to.
+
+**Lives in.** `deck/build-lean.js`, `deck/package.json (build:lean)`,
+`deck/README.md`, `Bookly_Customer_Deck.pptx`

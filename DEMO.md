@@ -9,6 +9,55 @@ both questions with the same screen.
 
 ---
 
+## The nine-minute cut
+
+The full run of show below is still the reference — the same setup, the same
+console, the same claim. This is a shorter path through it for a
+customer-facing audience: the same nine ideas, none of the internals unless
+they're asked for. Each beat links to its long-form section for the detail
+underneath, so nothing here duplicates what's already written there.
+
+Setup is identical — §0, below.
+
+1. **Cold open, the one idea.** Before touching the keyboard: "the model
+   never decides, it only converses." Everything in the next nine minutes is
+   evidence for that one sentence, not nine separate points.
+2. **Customer view, an ordinary conversation.** §1. Ask about an order. The
+   point isn't the answer — it's that operator fields (lifetime value, CSAT)
+   aren't hidden by CSS in this view. They're not rendered. That's a claim
+   about the document, not the paint.
+3. **Operator view, the color rule, the trace.** §2. One line, said once:
+   grey is the model, purple is deterministic, the customer's own words are
+   neither. The whole rest of the demo reads itself off that rule.
+4. **The clarifying question.** §3. The agent asks which book, offering two
+   orders out of thirty-eight. The number that matters isn't a confidence
+   score — there isn't one. It's a count: how many orders could actually
+   take this write. One candidate proceeds; more than one asks.
+5. **The injection turn.** §4. Paste the injected instruction, watch the
+   refund come back at the real amount, then open the audit log and show the
+   injected text sitting there — verbatim, inert, never parsed. An attacker
+   can make the agent *say* things. Not *do* things.
+6. **Denial, escalation, override.** §5. A pressured customer doesn't flip a
+   verdict — it escalates to a human. Resolve it in the back office and show
+   the original denial still sitting there, unedited, above the resolution.
+   An override is a new event, never a rewrite.
+7. **The policy editor.** §7. Flip the same denial by authoring the return
+   window instead — validated, attributed, appended to a log the console
+   reads live. Name the distinction once: a business threshold is
+   authorable; the two floors that stop a confidently wrong answer stay in
+   code and take an engineer.
+8. **Kill it, then heal it.** §9. Stop the back office mid-conversation — the
+   agent still decides, still audits. Restart it and reconcile: the pending
+   refund posts. Say what's actually true, plainly: delivery is
+   at-least-once, re-delivery is expected, and the receiver's idempotency
+   key is what makes the *posting* happen exactly once regardless of how
+   many times it was attempted.
+9. **Close, back in customer view.** Land where you opened — an ordinary
+   conversation, nothing about it different from beat 2. The architecture
+   was the point; the product never looked like one.
+
+---
+
 ## 0. Before you start
 
 Two terminals, no dependencies, no API key.

@@ -42,6 +42,7 @@ secrets*
 
 # Deck QA render artifacts — the .pptx is the deliverable
 Bookly_Agent_Architecture.pdf
+Bookly_Customer_Deck.pdf
 slide-*.jpg
 
 # Deck build tooling only; the agent itself needs no packages

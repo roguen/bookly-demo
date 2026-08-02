@@ -98,8 +98,9 @@ class Ledger:
     executed a second time. This is what makes reconcile() safe: the sender may
     re-deliver an envelope it is unsure landed, and the receiver posts it once.
     It still records and displays rather than actually posting a refund to a
-    bank — that is the part still simulated — but the exactly-once contract is
-    now real, not a diagram.
+    bank — that is the part still simulated — but delivery here is real, not a
+    diagram: re-delivery is at-least-once, and durable dedup on the idempotency
+    key is what makes the posting happen exactly once regardless.
     """
 
     def __init__(self, now: Callable[[], str] = _utc_now) -> None:
