@@ -1016,6 +1016,13 @@ button.order:focus-visible::after {
   color: var(--muted);
 }
 
+.case-events .envelope-reason {
+  display: block;
+  font-family: var(--mono);
+  font-size: var(--step--2);
+  margin-top: 2px;
+}
+
 .event-action {
   font-weight: 700;
   color: #fff;

@@ -2218,6 +2218,44 @@ def a_repeated_escalation_is_one_case_not_two():
 
 
 @check
+def a_manager_request_on_an_open_case_keeps_both_reasons():
+    """Staying one case must not mean losing why the second push happened.
+
+    Reported live: a customer disputed a denial ("refund it anyway" —
+    ESCALATED_POLICY_DISPUTE), then asked for a manager
+    (ESCALATED_CUSTOMER_REQUEST). Both escalations share one idempotency key
+    — same conversation, same action, same order — so the case stays merged,
+    exactly as `a_repeated_escalation_is_one_case_not_two` says it should.
+    The bug was not the merge. It was that the second reason, though it was
+    always appended to `events` here, was never rendered — a reviewer
+    scanning the queue saw only the reason the case opened for and had no
+    way to learn a manager had been asked for at all.
+    """
+    with _Console() as console:
+        case = _escalated_console(console)
+        console.post(
+            "/api/turn",
+            {
+                "conversation_id": "conv-queue",
+                "text": "I want to speak to a manager.",
+            },
+        )
+        queue = console.get("/api/queue")
+    assert queue["counts"]["total"] == 1, queue["counts"]
+    merged = queue["cases"][0]
+    assert merged["case_id"] == case["case_id"]
+    # The case still opened for the dispute — that fact does not move.
+    assert merged["reason_code"] == "ESCALATED_POLICY_DISPUTE"
+    # And the manager ask is in the record as its own event, reason attached,
+    # not folded silently into a generic repeat.
+    reasons = [e.get("reason_code") for e in merged["events"]]
+    assert reasons == [
+        "ESCALATED_POLICY_DISPUTE",
+        "ESCALATED_CUSTOMER_REQUEST",
+    ], reasons
+
+
+@check
 def an_escalated_case_carries_who_what_and_the_background():
     """A reviewer should not have to go looking.
 

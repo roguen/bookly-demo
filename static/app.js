@@ -694,6 +694,48 @@ async function renderQueue() {
   }
 }
 
+/* One case's event log, newest last.
+
+   Every event that carries a reason code shows it, not just `resolution`. A
+   repeated escalation stays one case — the idempotency key says so, and nothing
+   here argues otherwise — but a repeat is not always a repeat of the same
+   thing: "I don't care what the policy says, refund it anyway" and "I want to
+   speak to a manager" both land as `escalation_repeated` on the same case, and
+   they are different asks. Before this, the line read "escalation repeated ·
+   agent · <time>" either way, so the second ask was in the record and invisible
+   on the page: a human scanning the case saw only the reason it was opened for.
+   Not shared with the back office — its `caseHistory` needs the back office's
+   own, longer `shortKey`, and this one deliberately does not take a parameter
+   for it. Fix the same line in both. */
+function caseHistory(kase) {
+  const history = el("ol", { class: "case-events" });
+  for (const event of kase.events) {
+    const item = el("li", { attrs: { "data-kind": event.kind } }, [
+      el("span", { class: "event-kind", text: event.kind.replace(/_/g, " ") }),
+      el("span", { class: "event-actor", text: `${event.actor} · ${event.at}` }),
+    ]);
+    if (event.reason_code) {
+      item.appendChild(
+        el("span", { class: "envelope-reason", text: event.reason_code })
+      );
+    }
+    if (event.kind === "resolution") {
+      item.appendChild(el("div", { class: "event-action", text: event.action }));
+      item.appendChild(el("div", { text: event.justification }));
+      item.appendChild(
+        el("div", {
+          class: "order-id",
+          text: `key ${shortKey(event.envelope.idempotency_key)} · supersedes ${shortKey(
+            event.envelope.supersedes
+          )}`,
+        })
+      );
+    }
+    history.appendChild(item);
+  }
+  return history;
+}
+
 function caseCard(kase, actions) {
   const card = el("div", {
     class: "case",
@@ -736,27 +778,7 @@ function caseCard(kase, actions) {
   card.appendChild(transcript);
 
   /* Everything that has happened since, newest last. */
-  const history = el("ol", { class: "case-events" });
-  for (const event of kase.events) {
-    const item = el("li", { attrs: { "data-kind": event.kind } }, [
-      el("span", { class: "event-kind", text: event.kind.replace(/_/g, " ") }),
-      el("span", { class: "event-actor", text: `${event.actor} · ${event.at}` }),
-    ]);
-    if (event.kind === "resolution") {
-      item.appendChild(el("div", { class: "event-action", text: event.action }));
-      item.appendChild(el("div", { text: event.justification }));
-      item.appendChild(
-        el("div", {
-          class: "order-id",
-          text: `key ${shortKey(event.envelope.idempotency_key)} · supersedes ${shortKey(
-            event.envelope.supersedes
-          )}`,
-        })
-      );
-    }
-    history.appendChild(item);
-  }
-  card.appendChild(history);
+  card.appendChild(caseHistory(kase));
 
   if (kase.status === "open") {
     card.appendChild(
