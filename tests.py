@@ -1343,6 +1343,58 @@ def a_coincidental_title_word_never_moves_money():
 
 
 @check
+def an_article_inside_a_title_does_not_drown_the_real_word():
+    """"The" is not a book title, but the customer still has to say it.
+
+    Before this guard, "the" scored as a distinctive word purely because it
+    was missing from the generic-word list. On this catalog 12 of 39 titles
+    contain "the", so naming a book by its title lost to the article: eleven
+    titles the customer never named scored `strong=True` right alongside the
+    one they did, the answer could never resolve to a single order, and the
+    customer's own title reference burned the clarify budget and escalated
+    instead of finding the book. Caught from a hosted-provider transcript
+    where "The Pragmatic Programmer" was said twice and never bound.
+    """
+    # The half that is data: "the" reads the same as "book" or "copy" now —
+    # present in a title, absent from what identifies one.
+    assert "the" in store_module.GENERIC_TITLE_WORDS
+
+    # And the behaviour, end to end: naming the book resolves in one turn
+    # instead of re-asking or escalating.
+    result = _fresh_agent("conv-article").handle_turn(
+        "I would like to return The Pragmatic Programmer"
+    )
+    assert (
+        "delivered on May 2, which is outside the 30-day return window"
+        in result.reply
+    ), result.reply
+    assert "which book" not in result.reply, result.reply
+    assert "escalated" not in result.reply, result.reply
+
+    # The trace shows why: BK-0987 is still judged strong on its own two
+    # distinctive words, with "the" contributing to the match but not to
+    # what makes it strong.
+    watched = ListRecorder()
+    Agent(RulesProvider(), "conv-article-trace", recorder=watched).handle_turn(
+        "I would like to return The Pragmatic Programmer"
+    )
+    judged = {
+        n.payload["order_id"]: n.payload
+        for n in watched.notes
+        if n.stage == "candidates" and n.payload.get("source") == "title_reference"
+    }
+    assert judged, [n.stage for n in watched.notes]
+    programmer = judged["BK-0987"]
+    assert "the" not in programmer["distinctive_words"], programmer
+    assert programmer["strong_enough_to_act"] is True
+    # No other order in the account should score strong on "the" alone.
+    for order_id, payload in judged.items():
+        if order_id == "BK-0987":
+            continue
+        assert payload["strong_enough_to_act"] is False, payload
+
+
+@check
 def the_rubric_catches_the_recorded_hosted_drift():
     """The rubric has to catch the drift that actually happened.
 
