@@ -1,7 +1,8 @@
 # Bookly — standing context
 
-A support agent for a fictional bookstore. `main` is at **v4.0.0** — the whole
-version-3 arc has landed and the release is cut.
+A support agent for a fictional bookstore. `main` is at **v4.0.1** — the whole
+version-3 arc has landed, the release is cut, and a bug-fix patch (four
+hosted-path defects, found and confirmed live) has landed on top of it.
 
 ## The claim, which does not change
 
@@ -31,21 +32,21 @@ imports an LLM. Every file either enforces that boundary or demonstrates it.
 
 ## Where the reasoning lives
 
-**`docs/DECISIONS.md` first** — 51 entries: the decision, the reasoning, the
+**`docs/DECISIONS.md` first** — 54 entries: the decision, the reasoning, the
 alternative rejected, where it is enforced, and the sceptic's question it
 answers. Several record a diagnosis that was **wrong** and later corrected;
 those are the valuable ones. Do not re-litigate anything in that file without
 reading its "Rejected" line.
 
 Then, in descending fidelity: the commit messages (long, deliberately), the
-38 closed GitHub issues (`gh issue view <n>` — they carry diagnosis and
+43 closed GitHub issues (`gh issue view <n>` — they carry diagnosis and
 corrections), the code docstrings, and `deck/build.js` speaker notes under
 IF ASKED.
 
 ## Verify before you change anything
 
 ```bash
-python3 tests.py          # expect 82 passed, 0 failed
+python3 tests.py          # expect 87 passed, 0 failed
 /usr/bin/python3 tests.py # 3.9.6 — must also be green
 python3 harness.py        # expect 9 transcripts passed
 ```
@@ -67,6 +68,12 @@ branch and sub-version, one item per branch, and all have landed:
 | `v3.4.0` | the orchestration layer becoming real | ✅ |
 | `v3.5.0` | full code review — simplicity, clarity, technical debt | ✅ |
 | `v4.0.0` | the release, cut once all of the above landed | ✅ |
+
+**`v4.0.1`** is a patch on top of the cut release: four defects a live demo
+found on the hosted path (issues #49, #50, #51/#52, #53 — decision #52),
+none of them a capability change, none of them touching `policy.py`. Not a
+row in the table above — it is not an item in the planned arc, it is a
+bug fix, and the table stays a record of what was planned.
 
 Any further work keeps the same workflow: branch `claude/bookly-vN.M-<topic>`,
 PR into `main`, merge with `--merge`, then tag. Embeddings for retrieval remain
