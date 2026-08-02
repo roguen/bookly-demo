@@ -624,13 +624,25 @@ bookstore. Split the turn into requests at conjunctions and sentence breaks.
 For each request report: intent (one of "order_status" for one specific
 order, "order_history" for a question about the account as a whole — how many
 orders, what they have bought, their order history — "agent_identity" for who
-or what you are, "refund_status" for a question about a refund that already
-exists rather than a request for a new one, "return_request",
-"policy_question", "human_handoff", "out_of_scope", or null), order_id (format
-BK-0000, or null), title_words
-(words from the customer's own order titles listed below that the request
-refers to), option_number (if the request answers a numbered choice, else
-null), and text (the request verbatim).
+or what you are, "refund_status", "return_request", "policy_question",
+"human_handoff", "out_of_scope", or null), order_id (format BK-0000, or
+null), title_words (words from the customer's own order titles listed below
+that the request refers to), option_number (if the request answers a
+numbered choice, else null), and text (the request verbatim).
+
+"refund_status" and "return_request" are easy to cross because both mention
+money and both can contain the word "refund" — the test is whether the
+customer is asking about money that already moved or demanding money move.
+Use "refund_status" only for a question about a refund the agent already
+granted — "where's my refund", "has it come through yet", "how long does it
+take". Use "return_request" for anything that asks the agent to send a book
+back or issue a refund, including a customer disputing a denial they were
+just given: "refund it anyway", "I don't care what the policy says, just
+refund me", and "give me my money back" are all "return_request", never
+"refund_status" — nothing has been granted yet, so there is no status to ask
+about. If the turn follows a decision the agent just denied, read a renewed
+demand for money as "return_request", not as a question about one already
+issued.
 
 Use "out_of_scope" for a genuine request this bookstore's support does not
 cover — anything that is not about an order, a return, a refund, shipping or

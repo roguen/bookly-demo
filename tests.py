@@ -500,6 +500,39 @@ def extraction_finds_intent_and_order_id():
     )
 
 
+@check
+def disputing_a_denial_is_a_return_request_not_a_refund_question():
+    """"Refund" appears in both intents; the demand/question line is what
+    tells them apart, and it is easy to get backwards.
+
+    Reported live on the hosted path: after a return was correctly denied,
+    "I don't care what the policy says, refund it anyway" extracted as
+    refund_status — a question about a refund that already exists — so
+    policy was never consulted and the dispute-escalation branch
+    (`escalate_if_disputed`, DENIALS_BEFORE_ESCALATION) never ran. Nothing
+    downstream misbehaved; the turn just never reached it.
+
+    Nothing has been granted at the point any of these are said. Each is a
+    renewed demand, so each has to read as return_request — the rules
+    provider is the oracle EXTRACTION_SYSTEM_PROMPT is written to match, and
+    this pins its half of that contract, offline and every run.
+    """
+    for dispute in (
+        "I don't care what the policy says, refund it anyway.",
+        "I don't care, just refund me.",
+        "Give me my money back anyway.",
+    ):
+        requests = RulesProvider().extract(dispute, _extraction_context())
+        assert requests and requests[0].intent == "return_request", (
+            dispute, requests
+        )
+    # The genuine question this intent exists for still reads as one.
+    status = RulesProvider().extract(
+        "Has my refund come through yet?", _extraction_context()
+    )
+    assert status and status[0].intent == "refund_status", status
+
+
 # --- conversation-level checks -------------------------------------------
 
 
