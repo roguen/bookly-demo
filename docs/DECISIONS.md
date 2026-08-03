@@ -2276,3 +2276,78 @@ same discipline `build.js` already held itself to.
 
 **Lives in.** `deck/build-lean.js`, `deck/package.json (build:lean)`,
 `deck/README.md`, `Bookly_Customer_Deck.pptx`
+
+## 57. The Reset button, and the class of bug the checks could not see
+
+**Decision.** Three fixes, one root discipline. `Api.reset` passes `{}` so
+the call is a POST, matching `/api/reconcile`, which already did this and
+already knew why. The Reset click handler gained the `try`/`catch`/`notify`
+every other async handler in the build already had, and clears local state
+only after the server confirms. And the request body is now taken off the
+socket once in `web.py`'s `_route`, before dispatch, rather than by each
+handler choosing to read it.
+
+The three are recorded as one entry because they are one incident: a button
+that did nothing, the silence that made it hard to diagnose, and the framing
+bug that the first fix exposed.
+
+**Why.** `api()` derives its verb from its arguments — a body means POST, no
+body means the `fetch` default, GET. `/api/reset` was declared with no body,
+so the button issued `GET /api/reset` at a route registered POST-only, took a
+404, and abandoned the rest of the handler. It was the only mutating endpoint
+in `Api` called without a body.
+
+Fixing the verb then exposed something older. This console speaks HTTP/1.1, so
+a browser sends the next request down the same socket. A handler that never
+reads its request body leaves those bytes there; the server parses them as the
+next request line and answers 501 to a request that was fine. **The symptom
+lands one call after the cause** — Reset visibly worked, and then
+`/api/provider` returned an HTML error page, reported as "returned something
+that was not JSON." Only four handlers read a body. `/api/reset` never did,
+and neither did `/api/reconcile`, which has been shipping that way since
+v3.4.0 and was simply never clicked twice on one connection.
+
+The fix is not to teach two handlers to read a body they do not want; that
+leaves the trap armed for the next endpoint. Draining in `_route` covers the
+404 and 421 paths too, where there is no handler to be disciplined.
+
+**The correction worth recording.** The reason none of this was caught is not
+that nobody wrote a check — it is that every check drove the API with
+`urllib`, which opens a fresh connection per call and closes it. The stale
+bytes went out with the socket. `curl` behaves identically, which is why the
+first reproduction of the reset bug looked clean at the HTTP level while a
+browser broke immediately. **The bug existed only under connection reuse, and
+nothing in the suite reused a connection.** That is a statement about the
+shape of the test harness, not about anyone's diligence, and it is the part of
+this incident worth remembering: a check that cannot enter the state where a
+defect lives will pass forever and prove nothing.
+
+Each fix was verified by reverting it and watching its check go red, rather
+than by observing green after the change.
+
+**Rejected.** Registering `/api/reset` under GET as well — it mutates state,
+rotates the audit log, and a GET that changes the world is the thing every
+other route here avoids. Teaching `/api/reset` and `/api/reconcile` to call
+`_body()` individually — correct for those two, silent for the third one
+somebody adds. Sharing the console's handler with the back office's so the
+drain covers both — the back office was checked and is already clean, and the
+two handlers are deliberately separate for the same reason `static/app.js` and
+`static/backoffice.js` do not share a `caseHistory` (entry 52). Bundling the
+error surfacing into the first fix — the fix is one line and the surfacing is
+a behaviour change to the failure path; they are separate decisions and the
+history reads better with them apart.
+
+**Answers the question.** "Your suite is green, so how did a dead button ship?"
+Because green means every check passed, not that the checks covered the state
+the defect lives in. Three checks now exist that did not: one asserting the
+client's verbs match the server's routes, one asserting every async handler
+surfaces its failure, and one that deliberately reuses a single connection
+across two requests because that is the only condition under which the
+framing bug is observable.
+
+**Lives in.** `static/app.js` (`Api.reset`, the Reset handler), `web.py`
+(`_route`, `_read_body`, `_body`), and the checks
+`client_api_calls_use_a_method_the_server_routes`,
+`every_async_handler_surfaces_its_failure`,
+`a_post_body_never_desyncs_a_reused_connection`. Issues #57 and #60, PRs #58,
+#59 and #61.

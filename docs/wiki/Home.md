@@ -117,7 +117,7 @@ the suite, so a fix has to delete its own excuse.
 
 ---
 
-## The version-3 arc, `v4.0.0`, and `v4.0.1`
+## The version-3 arc, `v4.0.0`, `v4.0.1`, and `v4.0.2`
 
 Phase 3 shipped as `v3.0.0`, then was refined across five sub-versions — each its
 own branch, PR, and tag, and each holding the claim: the model never decides, and
@@ -152,6 +152,26 @@ hallucinate an approved refund five times out of five. All four are fixed at
 their actual root, all four confirmed against the live model rather than
 asserted from the fix, and none of them touched `policy.py` or changed an
 envelope field.
+
+**`v4.0.2`** is the second bug-fix patch, and the more instructive one. The
+console's **Reset** button did nothing: the client derives its HTTP verb from
+whether a body was passed, `Api.reset` passed none, so it sent GET at a route
+registered POST-only and took a 404 the handler never surfaced. Fixing the verb
+then exposed something older — this console speaks HTTP/1.1, so the browser
+reuses one socket, and a POST handler that never reads its request body leaves
+those bytes to be parsed as the next request line. The failure therefore lands
+*one call after* the cause: Reset visibly worked, and then the following request
+came back as an HTML 501. `/api/reconcile` had carried the same defect since
+v3.4.0 and had simply never been clicked twice on one connection.
+
+The lesson is about the harness, not the bug. Every check drove the API with
+`urllib`, which opens a fresh connection per call — as does `curl` — so the
+stale bytes went out with the socket and the defect was unobservable. It exists
+only under connection reuse, and nothing in the suite reused a connection. A
+check that cannot enter the state where a defect lives passes forever and proves
+nothing. Three checks now cover it, each verified by reverting its fix and
+watching it go red. Client and web-layer only: `policy.py` untouched, and every
+envelope field in the demo scenarios byte-identical to v4.0.1.
 
 ---
 
