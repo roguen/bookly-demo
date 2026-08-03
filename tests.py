@@ -1595,7 +1595,7 @@ def the_regression_run_installs_nothing():
     except a README. So the absence is asserted rather than trusted, and the
     interpreters the docs promise are asserted to actually be in the matrix:
     dropping 3.9 from CI while README still says 3.9 is the same class of
-    drift as DEMO.md saying forty-five.
+    drift as a run of show saying forty-five.
     """
     workflow = pathlib.Path(".github/workflows/checks.yml")
     assert workflow.exists(), "no regression run is configured"
@@ -3097,8 +3097,8 @@ def the_stub_receiver_is_untouched():
 # count is a fact about this file, and a document holding its own copy of it
 # is a document that will eventually disagree with the suite — the same
 # argument `policy_constants_surface_matches_policy` makes about thresholds,
-# with a slower fuse. DEMO.md drifted to forty-five while the suite ran fifty,
-# and nothing caught it because nothing was looking.
+# with a slower fuse. The run of show once drifted to forty-five while the
+# suite ran fifty, and nothing caught it because nothing was looking.
 #
 # This tuple is the centralisation. The number itself lives in exactly one
 # place — len(CHECKS) — and every claim about it is checked against that.
@@ -3106,7 +3106,6 @@ def the_stub_receiver_is_untouched():
 DOCUMENTS_CITING_THE_COUNT = (
     "README.md",
     "READING_GUIDE.md",
-    "DEMO.md",
     "docs/wiki/Home.md",
     "deck/build.js",
 )

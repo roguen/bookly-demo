@@ -134,7 +134,7 @@ setup surfaces at the button rather than on the next customer turn. Selecting
 a hosted provider with no key leaves the stand-in running and says so.
 
 **Replay** plays a scripted conversation into the real interface through the
-real API. Nothing is pre-recorded. `DEMO.md` is the run of show.
+real API. Nothing is pre-recorded.
 
 ### The back office
 
@@ -391,7 +391,6 @@ to drift and no place for a vendor to introduce a decision.
 | `demo.txt`            | the four scripted scenarios                         |
 | `profiles/bookly.json`| the dataset, so a re-skin is a data edit            |
 | `docs/DECISIONS.md`   | why the repo is the way it is, with what was rejected|
-| `DEMO.md`             | the run of show                                     |
 
 ## Assumptions and limits
 
