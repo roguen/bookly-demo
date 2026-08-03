@@ -49,7 +49,7 @@ BOOKLY_WEBHOOK_URL=http://127.0.0.1:8787/webhook python3 web.py  # terminal 2
 ```bash
 python3 app.py                     # a live session
 python3 app.py --script demo.txt   # four scripted scenarios
-python3 tests.py                   # 90 checks, no pytest
+python3 tests.py                   # 91 checks, no pytest
 python3 harness.py                 # the golden transcripts, and the rubric
 ```
 
