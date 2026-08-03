@@ -1883,6 +1883,64 @@ def web_layer_emits_identical_envelopes():
 
 
 @check
+def client_api_calls_use_a_method_the_server_routes():
+    """Every `/api/...` call the client makes reaches a route that exists.
+
+    `api()` in static/app.js derives the verb from its arguments: a body means
+    POST, no body means the fetch default, GET. The server routes each path
+    under one method and 404s the other. Nothing connected those two facts, so
+    `reset: () => api("/api/reset")` shipped sending GET at a POST-only route —
+    the console's Reset button issued one 404 and silently did nothing (#57).
+
+    This drives each literal call site with the verb the client would actually
+    send and asserts the router recognises it. A 400 from a deliberately empty
+    payload is fine and still proves the route is there; a 404 is the defect.
+    """
+    source = open("static/app.js", "r", encoding="utf-8").read()
+    # Literal paths only. `resolve` builds its path from a template literal and
+    # `checks()` bypasses api() for the streaming reader; both are exercised by
+    # their own checks, and matching them here would mean parsing JS properly.
+    call_sites = re.findall(r'\bapi\(\s*"(/api/[a-z/]+)"\s*(,?)', source)
+    assert call_sites, "no api() call sites found — did the client move?"
+    paths = {path: bool(comma) for path, comma in call_sites}
+    # The endpoints the console actually drives, so a silent rename fails here
+    # rather than in front of an audience.
+    for expected in ("/api/reset", "/api/reconcile", "/api/turn"):
+        assert expected in paths, (expected, sorted(paths))
+
+    # POSTing /api/reset rotates the audit trail. The suite redirects the
+    # outbox and ledger at import but not this one, so pin it to a temp file
+    # and restore — a check must never move the log a demo is about to show.
+    saved_audit = os.environ.get(envelope_module.AUDIT_PATH_ENV_VAR)
+    scratch = tempfile.mkdtemp(prefix="bookly-verbs-")
+    os.environ[envelope_module.AUDIT_PATH_ENV_VAR] = os.path.join(
+        scratch, "audit.log"
+    )
+    try:
+        with _Console() as console:
+            for path, has_body in sorted(paths.items()):
+                request = urllib.request.Request(
+                    console.base + path,
+                    data=b"{}" if has_body else None,
+                    headers={"Content-Type": "application/json"},
+                    method="POST" if has_body else "GET",
+                )
+                try:
+                    status = urllib.request.urlopen(request, timeout=20).status
+                except urllib.error.HTTPError as error:
+                    status = error.code
+                assert status != 404, (
+                    "%s is called as %s but the server does not route that verb"
+                    % (path, "POST" if has_body else "GET")
+                )
+    finally:
+        os.environ.pop(envelope_module.AUDIT_PATH_ENV_VAR, None)
+        if saved_audit is not None:
+            os.environ[envelope_module.AUDIT_PATH_ENV_VAR] = saved_audit
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+@check
 def policy_constants_surface_matches_policy():
     """Every threshold the interface shows is read from policy.py over the
     API. An interface holding its own copy of "30" is an interface that will
