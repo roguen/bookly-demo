@@ -852,7 +852,7 @@
     {
       "id": "hero",
       "title": "Hero sequence — the whole argument in one conversation",
-      "note": "Five turns, in this order on purpose: a read, a clarifying question the agent chooses to ask, an injected instruction that changes nothing, a denial with a reason code, and a human handoff. Documented as section 6 of DEMO.md. Edit here, not in code — the console reads this over /api/scenarios.",
+      "note": "Five turns, in this order on purpose: a read, a clarifying question the agent chooses to ask, an injected instruction that changes nothing, a denial with a reason code, and a human handoff. Edit here, not in code — the console reads this over /api/scenarios.",
       "turns": [
         "Where's my Dune order?",
         "I'd like to return a book.",

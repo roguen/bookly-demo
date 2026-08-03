@@ -48,3 +48,8 @@ slide-*.jpg
 # Deck build tooling only; the agent itself needs no packages
 node_modules/
 package-lock.json
+
+# Generated decks. Build tooling in deck/ regenerates both; the .pptx is an
+# output, not a source, and a binary in a diff is noise.
+Bookly_Agent_Architecture.pptx
+Bookly_Customer_Deck.pptx
