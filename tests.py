@@ -3115,7 +3115,7 @@ DOCUMENTS_CITING_THE_COUNT = (
 # are three spellings of one fact, and standardising on one form is what makes
 # drift mechanically detectable rather than a thing you have to notice. The
 # numeral must sit immediately before "check"/"checks", with at most one
-# adjective between them, so a version string like "3.9.6" in the same
+# adjective between them, so a version string like "3.13.2" in the same
 # sentence is not mistaken for a count.
 #
 # The adjective slot needs a guard. "phase 3 the check count is enforced" is a
