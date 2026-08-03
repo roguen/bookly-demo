@@ -10,6 +10,7 @@ harness lives.
 from __future__ import annotations
 
 import contextlib
+import http.client
 import json
 import os
 import pathlib
@@ -1880,6 +1881,187 @@ def web_layer_emits_identical_envelopes():
                 assert {n["side"] for n in over_http["trace"]} <= {
                     recorder.MODEL, recorder.DETERMINISTIC
                 }
+
+
+@check
+def a_post_body_never_desyncs_a_reused_connection():
+    """A POST body must be consumed even by a handler that does not want it.
+
+    The console speaks HTTP/1.1, so a browser sends the next request down the
+    same socket. A handler that never reads its body leaves those bytes there;
+    the server parses them as the next request line and answers 501 to a
+    request that was fine. The failure lands on the *following* call, which is
+    why #60 presented as "/api/provider returned something that was not JSON"
+    seconds after a Reset that had visibly worked.
+
+    Every check before this one drove the API with urllib, which opens a fresh
+    connection per call and closes it — the stale bytes went out with the
+    socket and the bug was invisible. curl behaves the same way. So this one
+    deliberately reuses a single connection across two requests, because that
+    is the only condition under which the defect exists.
+    """
+    saved_audit = os.environ.get(envelope_module.AUDIT_PATH_ENV_VAR)
+    scratch = tempfile.mkdtemp(prefix="bookly-desync-")
+    os.environ[envelope_module.AUDIT_PATH_ENV_VAR] = os.path.join(
+        scratch, "audit.log"
+    )
+    # Every POST the console's client sends with a body, including the two that
+    # ignored it. An unrouted path is in here too: the 404 branch answers before
+    # any handler exists, so it has to drain the body itself or the next request
+    # pays for it.
+    posts = (
+        ("/api/reset", {}),
+        ("/api/reconcile", {}),
+        ("/api/conversation/restart", {"conversation_id": "conv-desync"}),
+        ("/api/turn", {"conversation_id": "conv-desync", "text": "Hello?"}),
+        ("/api/no-such-route", {"padding": "x" * 200}),
+    )
+    try:
+        with _Console() as console:
+            host, port = console.server.server_address[:2]
+            for path, payload in posts:
+                connection = http.client.HTTPConnection(host, port, timeout=20)
+                try:
+                    connection.request(
+                        "POST",
+                        path,
+                        body=json.dumps(payload).encode("utf-8"),
+                        headers={"Content-Type": "application/json"},
+                    )
+                    connection.getresponse().read()
+                    # The same socket, deliberately. A fresh one would pass
+                    # even with the bug present.
+                    connection.request(
+                        "GET",
+                        "/api/provider",
+                        headers={"Content-Type": "application/json"},
+                    )
+                    following = connection.getresponse()
+                    text = following.read().decode("utf-8")
+                    assert following.status == 200, (
+                        "after POST %s the next request on the same connection "
+                        "returned %d — the body was left on the socket"
+                        % (path, following.status)
+                    )
+                    assert json.loads(text)["active"], (path, text[:80])
+                except http.client.HTTPException as error:
+                    raise AssertionError(
+                        "after POST %s the connection was unusable: %s"
+                        % (path, error)
+                    )
+                finally:
+                    connection.close()
+    finally:
+        os.environ.pop(envelope_module.AUDIT_PATH_ENV_VAR, None)
+        if saved_audit is not None:
+            os.environ[envelope_module.AUDIT_PATH_ENV_VAR] = saved_audit
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+@check
+def every_async_handler_surfaces_its_failure():
+    """An async click or submit handler that can reject must say so on screen.
+
+    An awaited call that rejects abandons the rest of the handler silently:
+    the browser logs an unhandled rejection nobody is watching and the button
+    reads as doing nothing. That is exactly how the dead Reset button (#57)
+    presented — the failure was invisible, so the diagnosis started from
+    "nothing happens" instead of from a 404.
+
+    Every handler in the build already surfaced its failure through notify();
+    Reset was the single exception. This keeps it that way by construction,
+    for both clients, rather than by everyone remembering.
+    """
+    opener = re.compile(r'addEventListener\(\s*"(?:click|submit)"\s*,\s*async')
+    checked = 0
+    for name in ("static/app.js", "static/backoffice.js"):
+        source = pathlib.Path(name).read_text(encoding="utf-8")
+        for match in opener.finditer(source):
+            start = source.index("{", match.end())
+            depth, index = 0, start
+            while index < len(source):
+                if source[index] == "{":
+                    depth += 1
+                elif source[index] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                index += 1
+            assert depth == 0, (
+                "%s: could not find the end of the handler at offset %d"
+                % (name, match.start())
+            )
+            body = source[start:index]
+            line = source.count("\n", 0, match.start()) + 1
+            assert "catch" in body, (
+                "%s:%d an async handler awaits without surfacing a failure; "
+                "wrap it and notify(String(error)) the way the others do"
+                % (name, line)
+            )
+            checked += 1
+    # A rename that stopped matching would make this quietly vacuous. Five
+    # today: the resolution form, the checks runner, Reconcile and Reset in
+    # the console, and the back office's policy form. The composer's submit
+    # is deliberately not async — it delegates to send(), which catches.
+    assert checked >= 5, checked
+
+
+@check
+def client_api_calls_use_a_method_the_server_routes():
+    """Every `/api/...` call the client makes reaches a route that exists.
+
+    `api()` in static/app.js derives the verb from its arguments: a body means
+    POST, no body means the fetch default, GET. The server routes each path
+    under one method and 404s the other. Nothing connected those two facts, so
+    `reset: () => api("/api/reset")` shipped sending GET at a POST-only route —
+    the console's Reset button issued one 404 and silently did nothing (#57).
+
+    This drives each literal call site with the verb the client would actually
+    send and asserts the router recognises it. A 400 from a deliberately empty
+    payload is fine and still proves the route is there; a 404 is the defect.
+    """
+    source = open("static/app.js", "r", encoding="utf-8").read()
+    # Literal paths only. `resolve` builds its path from a template literal and
+    # `checks()` bypasses api() for the streaming reader; both are exercised by
+    # their own checks, and matching them here would mean parsing JS properly.
+    call_sites = re.findall(r'\bapi\(\s*"(/api/[a-z/]+)"\s*(,?)', source)
+    assert call_sites, "no api() call sites found — did the client move?"
+    paths = {path: bool(comma) for path, comma in call_sites}
+    # The endpoints the console actually drives, so a silent rename fails here
+    # rather than in front of an audience.
+    for expected in ("/api/reset", "/api/reconcile", "/api/turn"):
+        assert expected in paths, (expected, sorted(paths))
+
+    # POSTing /api/reset rotates the audit trail. The suite redirects the
+    # outbox and ledger at import but not this one, so pin it to a temp file
+    # and restore — a check must never move the log a demo is about to show.
+    saved_audit = os.environ.get(envelope_module.AUDIT_PATH_ENV_VAR)
+    scratch = tempfile.mkdtemp(prefix="bookly-verbs-")
+    os.environ[envelope_module.AUDIT_PATH_ENV_VAR] = os.path.join(
+        scratch, "audit.log"
+    )
+    try:
+        with _Console() as console:
+            for path, has_body in sorted(paths.items()):
+                request = urllib.request.Request(
+                    console.base + path,
+                    data=b"{}" if has_body else None,
+                    headers={"Content-Type": "application/json"},
+                    method="POST" if has_body else "GET",
+                )
+                try:
+                    status = urllib.request.urlopen(request, timeout=20).status
+                except urllib.error.HTTPError as error:
+                    status = error.code
+                assert status != 404, (
+                    "%s is called as %s but the server does not route that verb"
+                    % (path, "POST" if has_body else "GET")
+                )
+    finally:
+        os.environ.pop(envelope_module.AUDIT_PATH_ENV_VAR, None)
+        if saved_audit is not None:
+            os.environ[envelope_module.AUDIT_PATH_ENV_VAR] = saved_audit
+        shutil.rmtree(scratch, ignore_errors=True)
 
 
 @check

@@ -55,7 +55,11 @@ export const Api = {
   resolve: (caseId, body) => api(`/api/queue/${caseId}/resolve`, body),
   turn: (conversationId, text) =>
     api("/api/turn", { conversation_id: conversationId, text }),
-  reset: () => api("/api/reset"),
+  /* The empty object is load-bearing, exactly as it is on `reconcile` below:
+     `api()` sends GET unless it is given a body, and both of these routes are
+     registered POST-only. Dropping it makes the call a GET, the server 404s,
+     and the button silently does nothing. */
+  reset: () => api("/api/reset", {}),
   restart: (conversationId) =>
     api("/api/conversation/restart", { conversation_id: conversationId }),
   outbox: () => api("/api/outbox"),
@@ -1362,23 +1366,41 @@ async function boot() {
   for (const button of document.querySelectorAll(".mobilebar [data-region]")) {
     button.addEventListener("click", () => setRegion(button.dataset.region));
   }
-  document.getElementById("reset").addEventListener("click", async () => {
-    state.replaying = false;
-    dom.replayPanel.hidden = true;
-    await Api.reset();
-    state.messages = [];
-    state.trace = [];
-    state.envelopes = [];
-    state.conversationId = FREE_CONVERSATION_ID;
-    renderMessages();
-    renderTrace(false);
-    state.provider = await Api.provider();
-    state.providerOpen = false;
-    renderProvider();
-    renderProviderPanel();
-    if (state.tab === "audit") renderAudit();
-    notify(null);
-    refreshOutbox();
+  const resetButton = document.getElementById("reset");
+  /* Every other async handler in this build surfaces its own failure — send,
+     reconcile, replay, the resolution form, the back office's policy form.
+     This one did not, which is the reason #57 read as a dead button rather
+     than an error: the call rejected, the handler abandoned the rest of its
+     body, and nothing said so.
+
+     The local state is cleared only after the server has confirmed. A reset
+     that fails now leaves the screen honest — still showing the conversation
+     the server is still holding — rather than a blank transcript the server
+     disagrees with, which is the worse of the two failures to demo. */
+  resetButton.addEventListener("click", async () => {
+    resetButton.disabled = true;
+    try {
+      await Api.reset();
+      state.replaying = false;
+      dom.replayPanel.hidden = true;
+      state.messages = [];
+      state.trace = [];
+      state.envelopes = [];
+      state.conversationId = FREE_CONVERSATION_ID;
+      renderMessages();
+      renderTrace(false);
+      state.provider = await Api.provider();
+      state.providerOpen = false;
+      renderProvider();
+      renderProviderPanel();
+      if (state.tab === "audit") await renderAudit();
+      notify(null);
+    } catch (error) {
+      notify(String(error));
+    } finally {
+      resetButton.disabled = false;
+      refreshOutbox();
+    }
   });
   document.getElementById("replay").addEventListener("click", toggleReplay);
 
