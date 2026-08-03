@@ -47,10 +47,13 @@ IF ASKED.
 ## Verify before you change anything
 
 ```bash
-python3 tests.py          # expect 90 passed, 0 failed
-/usr/bin/python3 tests.py # 3.9.6 — must also be green
-python3 harness.py        # expect 9 transcripts passed
+python3 tests.py     # expect 90 passed, 0 failed
+python3 harness.py   # expect 9 transcripts passed
 ```
+
+The suite must also be green on the **oldest supported interpreter, 3.9** —
+run it there however your setup provides one. CI proves 3.9, 3.13 and 3.14 on
+every push, so a local 3.9 run is the fast signal, never the only one.
 
 `python3 tests.py --count` prints the check count. Adding a check changes a
 number five documents cite; `documents_state_the_actual_check_count` names
@@ -107,7 +110,7 @@ be opt-in like the hosted model.
 
 ## Done means, every time
 
-Checks green on 3.9.6 and 3.13+, CI green on all four jobs, every envelope
+Checks green on 3.9 and 3.13+, CI green on all four jobs, every envelope
 field in the demo scenarios unchanged against the previous tag, a clean clone
 still boots with no dependencies, `docs/DECISIONS.md` extended with whatever
 was decided, and `docs/wiki/Home.md` updated and published via the recipe in
