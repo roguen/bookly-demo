@@ -21,18 +21,40 @@ confined to where being wrong is only cosmetic.
 
 ## Run it
 
-No dependencies. No API key. Python 3.9 or later.
+No dependencies. No API key. No build step. Python 3.9 or later. Every path
+below runs the **same agent** through the same `handle_turn` — the interface
+changes, the decisions do not.
+
+**The console — start here.** A local web console, and the best way to see the
+argument. It opens looking like an ordinary support chat; one click splits the
+screen down the middle, language on one side and decisions on the other, with
+the trace, audit log, escalation queue and check suite all live.
 
 ```bash
-python3 app.py --script demo.txt   # four scripted scenarios, in a terminal
-python3 tests.py                   # 90 checks, no pytest
-python3 harness.py                 # the golden transcripts, and the rubric
-python3 web.py                     # the console, 127.0.0.1:8000
-python3 backoffice.py              # the executing side, 127.0.0.1:8787
+python3 web.py     # http://127.0.0.1:8000
 ```
 
-Nothing above installs anything, reaches the network, or needs a build step.
-A hosted model is opt-in. The demo works on a plane.
+**With the back office**, the executing side runs as a second process — a refund
+ledger, an agent desk, a policy editor. Two processes on purpose: the agent
+claims to *emit* actions rather than execute them, which is only demonstrable if
+the receiver can be killed independently. The console runs fine without it.
+
+```bash
+python3 backoffice.py                                            # terminal 1
+BOOKLY_WEBHOOK_URL=http://127.0.0.1:8787/webhook python3 web.py  # terminal 2
+```
+
+**Or no browser at all.**
+
+```bash
+python3 app.py                     # a live session
+python3 app.py --script demo.txt   # four scripted scenarios
+python3 tests.py                   # 90 checks, no pytest
+python3 harness.py                 # the golden transcripts, and the rubric
+```
+
+Nothing above installs anything or reaches the network. A hosted model is
+opt-in. The demo works on a plane.
 
 ---
 

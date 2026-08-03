@@ -9,24 +9,50 @@ structured slots) and narration (structured decision → English). Eligibility,
 escalation, disambiguation and amounts are computed in `policy.py`, which never
 imports an LLM.
 
-## Quickstart
+## Three ways to run it
 
-No dependencies, no API key, Python 3.9 or later.
+No dependencies, no API key, no build step. Python 3.9 or later. All three run
+the **same agent** through the same `handle_turn` — the interface changes, the
+decisions do not.
 
-```bash
-python3 app.py --script demo.txt
-```
-
-Four scenarios: an order lookup with a follow-up answered from memory; a return
-where the agent asks which book before acting; two policy questions, one
-answered and one where retrieval fails closed rather than serving the nearest
-article; and an out-of-window denial where pressure to override escalates to a
-human instead of flipping the verdict.
+### 1. The console — start here
 
 ```bash
-python3 app.py     # a live session
-python3 web.py     # the console, at http://127.0.0.1:8000
+python3 web.py     # http://127.0.0.1:8000
 ```
+
+A local web console, and the best way to see the argument. It opens in
+**customer view**, looking like an ordinary support chat; one click switches to
+**operator view**, which splits the screen down the middle — language on one
+side, decisions on the other — and shows the trace, the audit log, the
+escalation queue, and the check suite streaming live. Vanilla JS, one
+stylesheet, no bundler.
+
+### 2. The console with the back office
+
+```bash
+python3 backoffice.py                                            # terminal 1
+BOOKLY_WEBHOOK_URL=http://127.0.0.1:8787/webhook python3 web.py  # terminal 2
+```
+
+Adds the executing side on `127.0.0.1:8787` — a refund ledger, an agent desk,
+and a policy editor. Two processes, because the agent claims to *emit* actions
+rather than execute them, and that is only demonstrable if the receiver can be
+killed independently. The console runs fine without it; envelopes simply record
+`failed_unreachable` instead of being delivered.
+
+### 3. The CLI
+
+```bash
+python3 app.py                     # a live session
+python3 app.py --script demo.txt   # four scripted scenarios
+```
+
+No browser, same decisions. The scripted run walks an order lookup with a
+follow-up answered from memory; a return where the agent asks which book before
+acting; two policy questions, one answered and one where retrieval fails closed
+rather than serving the nearest article; and an out-of-window denial where
+pressure to override escalates to a human instead of flipping the verdict.
 
 ## Verifying the claim
 
@@ -52,15 +78,12 @@ cannot become deciding.
 
 CI runs all of it on Python 3.9, 3.13 and 3.14, plus a clean-clone boot.
 
-## The console
+## Inside the console
 
-`python3 web.py` opens a local console — the same agent, made legible to
-someone who will not read `policy.py`.
-
-The layout is the argument. A line runs down the middle: language on one side,
-decisions on the other. **Every element is coloured by which side produced
-it** — model output grey, deterministic output purple, the customer's own words
-neither. One rule, no exceptions.
+The layout is the argument. In operator view a line runs down the middle:
+language on one side, decisions on the other. **Every element is coloured by
+which side produced it** — model output grey, deterministic output purple, the
+customer's own words neither. One rule, no exceptions.
 
 | Surface | What it shows |
 | --- | --- |
@@ -71,23 +94,15 @@ neither. One rule, no exceptions.
 | Queue | escalated cases and the append-only resolution record |
 | Checks | `tests.py`, streamed, plus a provider parity view |
 
-It opens in **customer view**, showing only what a shopper sees. Lifetime value
-and CSAT are not hidden by CSS there — they are not rendered.
+Customer view is not the same screen with fields hidden. Lifetime value, CSAT
+and reason codes are **not rendered** there at all — a claim about the document,
+not about the paint.
 
-**The back office** runs as a second process on a second port:
-
-```bash
-python3 backoffice.py
-BOOKLY_WEBHOOK_URL=http://127.0.0.1:8787/webhook python3 web.py
-```
-
-A refund ledger, an agent desk, and a policy editor where a non-engineer
-authors the CX thresholds — validated, attributed, append-only, read live by
-the console. The separation is the argument rather than packaging: the agent
-claims to *emit* actions rather than execute them, and if the receiver ran
-in-process you would have to take that on trust. Kill it mid-conversation
-instead. The refund still decides, still writes its audit line, and records
-`failed_unreachable`.
+Clicking an order writes a question about that book into the composer rather
+than sending it, so you can edit first. After each reply the console offers what
+to say next, following the reason code the turn actually produced — and those
+prompts live in the profile, not the JavaScript. **Replay** plays a scripted
+conversation through the real API; nothing is pre-recorded.
 
 ## Action envelopes
 
