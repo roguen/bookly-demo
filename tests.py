@@ -1883,6 +1883,54 @@ def web_layer_emits_identical_envelopes():
 
 
 @check
+def every_async_handler_surfaces_its_failure():
+    """An async click or submit handler that can reject must say so on screen.
+
+    An awaited call that rejects abandons the rest of the handler silently:
+    the browser logs an unhandled rejection nobody is watching and the button
+    reads as doing nothing. That is exactly how the dead Reset button (#57)
+    presented — the failure was invisible, so the diagnosis started from
+    "nothing happens" instead of from a 404.
+
+    Every handler in the build already surfaced its failure through notify();
+    Reset was the single exception. This keeps it that way by construction,
+    for both clients, rather than by everyone remembering.
+    """
+    opener = re.compile(r'addEventListener\(\s*"(?:click|submit)"\s*,\s*async')
+    checked = 0
+    for name in ("static/app.js", "static/backoffice.js"):
+        source = pathlib.Path(name).read_text(encoding="utf-8")
+        for match in opener.finditer(source):
+            start = source.index("{", match.end())
+            depth, index = 0, start
+            while index < len(source):
+                if source[index] == "{":
+                    depth += 1
+                elif source[index] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                index += 1
+            assert depth == 0, (
+                "%s: could not find the end of the handler at offset %d"
+                % (name, match.start())
+            )
+            body = source[start:index]
+            line = source.count("\n", 0, match.start()) + 1
+            assert "catch" in body, (
+                "%s:%d an async handler awaits without surfacing a failure; "
+                "wrap it and notify(String(error)) the way the others do"
+                % (name, line)
+            )
+            checked += 1
+    # A rename that stopped matching would make this quietly vacuous. Five
+    # today: the resolution form, the checks runner, Reconcile and Reset in
+    # the console, and the back office's policy form. The composer's submit
+    # is deliberately not async — it delegates to send(), which catches.
+    assert checked >= 5, checked
+
+
+@check
 def client_api_calls_use_a_method_the_server_routes():
     """Every `/api/...` call the client makes reaches a route that exists.
 
