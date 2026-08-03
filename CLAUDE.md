@@ -46,7 +46,7 @@ IF ASKED.
 ## Verify before you change anything
 
 ```bash
-python3 tests.py          # expect 88 passed, 0 failed
+python3 tests.py          # expect 90 passed, 0 failed
 /usr/bin/python3 tests.py # 3.9.6 — must also be green
 python3 harness.py        # expect 9 transcripts passed
 ```
