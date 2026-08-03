@@ -1,8 +1,9 @@
 # Bookly — standing context
 
-A support agent for a fictional bookstore. `main` is at **v4.0.1** — the whole
-version-3 arc has landed, the release is cut, and a bug-fix patch (four
-hosted-path defects, found and confirmed live) has landed on top of it.
+A support agent for a fictional bookstore. `main` is at **v4.0.2** — the whole
+version-3 arc has landed, the release is cut, and two bug-fix patches have
+landed on top of it: four hosted-path defects (v4.0.1) and the console's Reset
+button with the request-framing bug behind it (v4.0.2).
 
 ## The claim, which does not change
 
@@ -32,14 +33,14 @@ imports an LLM. Every file either enforces that boundary or demonstrates it.
 
 ## Where the reasoning lives
 
-**`docs/DECISIONS.md` first** — 56 entries: the decision, the reasoning, the
+**`docs/DECISIONS.md` first** — 57 entries: the decision, the reasoning, the
 alternative rejected, where it is enforced, and the sceptic's question it
 answers. Several record a diagnosis that was **wrong** and later corrected;
 those are the valuable ones. Do not re-litigate anything in that file without
 reading its "Rejected" line.
 
 Then, in descending fidelity: the commit messages (long, deliberately), the
-43 closed GitHub issues (`gh issue view <n>` — they carry diagnosis and
+45 closed GitHub issues (`gh issue view <n>` — they carry diagnosis and
 corrections), the code docstrings, and `deck/build.js` speaker notes under
 IF ASKED.
 
@@ -74,6 +75,14 @@ found on the hosted path (issues #49, #50, #51/#52, #53 — decision #52),
 none of them a capability change, none of them touching `policy.py`. Not a
 row in the table above — it is not an item in the planned arc, it is a
 bug fix, and the table stays a record of what was planned.
+
+**`v4.0.2`** is the second such patch, and the same reasoning applies — not a
+row in the table. The console's Reset button sent GET at a POST-only route and
+silently did nothing (#57); fixing the verb exposed an older defect where a
+POST body no handler reads desyncs the keep-alive connection, so the *next*
+request fails (#60, and `/api/reconcile` had it since v3.4.0). Decision #57.
+Client and web-layer only — `policy.py` untouched, and every envelope field in
+the demo scenarios is byte-identical to v4.0.1.
 
 Any further work keeps the same workflow: branch `claude/bookly-vN.M-<topic>`,
 PR into `main`, merge with `--merge`, then tag. Embeddings for retrieval remain
