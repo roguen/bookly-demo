@@ -10,6 +10,7 @@ harness lives.
 from __future__ import annotations
 
 import contextlib
+import http.client
 import json
 import os
 import pathlib
@@ -1880,6 +1881,81 @@ def web_layer_emits_identical_envelopes():
                 assert {n["side"] for n in over_http["trace"]} <= {
                     recorder.MODEL, recorder.DETERMINISTIC
                 }
+
+
+@check
+def a_post_body_never_desyncs_a_reused_connection():
+    """A POST body must be consumed even by a handler that does not want it.
+
+    The console speaks HTTP/1.1, so a browser sends the next request down the
+    same socket. A handler that never reads its body leaves those bytes there;
+    the server parses them as the next request line and answers 501 to a
+    request that was fine. The failure lands on the *following* call, which is
+    why #60 presented as "/api/provider returned something that was not JSON"
+    seconds after a Reset that had visibly worked.
+
+    Every check before this one drove the API with urllib, which opens a fresh
+    connection per call and closes it — the stale bytes went out with the
+    socket and the bug was invisible. curl behaves the same way. So this one
+    deliberately reuses a single connection across two requests, because that
+    is the only condition under which the defect exists.
+    """
+    saved_audit = os.environ.get(envelope_module.AUDIT_PATH_ENV_VAR)
+    scratch = tempfile.mkdtemp(prefix="bookly-desync-")
+    os.environ[envelope_module.AUDIT_PATH_ENV_VAR] = os.path.join(
+        scratch, "audit.log"
+    )
+    # Every POST the console's client sends with a body, including the two that
+    # ignored it. An unrouted path is in here too: the 404 branch answers before
+    # any handler exists, so it has to drain the body itself or the next request
+    # pays for it.
+    posts = (
+        ("/api/reset", {}),
+        ("/api/reconcile", {}),
+        ("/api/conversation/restart", {"conversation_id": "conv-desync"}),
+        ("/api/turn", {"conversation_id": "conv-desync", "text": "Hello?"}),
+        ("/api/no-such-route", {"padding": "x" * 200}),
+    )
+    try:
+        with _Console() as console:
+            host, port = console.server.server_address[:2]
+            for path, payload in posts:
+                connection = http.client.HTTPConnection(host, port, timeout=20)
+                try:
+                    connection.request(
+                        "POST",
+                        path,
+                        body=json.dumps(payload).encode("utf-8"),
+                        headers={"Content-Type": "application/json"},
+                    )
+                    connection.getresponse().read()
+                    # The same socket, deliberately. A fresh one would pass
+                    # even with the bug present.
+                    connection.request(
+                        "GET",
+                        "/api/provider",
+                        headers={"Content-Type": "application/json"},
+                    )
+                    following = connection.getresponse()
+                    text = following.read().decode("utf-8")
+                    assert following.status == 200, (
+                        "after POST %s the next request on the same connection "
+                        "returned %d — the body was left on the socket"
+                        % (path, following.status)
+                    )
+                    assert json.loads(text)["active"], (path, text[:80])
+                except http.client.HTTPException as error:
+                    raise AssertionError(
+                        "after POST %s the connection was unusable: %s"
+                        % (path, error)
+                    )
+                finally:
+                    connection.close()
+    finally:
+        os.environ.pop(envelope_module.AUDIT_PATH_ENV_VAR, None)
+        if saved_audit is not None:
+            os.environ[envelope_module.AUDIT_PATH_ENV_VAR] = saved_audit
+        shutil.rmtree(scratch, ignore_errors=True)
 
 
 @check

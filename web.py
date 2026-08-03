@@ -667,13 +667,33 @@ class ConsoleHandler(BaseHTTPRequestHandler):
     def _error(self, status: int, message: str) -> None:
         self._json({"error": message}, status)
 
-    def _body(self) -> dict:
+    def _read_body(self) -> bool:
+        """Take the request body off the socket exactly once, before routing.
+
+        Returns False when it has already answered and the caller should stop.
+        Oversized is refused here rather than read and discarded, so a hostile
+        Content-Length cannot make the console allocate on demand — the socket
+        is left dirty in that one case on purpose, because the answer is to
+        close the connection, not to keep talking on it.
+        """
+        self._payload_bytes = b""
         length = int(self.headers.get("Content-Length") or 0)
         if length <= 0:
-            return {}
+            return True
         if length > MAX_BODY_BYTES:
-            raise ValueError("request body too large")
-        payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            self.close_connection = True
+            self._error(400, "request body too large")
+            return False
+        self._payload_bytes = self.rfile.read(length)
+        return True
+
+    def _body(self) -> dict:
+        """The parsed request body. The bytes were already read by _read_body;
+        this only decodes them, so a handler that never calls this still leaves
+        the socket clean."""
+        if not self._payload_bytes:
+            return {}
+        payload = json.loads(self._payload_bytes.decode("utf-8"))
         if not isinstance(payload, dict):
             raise ValueError("expected a JSON object")
         return payload
@@ -698,6 +718,20 @@ class ConsoleHandler(BaseHTTPRequestHandler):
         self._route("POST")
 
     def _route(self, method: str) -> None:
+        # Drain the request body before anything can decide not to want it.
+        #
+        # This is HTTP/1.1, so the browser keeps the connection open and sends
+        # the next request down the same socket. A handler that never reads its
+        # body leaves those bytes there, the server parses them as the next
+        # request line, and answers 501 to a request that was perfectly valid —
+        # so the failure lands on the *following* call and reads as nonsense.
+        # /api/reset and /api/reconcile both ignored their bodies (#60).
+        #
+        # Reading here rather than in each handler means the drain does not
+        # depend on handler discipline, and still happens on the 404 and 421
+        # paths, where there is no handler to be disciplined.
+        if not self._read_body():
+            return
         if not self._host_allowed():
             self._error(421, "This console answers on 127.0.0.1 only.")
             return
