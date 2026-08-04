@@ -64,7 +64,7 @@ orchestration end — durable dedup, the outbox, reconcile — is `backoffice.py
 plus `reconcile.py`, run instead of the stub.
 
 **7. `tests.py` — the claims, executable.**
-90 dependency-free checks, runnable from a terminal or from inside the
+91 dependency-free checks, runnable from a terminal or from inside the
 console. The ones to point at under questioning: `injection_changes_nothing`
 (the thesis, tested), `web_layer_emits_identical_envelopes` (the same
 scenarios through HTTP and through `Agent`, every decision field compared —

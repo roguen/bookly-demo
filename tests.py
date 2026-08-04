@@ -9,6 +9,7 @@ harness lives.
 """
 from __future__ import annotations
 
+import ast
 import contextlib
 import http.client
 import json
@@ -1881,6 +1882,70 @@ def web_layer_emits_identical_envelopes():
                 assert {n["side"] for n in over_http["trace"]} <= {
                     recorder.MODEL, recorder.DETERMINISTIC
                 }
+
+
+@check
+def every_candidates_payload_renders_in_the_trace():
+    """The trace summary must be able to render every payload the agent emits.
+
+    `agent.py` emits two different shapes under the `candidates` stage: the
+    "which of your orders could take this write" pass, which carries a count,
+    and the floor that stops a coincidence acting on a book the customer never
+    named, which carries the words that matched instead. `static/app.js`
+    rendered one shape for both, so every title reference printed
+    "undefined candidate(s)" in operator view — on the exact turn the demo is
+    built around (#68).
+
+    Read from the source rather than from a run, so a third shape added later
+    fails here even if no check happens to exercise it.
+    """
+    tree = ast.parse(pathlib.Path("agent.py").read_text(encoding="utf-8"))
+    shapes = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if not (isinstance(func, ast.Attribute) and func.attr == "note"):
+            continue
+        if len(node.args) < 2:
+            continue
+        stage = node.args[0]
+        payload = node.args[1]
+        if not (isinstance(stage, ast.Constant) and stage.value == "candidates"):
+            continue
+        if not isinstance(payload, ast.Dict):
+            continue
+        keys = {
+            k.value for k in payload.keys
+            if isinstance(k, ast.Constant) and isinstance(k.value, str)
+        }
+        source = None
+        for key, value in zip(payload.keys, payload.values):
+            if (
+                isinstance(key, ast.Constant) and key.value == "source"
+                and isinstance(value, ast.Constant)
+            ):
+                source = value.value
+        shapes.append((source, keys))
+
+    assert len(shapes) >= 2, shapes
+    required = {
+        "title_reference": {
+            "distinctive_words", "matched_words", "limit", "strong_enough_to_act",
+        },
+        "returnable_now": {"count", "should_clarify"},
+    }
+    for source, keys in shapes:
+        assert source in required, (
+            "a candidates payload with source %r has no renderer branch in "
+            "static/app.js — add one, or the trace prints undefined" % (source,)
+        )
+        missing = required[source] - keys
+        assert not missing, (source, sorted(missing))
+
+    # And the client actually branches, rather than happening to work.
+    client = pathlib.Path("static/app.js").read_text(encoding="utf-8")
+    assert 'p.source === "title_reference"' in client
 
 
 @check

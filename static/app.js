@@ -416,6 +416,25 @@ function summarize(note) {
       }
       return `${p.rule} → ${p.order_id || (p.matched_ids || []).join(", ") || "nothing"}`;
     case "candidates":
+      /* Two different payloads share this stage. `returnable_now` is the
+         "which of your orders could take this write" pass and carries a count;
+         `title_reference` is the floor that stops a coincidence acting on a
+         book the customer never named, and carries the words that matched
+         instead. Rendering one shape for both printed `undefined` on every
+         title reference (#68). */
+      if (p.source === "title_reference") {
+        /* One distinctive word identifies a book on its own; the limit is the
+           fallback bar for a match made only of generic words. Showing
+           "1 of 2" would misstate the rule as needing two distinctive ones. */
+        const distinctive = (p.distinctive_words || []).length;
+        const matched = (p.matched_words || []).length;
+        const basis = distinctive
+          ? `${distinctive} distinctive word(s)`
+          : `${matched} generic word(s) of ${p.limit}`;
+        return `${basis} · write: ${
+          p.strong_enough_to_act ? "yes" : "clarify"
+        }`;
+      }
       return `${p.count} candidate(s) · clarify: ${p.should_clarify ? "yes" : "no"}`;
     case "clarify":
       if (p.step === "asked") {
