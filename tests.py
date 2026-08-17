@@ -222,12 +222,12 @@ def profile_load_preserves_the_fixtures():
     fixtures = {
         "BK-1041": ("C-1001", "Dune", 18.99, "shipped", None),
         "BK-1042": ("C-1001", "Godel, Escher, Bach", 22.50, "delivered",
-                    date(2026, 7, 18)),
+                    date(2026, 8, 5)),
         "BK-0987": ("C-1001", "The Pragmatic Programmer", 39.99, "delivered",
-                    date(2026, 5, 2)),
+                    date(2026, 5, 20)),
         # Another customer's order, kept so ownership checks stay testable.
         "BK-2077": ("C-2002", "Snow Crash", 17.25, "delivered",
-                    date(2026, 7, 20)),
+                    date(2026, 8, 7)),
     }
     for order_id, expected in fixtures.items():
         order = ORDERS[order_id]
@@ -236,7 +236,7 @@ def profile_load_preserves_the_fixtures():
             order.delivered_on,
         )
         assert actual == expected, (order_id, actual, expected)
-    assert TODAY == date(2026, 7, 30)
+    assert TODAY == date(2026, 8, 17)
     assert CURRENT_CUSTOMER_ID == "C-1001"
     # The record and the store agree about how many orders exist. They did not
     # for a while — the card said 37 and five were loaded — and an agent that
@@ -377,7 +377,7 @@ def an_authored_change_moves_a_verdict_through_policy_only():
     """Editing the return window changes a real verdict, and the value flows
     through policy.py, not the model. The surface the console serves reads the
     same document, so the engine and the interface cannot disagree about it."""
-    geb = ORDERS["BK-1042"]  # delivered 2026-07-18; TODAY is 2026-07-30, so 12 days
+    geb = ORDERS["BK-1042"]  # delivered 2026-08-05; TODAY is 2026-08-17, so 12 days
     assert policy.decide_return(
         geb, CURRENT_CUSTOMER_ID, TODAY
     ).decision == "approve_refund"
@@ -571,7 +571,7 @@ def multi_intent_turn_handles_both_requests():
     result = _fresh_agent().handle_turn(
         "where's my Dune order and I want to return the Escher book"
     )
-    assert "Dune" in result.reply and "August 1" in result.reply
+    assert "Dune" in result.reply and "August 19" in result.reply
     emitted = _envelopes(result)
     assert len(emitted) == 1
     assert emitted[0]["action"] == "refund"
@@ -1054,7 +1054,7 @@ def a_genuine_refund_narration_passes_through_unreplaced():
         "days."
     )
     facts = {"title": "The Pragmatic Programmer", "order_id": "BK-0987",
-              "delivered_on": "2026-05-02", "window_days": 30,
+              "delivered_on": "2026-05-20", "window_days": 30,
               "amount": 39.99, "posting_target": "within 5 business days"}
     result = approved.narrate(llm.NarrationEvent("refund_approved", facts))
     assert "issued" in result and "$39.99" in result, result
@@ -1086,7 +1086,7 @@ def a_genuine_refund_narration_passes_through_unreplaced():
         "refund for it — sorry about that."
     )
     facts = {"title": "The Pragmatic Programmer", "order_id": "BK-0987",
-              "status": "delivered", "delivered_on": "2026-05-02",
+              "status": "delivered", "delivered_on": "2026-05-20",
               "returned_on": None, "eta": None, "carrier": None,
               "reason_code": "RETURN_WINDOW_EXPIRED", "window_days": 30}
     result = denial.narrate(llm.NarrationEvent("return_denied", facts))
@@ -1513,7 +1513,7 @@ def an_article_inside_a_title_does_not_drown_the_real_word():
         "I would like to return The Pragmatic Programmer"
     )
     assert (
-        "delivered on May 2, which is outside the 30-day return window"
+        "delivered on May 20, which is outside the 30-day return window"
         in result.reply
     ), result.reply
     assert "which book" not in result.reply, result.reply
