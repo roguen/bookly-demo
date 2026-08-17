@@ -4,6 +4,12 @@ __pycache__/
 # truncates, so a demo reset never destroys the previous run's record.
 audit.log
 audit.log.*
+# The suite's own trail. web.py redirects BOOKLY_AUDIT_PATH here when the
+# console runs the checks in a subprocess, so test envelopes never land in
+# the trail a demo is about to show. Same reason as the .checks siblings
+# below; it was simply missed from that list.
+audit.checks.log
+audit.checks.log.*
 # The human review queue's persisted state. Demo data, rebuilt by /api/reset.
 queue.json
 # The authored policy document (v3.2.0): an append-only change log a non-engineer
