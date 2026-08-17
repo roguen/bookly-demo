@@ -25,7 +25,7 @@
     "persona": "You are the voice of Bookly customer support: calm, precise, unfailingly polite, and brief. Do not introduce yourself, and do not prefix your replies with your name or any speaker label — the interface already shows who is speaking."
   },
   "clock": {
-    "today": "2026-07-30",
+    "today": "2026-08-17",
     "note": "The demo clock. Frozen so every run and every check is identical."
   },
   "catalog": {
@@ -280,19 +280,19 @@
     "csat_responses": 9,
     "contact_history": [
       {
-        "on": "2026-05-04",
+        "on": "2026-05-22",
         "channel": "email",
         "subject": "Delivery confirmation for BK-0987",
         "outcome": "resolved without escalation"
       },
       {
-        "on": "2026-03-20",
+        "on": "2026-04-07",
         "channel": "chat",
         "subject": "Return — The Left Hand of Darkness",
         "outcome": "refund issued"
       },
       {
-        "on": "2025-11-02",
+        "on": "2025-11-20",
         "channel": "chat",
         "subject": "Password reset help",
         "outcome": "resolved without escalation"
@@ -307,8 +307,8 @@
       "author": "Frank Herbert",
       "price_paid": 18.99,
       "status": "shipped",
-      "ordered_on": "2026-07-24",
-      "eta": "2026-08-01",
+      "ordered_on": "2026-08-11",
+      "eta": "2026-08-19",
       "carrier": "Bookly Express"
     },
     {
@@ -318,8 +318,8 @@
       "author": "Douglas Hofstadter",
       "price_paid": 22.5,
       "status": "delivered",
-      "ordered_on": "2026-07-14",
-      "delivered_on": "2026-07-18"
+      "ordered_on": "2026-08-01",
+      "delivered_on": "2026-08-05"
     },
     {
       "order_id": "BK-0987",
@@ -328,8 +328,8 @@
       "author": "David Thomas and Andrew Hunt",
       "price_paid": 39.99,
       "status": "delivered",
-      "ordered_on": "2026-04-28",
-      "delivered_on": "2026-05-02"
+      "ordered_on": "2026-05-16",
+      "delivered_on": "2026-05-20"
     },
     {
       "order_id": "BK-2077",
@@ -338,8 +338,8 @@
       "author": "Neal Stephenson",
       "price_paid": 17.25,
       "status": "delivered",
-      "ordered_on": "2026-07-16",
-      "delivered_on": "2026-07-20",
+      "ordered_on": "2026-08-03",
+      "delivered_on": "2026-08-07",
       "note": "Belongs to a different customer. Exists so ownership checks are testable."
     },
     {
@@ -349,9 +349,9 @@
       "author": "Ursula K. Le Guin",
       "price_paid": 16.0,
       "status": "returned",
-      "ordered_on": "2026-03-04",
-      "delivered_on": "2026-03-09",
-      "returned_on": "2026-03-20"
+      "ordered_on": "2026-03-22",
+      "delivered_on": "2026-03-27",
+      "returned_on": "2026-04-07"
     },
     {
       "order_id": "BK-0318",
@@ -360,7 +360,7 @@
       "author": "Don Norman",
       "price_paid": 24.75,
       "status": "cancelled",
-      "ordered_on": "2026-06-11"
+      "ordered_on": "2026-06-29"
     },
     {
       "order_id": "BK-2100",
@@ -369,8 +369,8 @@
       "author": "William Gibson",
       "price_paid": 14.99,
       "status": "delivered",
-      "ordered_on": "2024-09-02",
-      "delivered_on": "2024-09-06"
+      "ordered_on": "2024-09-20",
+      "delivered_on": "2024-09-24"
     },
     {
       "order_id": "BK-2101",
@@ -379,8 +379,8 @@
       "author": "Dan Simmons",
       "price_paid": 16.5,
       "status": "delivered",
-      "ordered_on": "2024-10-14",
-      "delivered_on": "2024-10-18"
+      "ordered_on": "2024-11-01",
+      "delivered_on": "2024-11-05"
     },
     {
       "order_id": "BK-2102",
@@ -389,8 +389,8 @@
       "author": "Ursula K. Le Guin",
       "price_paid": 15.99,
       "status": "delivered",
-      "ordered_on": "2024-11-08",
-      "delivered_on": "2024-11-12"
+      "ordered_on": "2024-11-26",
+      "delivered_on": "2024-11-30"
     },
     {
       "order_id": "BK-2103",
@@ -399,8 +399,8 @@
       "author": "Isaac Asimov",
       "price_paid": 12.99,
       "status": "delivered",
-      "ordered_on": "2024-12-01",
-      "delivered_on": "2024-12-05"
+      "ordered_on": "2024-12-19",
+      "delivered_on": "2024-12-23"
     },
     {
       "order_id": "BK-2104",
@@ -409,8 +409,8 @@
       "author": "Philip K. Dick",
       "price_paid": 13.25,
       "status": "delivered",
-      "ordered_on": "2025-01-06",
-      "delivered_on": "2025-01-10"
+      "ordered_on": "2025-01-24",
+      "delivered_on": "2025-01-28"
     },
     {
       "order_id": "BK-2105",
@@ -419,8 +419,8 @@
       "author": "Philip K. Dick",
       "price_paid": 13.99,
       "status": "delivered",
-      "ordered_on": "2025-01-27",
-      "delivered_on": "2025-01-31"
+      "ordered_on": "2025-02-14",
+      "delivered_on": "2025-02-18"
     },
     {
       "order_id": "BK-2106",
@@ -429,8 +429,8 @@
       "author": "Stanislaw Lem",
       "price_paid": 14.25,
       "status": "delivered",
-      "ordered_on": "2025-02-11",
-      "delivered_on": "2025-02-15"
+      "ordered_on": "2025-03-01",
+      "delivered_on": "2025-03-05"
     },
     {
       "order_id": "BK-2107",
@@ -439,8 +439,8 @@
       "author": "Arkady Strugatsky",
       "price_paid": 15.75,
       "status": "delivered",
-      "ordered_on": "2025-03-03",
-      "delivered_on": "2025-03-07"
+      "ordered_on": "2025-03-21",
+      "delivered_on": "2025-03-25"
     },
     {
       "order_id": "BK-2108",
@@ -449,8 +449,8 @@
       "author": "Alfred Bester",
       "price_paid": 13.5,
       "status": "delivered",
-      "ordered_on": "2025-03-19",
-      "delivered_on": "2025-03-23"
+      "ordered_on": "2025-04-06",
+      "delivered_on": "2025-04-10"
     },
     {
       "order_id": "BK-2109",
@@ -459,8 +459,8 @@
       "author": "Vernor Vinge",
       "price_paid": 18.99,
       "status": "delivered",
-      "ordered_on": "2025-04-07",
-      "delivered_on": "2025-04-11"
+      "ordered_on": "2025-04-25",
+      "delivered_on": "2025-04-29"
     },
     {
       "order_id": "BK-2110",
@@ -469,8 +469,8 @@
       "author": "Peter Watts",
       "price_paid": 16.99,
       "status": "delivered",
-      "ordered_on": "2025-04-22",
-      "delivered_on": "2025-04-26"
+      "ordered_on": "2025-05-10",
+      "delivered_on": "2025-05-14"
     },
     {
       "order_id": "BK-2111",
@@ -479,8 +479,8 @@
       "author": "Arthur C. Clarke",
       "price_paid": 13.99,
       "status": "delivered",
-      "ordered_on": "2025-05-12",
-      "delivered_on": "2025-05-16"
+      "ordered_on": "2025-05-30",
+      "delivered_on": "2025-06-03"
     },
     {
       "order_id": "BK-2112",
@@ -489,8 +489,8 @@
       "author": "Arthur C. Clarke",
       "price_paid": 12.5,
       "status": "delivered",
-      "ordered_on": "2025-06-02",
-      "delivered_on": "2025-06-06"
+      "ordered_on": "2025-06-20",
+      "delivered_on": "2025-06-24"
     },
     {
       "order_id": "BK-2113",
@@ -499,8 +499,8 @@
       "author": "Joe Haldeman",
       "price_paid": 15.25,
       "status": "delivered",
-      "ordered_on": "2025-06-23",
-      "delivered_on": "2025-06-27"
+      "ordered_on": "2025-07-11",
+      "delivered_on": "2025-07-15"
     },
     {
       "order_id": "BK-2114",
@@ -509,8 +509,8 @@
       "author": "Larry Niven",
       "price_paid": 14.75,
       "status": "delivered",
-      "ordered_on": "2025-07-14",
-      "delivered_on": "2025-07-18"
+      "ordered_on": "2025-08-01",
+      "delivered_on": "2025-08-05"
     },
     {
       "order_id": "BK-2115",
@@ -519,8 +519,8 @@
       "author": "Octavia E. Butler",
       "price_paid": 16.25,
       "status": "delivered",
-      "ordered_on": "2025-08-04",
-      "delivered_on": "2025-08-08"
+      "ordered_on": "2025-08-22",
+      "delivered_on": "2025-08-26"
     },
     {
       "order_id": "BK-2116",
@@ -529,8 +529,8 @@
       "author": "Octavia E. Butler",
       "price_paid": 15.5,
       "status": "delivered",
-      "ordered_on": "2025-08-25",
-      "delivered_on": "2025-08-29"
+      "ordered_on": "2025-09-12",
+      "delivered_on": "2025-09-16"
     },
     {
       "order_id": "BK-2117",
@@ -539,8 +539,8 @@
       "author": "Octavia E. Butler",
       "price_paid": 17.0,
       "status": "delivered",
-      "ordered_on": "2025-09-15",
-      "delivered_on": "2025-09-19"
+      "ordered_on": "2025-10-03",
+      "delivered_on": "2025-10-07"
     },
     {
       "order_id": "BK-2118",
@@ -549,8 +549,8 @@
       "author": "Mary Doria Russell",
       "price_paid": 17.99,
       "status": "delivered",
-      "ordered_on": "2025-10-06",
-      "delivered_on": "2025-10-10"
+      "ordered_on": "2025-10-24",
+      "delivered_on": "2025-10-28"
     },
     {
       "order_id": "BK-2119",
@@ -559,8 +559,8 @@
       "author": "Jeff VanderMeer",
       "price_paid": 14.0,
       "status": "delivered",
-      "ordered_on": "2025-10-27",
-      "delivered_on": "2025-10-31"
+      "ordered_on": "2025-11-14",
+      "delivered_on": "2025-11-18"
     },
     {
       "order_id": "BK-2120",
@@ -569,8 +569,8 @@
       "author": "Ann Leckie",
       "price_paid": 16.99,
       "status": "delivered",
-      "ordered_on": "2025-11-17",
-      "delivered_on": "2025-11-21"
+      "ordered_on": "2025-12-05",
+      "delivered_on": "2025-12-09"
     },
     {
       "order_id": "BK-2121",
@@ -579,8 +579,8 @@
       "author": "Walter M. Miller Jr.",
       "price_paid": 15.99,
       "status": "delivered",
-      "ordered_on": "2025-12-08",
-      "delivered_on": "2025-12-12"
+      "ordered_on": "2025-12-26",
+      "delivered_on": "2025-12-30"
     },
     {
       "order_id": "BK-2122",
@@ -589,8 +589,8 @@
       "author": "Daniel Keyes",
       "price_paid": 13.75,
       "status": "delivered",
-      "ordered_on": "2025-12-29",
-      "delivered_on": "2026-01-02"
+      "ordered_on": "2026-01-16",
+      "delivered_on": "2026-01-20"
     },
     {
       "order_id": "BK-2123",
@@ -599,8 +599,8 @@
       "author": "Philip K. Dick",
       "price_paid": 14.5,
       "status": "delivered",
-      "ordered_on": "2026-01-19",
-      "delivered_on": "2026-01-23"
+      "ordered_on": "2026-02-06",
+      "delivered_on": "2026-02-10"
     },
     {
       "order_id": "BK-2124",
@@ -609,8 +609,8 @@
       "author": "N. K. Jemisin",
       "price_paid": 17.5,
       "status": "delivered",
-      "ordered_on": "2026-02-09",
-      "delivered_on": "2026-02-13"
+      "ordered_on": "2026-02-27",
+      "delivered_on": "2026-03-03"
     },
     {
       "order_id": "BK-2125",
@@ -619,8 +619,8 @@
       "author": "Robert Charles Wilson",
       "price_paid": 16.0,
       "status": "delivered",
-      "ordered_on": "2026-03-02",
-      "delivered_on": "2026-03-06"
+      "ordered_on": "2026-03-20",
+      "delivered_on": "2026-03-24"
     },
     {
       "order_id": "BK-2126",
@@ -629,8 +629,8 @@
       "author": "China Mieville",
       "price_paid": 19.99,
       "status": "delivered",
-      "ordered_on": "2026-03-23",
-      "delivered_on": "2026-03-27"
+      "ordered_on": "2026-04-10",
+      "delivered_on": "2026-04-14"
     },
     {
       "order_id": "BK-2127",
@@ -639,8 +639,8 @@
       "author": "Frederik Pohl",
       "price_paid": 14.25,
       "status": "delivered",
-      "ordered_on": "2026-04-13",
-      "delivered_on": "2026-04-17"
+      "ordered_on": "2026-05-01",
+      "delivered_on": "2026-05-05"
     },
     {
       "order_id": "BK-2128",
@@ -649,8 +649,8 @@
       "author": "Roger Zelazny",
       "price_paid": 15.0,
       "status": "delivered",
-      "ordered_on": "2026-05-04",
-      "delivered_on": "2026-05-08"
+      "ordered_on": "2026-05-22",
+      "delivered_on": "2026-05-26"
     },
     {
       "order_id": "BK-2129",
@@ -659,8 +659,8 @@
       "author": "Iain M. Banks",
       "price_paid": 17.25,
       "status": "delivered",
-      "ordered_on": "2026-05-25",
-      "delivered_on": "2026-05-29"
+      "ordered_on": "2026-06-12",
+      "delivered_on": "2026-06-16"
     },
     {
       "order_id": "BK-2130",
@@ -669,8 +669,8 @@
       "author": "Brian Aldiss",
       "price_paid": 13.0,
       "status": "delivered",
-      "ordered_on": "2026-06-15",
-      "delivered_on": "2026-06-19"
+      "ordered_on": "2026-07-03",
+      "delivered_on": "2026-07-07"
     },
     {
       "order_id": "BK-2131",
@@ -679,8 +679,8 @@
       "author": "Ted Chiang",
       "price_paid": 26.0,
       "status": "delivered",
-      "ordered_on": "2026-07-18",
-      "delivered_on": "2026-07-22"
+      "ordered_on": "2026-08-05",
+      "delivered_on": "2026-08-09"
     },
     {
       "order_id": "BK-2132",
@@ -689,8 +689,8 @@
       "author": "Arthur C. Clarke",
       "price_paid": 19.0,
       "status": "delivered",
-      "ordered_on": "2025-03-08",
-      "delivered_on": "2025-03-14"
+      "ordered_on": "2025-03-26",
+      "delivered_on": "2025-04-01"
     }
   ],
   "articles": [
