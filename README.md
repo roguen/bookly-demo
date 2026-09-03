@@ -198,7 +198,7 @@ API access is billed separately from a claude.ai subscription.
 
 - **`READING_GUIDE.md`** — the repo in the order that makes the argument,
   starting at `policy.py`.
-- **`docs/DECISIONS.md`** — 57 entries: the decision, the alternative rejected,
+- **`docs/DECISIONS.md`** — 58 entries: the decision, the alternative rejected,
   where it is enforced, and the sceptic's question it answers. Several record a
   diagnosis that was wrong and later corrected; those are the useful ones.
 - **`evidence/`** — transcripts and audit trails captured from real runs.

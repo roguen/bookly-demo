@@ -124,7 +124,7 @@ want the argument, because none of them can change an outcome.
 
 ## If you want the reasoning
 
-`docs/DECISIONS.md` is the decision record: 57 entries, each with the
+`docs/DECISIONS.md` is the decision record: 58 entries, each with the
 reasoning, the alternative that was rejected, and where the decision is
 enforced. Several record a diagnosis that turned out to be wrong and was
 corrected — kept deliberately, because "we thought X, it was actually Y" is
