@@ -22,7 +22,7 @@
     },
     {
       "customer": "1",
-      "reply": "Done — Godel, Escher, Bach (BK-1042) was delivered on August 5, inside the 30-day return window, so I've issued a refund of $22.50 to your original payment method. It should post within 5 business days.",
+      "reply": "Done — Godel, Escher, Bach (BK-1042) was delivered on August 22, inside the 30-day return window, so I've issued a refund of $22.50 to your original payment method. It should post within 5 business days.",
       "stages": [
         "extract",
         "route",

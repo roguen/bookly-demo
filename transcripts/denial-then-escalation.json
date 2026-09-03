@@ -6,7 +6,7 @@
   "turns": [
     {
       "customer": "I want to return my copy of The Pragmatic Programmer, order BK-0987.",
-      "reply": "The Pragmatic Programmer (BK-0987) was delivered on May 20, which is outside the 30-day return window, so I can't issue a refund for it.",
+      "reply": "The Pragmatic Programmer (BK-0987) was delivered on June 6, which is outside the 30-day return window, so I can't issue a refund for it.",
       "stages": [
         "extract",
         "route",

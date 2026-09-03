@@ -1,11 +1,13 @@
-NOTE (2026-08-16). This capture predates the demo-clock shift to 2026-08-17.
-The dataset's dates all moved forward 18 days, so the delivery dates quoted
-below (July 18, May 2) read 18 days earlier than the same orders do today
-(August 5, May 20). Nothing else about this run changed: the claim it exists
-to support is that every decision field is identical across providers, and a
-date shift moves both providers equally. It is left as captured rather than
-re-run, because half of it is a live gpt-5.4-mini run and rewriting only the
-stand-in half would make a parity match look like a parity failure.
+NOTE (2026-09-03). This capture predates two demo-clock shifts: to 2026-08-17
+on 2026-08-16 (+18 days) and to 2026-09-03 on 2026-09-03 (+17 days), 35 days
+in all. The dataset's dates moved with the clock both times, so the delivery
+dates quoted below (July 18, May 2) read 35 days earlier than the same orders
+do today (August 22, June 6). Nothing else about this run changed: the claim
+it exists to support is that every decision field is identical across
+providers, and a date shift moves both providers equally. It is left as
+captured rather than re-run, because half of it is a live gpt-5.4-mini run
+and rewriting only the stand-in half would make a parity match look like a
+parity failure.
 
 NOTE. Captured 2026-07-31, before the agent was briefly given a persona (a name
 and an "I'm sorry Dave, I can't do that." refusal line, profiles/bookly.json ->

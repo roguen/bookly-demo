@@ -2351,3 +2351,53 @@ framing bug is observable.
 `every_async_handler_surfaces_its_failure`,
 `a_post_body_never_desyncs_a_reused_connection`. Issues #57 and #60, PRs #58,
 #59 and #61.
+
+---
+
+## 58. The demo clock is data, and moving it means moving the dataset with it
+
+**Decision.** The frozen clock moved from `2026-08-17` to `2026-09-03` for a
+second run of the demo, and every date in the profile that takes part in
+relative reasoning moved forward by the same seventeen days: `today`,
+`ordered_on`, `delivered_on`, `eta`, `returned_on` and the contact history.
+Eighty-two dates in all. `member_since` stayed at 2021.
+
+**Why.** This is the second time the clock has moved (entry 36 made it profile
+data, issue #70 moved it the first time), which makes it a recurring operation
+rather than a one-off, and worth writing down as a procedure.
+
+A clock is meaningless on its own. Every claim the demo makes is a *distance*:
+Godel, Escher, Bach was delivered twelve days ago and so refunds; Dune arrives
+in two days and so is still in flight; the Pragmatic Programmer is eighty-nine
+days out and so is denied. Moving `today` while the orders stay put does not
+advance the demo, it deforms it — the refund loses its margin, and the order
+still "arriving" arrives in the past. Shifting the whole dataset by one delta
+preserves every distance exactly, which is why no scenario changed behaviour
+and no reason code moved.
+
+The clock is set to the first of the two presentation days rather than to a
+midpoint. Nothing in the decision path reads the wall clock, verified in #70
+by running the return flow with the system date faked to 2027-03-01 and
+getting the same `$22.50`, so the second day runs the same turns with the same
+output. There is no window this expires at the end of.
+
+**Rejected.** Unfreezing the clock so it tracks the real date — every golden
+transcript would then be undeterministic, the refund would silently age out of
+its window mid-week, and the suite would stop being reproducible, which is the
+whole reason entry 36 froze it. Moving `today` alone and re-blessing whatever
+came out — that is how a deformed demo gets blessed as correct, and the
+transcripts would have recorded it without complaint. Shifting `member_since`
+with everything else — an eighteen-day, now seventeen-day, drift on a tenure
+fact from 2021 is churn with no meaning, and it accumulates every time.
+
+**Answers the question.** "How do you know the dataset still says what it said
+last month?" Because the diff is all dates and nothing else. Ten lines changed
+across six transcripts, every one a reply carrying a date; no envelope field,
+reason code or idempotency key moved. `evidence/demo_transcript.txt` and
+`evidence/injection_transcript.txt` were re-captured and then checked against
+live runs rather than hand-edited, and the injection capture still emits key
+`929b981a…`, which is the property that file exists to prove.
+
+**Lives in.** `profiles/bookly.json` (`clock.today` and every dated order), the
+nine date assertions in `tests.py`, the six golden transcripts,
+`evidence/`, and `docs/images/console-operator-view.png`. Issues #70 and #73.
