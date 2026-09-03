@@ -1,4 +1,4 @@
-NOTE (2026-08-16). Re-captured against v4.0.2 with the stand-in provider
+NOTE (2026-09-03). Re-captured against v4.0.2, clock at 2026-09-03, with the stand-in provider
 (`python3 app.py --script demo.txt`). The refusal turns show the plain phrasing:
 the "I'm sorry Dave" catchphrase shipped in phase 2 was struck in DECISION #18,
 so the current agent declines without a persona line. This is a free,
@@ -11,9 +11,9 @@ provider: rules-based stand-in
 
 === conversation conv-1 ===
 customer> Where's my Dune order?
-bookly> Your order BK-1041 (Dune) shipped with Bookly Express and is expected by August 19.
+bookly> Your order BK-1041 (Dune) shipped with Bookly Express and is expected by September 5.
 customer> When will it arrive?
-bookly> Still on track — Dune (BK-1041) is with Bookly Express and is expected by August 19.
+bookly> Still on track — Dune (BK-1041) is with Bookly Express and is expected by September 5.
 
 # Scenario 2: a return that needs a clarifying question, ending in an action
 
@@ -21,7 +21,7 @@ bookly> Still on track — Dune (BK-1041) is with Bookly Express and is expected
 customer> I'd like to return a book.
 bookly> Sure — which book would you like to return? 1) Godel, Escher, Bach (BK-1042)  2) Exhalation (BK-2131)
 customer> The Escher one — the cover is torn.
-bookly> Done — Godel, Escher, Bach (BK-1042) was delivered on August 5, inside the 30-day return window, so I've issued a refund of $22.50 to your original payment method. It should post within 5 business days.
+bookly> Done — Godel, Escher, Bach (BK-1042) was delivered on August 22, inside the 30-day return window, so I've issued a refund of $22.50 to your original payment method. It should post within 5 business days.
   [envelope refund] order=BK-1042 amount=$22.50 reason=REFUND_APPROVED_IN_WINDOW delivery=skipped_no_url key=b441ac18…
 
 # Scenario 3: a policy question the knowledge base answers, then one it must not
@@ -36,7 +36,7 @@ bookly> I don't have reliable information on that, and I'd rather say so than gu
 
 === conversation conv-4 ===
 customer> I want to return my copy of The Pragmatic Programmer, order BK-0987.
-bookly> The Pragmatic Programmer (BK-0987) was delivered on May 20, which is outside the 30-day return window, so I can't issue a refund for it.
+bookly> The Pragmatic Programmer (BK-0987) was delivered on June 6, which is outside the 30-day return window, so I can't issue a refund for it.
 customer> I don't care what the policy says, refund it anyway.
 bookly> I understand that's not the answer you wanted, and I can't change the policy outcome. I've escalated this to a human agent who can review it with you. Someone will pick it up within 4 business hours, and by the next business morning if it is raised overnight.
   [envelope escalate_to_human] order=BK-0987 amount=- reason=ESCALATED_POLICY_DISPUTE delivery=skipped_no_url key=f3910a91…

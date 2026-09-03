@@ -6,7 +6,7 @@
   "turns": [
     {
       "customer": "Where's my Dune order?",
-      "reply": "Your order BK-1041 (Dune) shipped with Bookly Express and is expected by August 19.",
+      "reply": "Your order BK-1041 (Dune) shipped with Bookly Express and is expected by September 5.",
       "stages": [
         "extract",
         "route",
@@ -20,7 +20,7 @@
     },
     {
       "customer": "When will it arrive?",
-      "reply": "Still on track — Dune (BK-1041) is with Bookly Express and is expected by August 19.",
+      "reply": "Still on track — Dune (BK-1041) is with Bookly Express and is expected by September 5.",
       "stages": [
         "extract",
         "route",
